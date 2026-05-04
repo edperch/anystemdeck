@@ -1,0 +1,253 @@
+/* ───────────── Top bar ───────────── */
+
+.appbar {
+  display: grid;
+  grid-template-columns: minmax(220px, 300px) minmax(0, 1fr);
+  align-items: stretch;
+  gap: 22px;
+  padding: 20px 24px 22px;
+  border: 1px solid var(--glass-line);
+  border-radius: 16px;
+  background:
+    radial-gradient(circle at 82% -20%, rgba(216, 168, 74, 0.11), transparent 20rem),
+    linear-gradient(180deg, rgba(27, 39, 48, 0.76), rgba(13, 22, 30, 0.84));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.045),
+    var(--shadow-panel);
+}
+
+.brand-group {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 5px;
+  min-width: 0;
+  padding-right: 8px;
+}
+
+.brand-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.brand {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-weight: 700;
+  font-size: 24px;
+  line-height: 1;
+  color: var(--ink);
+  letter-spacing: -0.01em;
+}
+
+.beta-badge {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 5px;
+  border: 1px solid rgba(216, 168, 74, 0.65);
+  border-radius: 6px;
+  background: var(--gold-soft);
+  color: var(--gold-bright);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.brand-sub {
+  font-size: 13px;
+  color: var(--ink-dim);
+  white-space: nowrap;
+}
+
+.post-urlbar,
+.post-process-btn {
+  display: none;
+}
+
+.appbar-form {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+}
+
+.appbar-import-panel {
+  min-width: 0;
+}
+
+.appbar-import-panel .import-input-row {
+  grid-template-columns: minmax(0, 1fr) minmax(156px, 220px);
+  gap: 28px;
+  padding-bottom: 22px;
+}
+
+.appbar-import-panel .url-wrap {
+  min-height: 58px;
+  padding: 0 20px;
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  border-radius: 11px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.025), transparent),
+    rgba(3, 9, 14, 0.72);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.035),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.32),
+    0 0 0 0 rgba(216, 168, 74, 0);
+  transition:
+    border-color var(--t-base) var(--easing),
+    box-shadow var(--t-base) var(--easing),
+    background-color var(--t-base) var(--easing);
+}
+
+.appbar-import-panel .url-wrap:focus-within {
+  border-color: rgba(216, 168, 74, 0.56);
+  background-color: rgba(6, 13, 19, 0.86);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.045),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.34),
+    0 0 0 3px rgba(216, 168, 74, 0.08),
+    0 14px 34px rgba(0, 0, 0, 0.22);
+}
+
+.appbar-import-panel .url-prefix {
+  color: #cbd2dc;
+  opacity: 0.92;
+}
+
+.appbar-import-panel input[type="url"] {
+  font-size: clamp(15px, 0.95vw, 18px);
+  height: 100%;
+  color: #edf0f4;
+  caret-color: var(--gold-bright);
+  letter-spacing: 0;
+}
+
+.appbar-import-panel .btn-primary {
+  height: 58px;
+  min-width: 0;
+  width: 100%;
+  border-radius: 11px;
+  font-size: clamp(14px, 0.9vw, 16px);
+}
+
+.appbar-import-panel .stem-choice-row {
+  grid-template-columns: 156px repeat(6, minmax(92px, 1fr));
+  gap: 14px;
+  padding-top: 20px;
+}
+
+.appbar-import-panel .stem-choice-row > span {
+  font-size: clamp(12px, 0.8vw, 14px);
+}
+
+.appbar-import-panel .stem-choice {
+  min-height: 48px;
+  padding: 0 14px;
+  border-radius: 10px;
+  font-size: clamp(12px, 0.8vw, 14px);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, currentColor 9%, transparent), transparent),
+    rgba(8, 15, 22, 0.42);
+}
+
+.url-wrap {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex: 1;
+  min-width: 0;
+  cursor: text;
+}
+
+.url-prefix {
+  flex-shrink: 0;
+  color: #d7dbe2;
+}
+
+.appbar-form input[type="url"],
+.appbar-import-panel input[type="url"],
+.import-card input[type="url"] {
+  flex: 1;
+  background: transparent;
+  border: 0;
+  outline: 0;
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: 19px;
+  padding: 0;
+  min-width: 0;
+  appearance: none;
+  box-shadow: none;
+}
+
+.appbar-form input[type="url"]::placeholder,
+.appbar-import-panel input[type="url"]::placeholder,
+.import-card input[type="url"]::placeholder {
+  color: #9da3ad;
+  opacity: 0.78;
+}
+
+.appbar-import-panel input[type="url"]::selection {
+  background: rgba(216, 168, 74, 0.28);
+  color: #fff6de;
+}
+
+.appbar-import-panel input[type="url"] {
+  font-size: clamp(15px, 0.95vw, 18px);
+  color: #edf0f4;
+}
+
+.btn-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  height: 56px;
+  min-width: 150px;
+  background: linear-gradient(180deg, var(--gold-bright) 0%, var(--gold) 100%);
+  color: #17130c;
+  border: 0;
+  border-radius: var(--radius);
+  padding: 0 24px;
+  font-family: var(--font-mono);
+  font-size: 16px;
+  font-weight: 700;
+  cursor: pointer;
+  position: relative;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.38),
+    0 16px 36px rgba(216, 168, 74, 0.18);
+  transition:
+    filter var(--t-base) var(--easing),
+    transform var(--t-fast) var(--easing);
+}
+
+.btn-primary:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+.btn-primary:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+.btn-primary:disabled {
+  opacity: 0.82;
+  cursor: progress;
+}
+
+.btn-primary.loading {
+  filter: saturate(0.92);
+}
+
+.btn-primary.loading .icon {
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

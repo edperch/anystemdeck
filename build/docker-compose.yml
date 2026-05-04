@@ -1,0 +1,27 @@
+# Explicit name so compose doesn't derive it from the parent directory
+# (which is now `build/`, giving misleading object names like
+# `build_default` for the network).
+name: stemdeck
+
+services:
+  stemdeck:
+    # Compose file lives in build/, so the build context is the parent
+    # (project root) and the Dockerfile sits next to this compose file.
+    build:
+      context: ..
+      dockerfile: build/Dockerfile
+    image: stemdeck
+    container_name: stemdeck
+    ports:
+      # Bind to loopback only -- StemDeck has no auth and is local-only.
+      - "127.0.0.1:8000:8000"
+    volumes:
+      # Stems and downloaded audio land in <project root>/jobs on the
+      # host so you can grab them without going through the container.
+      - ../jobs:/app/jobs
+      # Demucs model weights (~170 MB) survive container rebuilds.
+      - stemdeck-cache:/cache
+    restart: unless-stopped
+
+volumes:
+  stemdeck-cache:
