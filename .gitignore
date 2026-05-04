@@ -15,7 +15,6 @@ env/
 pip-wheel-metadata/
 
 # Build / packaging
-# Top-level build/ holds the Dockerfile + compose; do not ignore it.
 dist/
 *.egg-info/
 *.egg
