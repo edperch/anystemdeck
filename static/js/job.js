@@ -109,11 +109,20 @@ function applyState(state) {
   const summaryLufs = document.getElementById("summary-lufs");
   const summaryPeak = document.getElementById("summary-peak");
   if (summaryKey && state.key) summaryKey.textContent = state.key;
-  if (summaryBpm && state.bpm) summaryBpm.innerHTML = `${state.bpm} <small>BPM</small>`;
+  if (summaryBpm && state.bpm) {
+    summaryBpm.textContent = "";
+    const bpmNum = document.createTextNode(String(state.bpm) + " ");
+    const bpmUnit = document.createElement("small");
+    bpmUnit.textContent = "BPM";
+    summaryBpm.append(bpmNum, bpmUnit);
+  }
   if (summaryScale && state.scale) summaryScale.textContent = state.scale;
   if (summaryConfidence && state.key_confidence != null) {
     const confidence = Math.max(0, Math.min(100, Number(state.key_confidence)));
-    summaryConfidence.innerHTML = `<span>${confidence}%</span>`;
+    const confSpan = document.createElement("span");
+    confSpan.textContent = `${confidence}%`;
+    summaryConfidence.textContent = "";
+    summaryConfidence.appendChild(confSpan);
     summaryConfidence.style.setProperty("--confidence-pct", confidence);
     summaryConfidence.classList.remove("hidden");
     summaryConfidenceLabel?.classList.remove("hidden");

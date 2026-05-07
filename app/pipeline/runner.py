@@ -7,17 +7,21 @@ from pathlib import Path
 
 from app.core.models import Job, JobCancelled
 from app.pipeline.analyze import analyze
-from app.pipeline.collect import (
-    cleanup_source,
-    collect,
-    make_original_track,
-    make_selected_mix,
-    sweep_old_jobs,
-)
+from app.pipeline.collect import cleanup_source, collect, make_original_track, make_selected_mix
 from app.pipeline.download import _set, download
 from app.pipeline.separate import separate
 
 logger = logging.getLogger("stemdeck.pipeline")
+
+
+def _rmtree(path: Path) -> None:
+    try:
+        shutil.rmtree(path)
+    except FileNotFoundError:
+        pass
+    except Exception:
+        logger.warning("failed to remove %s", path, exc_info=True)
+
 
 # Only one heavy job runs at a time -- Demucs is GPU/CPU-hungry.
 _pipeline_lock = asyncio.Semaphore(1)
@@ -80,17 +84,13 @@ async def run_pipeline(job: Job, url: str, jobs_dir: Path) -> None:
     # stay stuck on `queued` forever -- transition to `error` instead.
     try:
         job_dir.mkdir(parents=True, exist_ok=True)
-        # Best-effort sweep of stale jobs before acquiring the pipeline lock so
-        # disk reclaim happens even while another job is running.
-        await asyncio.to_thread(sweep_old_jobs, jobs_dir)
         async with _pipeline_lock:
             await asyncio.to_thread(_run_blocking, job, url, job_dir)
     except JobCancelled:
         logger.info("pipeline cancelled for job %s", job.id)
         _set(job, status="cancelled", stage="Cancelled")
         # Drop partial files so the disk reclaim is immediate.
-        if job_dir.is_dir():
-            shutil.rmtree(job_dir, ignore_errors=True)
+        _rmtree(job_dir)
         return
     except Exception as e:
         # yt-dlp wraps hook exceptions in DownloadError; if the user cancelled
@@ -99,10 +99,14 @@ async def run_pipeline(job: Job, url: str, jobs_dir: Path) -> None:
         if job.cancel_requested:
             logger.info("pipeline cancelled (wrapped) for job %s", job.id)
             _set(job, status="cancelled", stage="Cancelled")
-            if job_dir.is_dir():
-                shutil.rmtree(job_dir, ignore_errors=True)
+            _rmtree(job_dir)
             return
-        logger.exception("pipeline failed for job %s", job.id)
-        _set(job, status="error", stage=f"Error: {e}", error=str(e))
+        logger.exception("pipeline failed for job %s: %s", job.id, e)
+        _set(
+            job,
+            status="error",
+            stage="Error: Processing failed",
+            error="Audio processing failed. Please try another video.",
+        )
         return
     _set(job, status="done", progress=1.0, stage="Done")

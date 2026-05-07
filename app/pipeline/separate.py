@@ -4,6 +4,8 @@ import logging
 import re
 import subprocess
 import sys
+import threading
+import time
 from pathlib import Path
 
 from app.core.config import DEMUCS_DEVICE, DEMUCS_MODEL
@@ -13,6 +15,10 @@ from app.core.registry import set_proc
 logger = logging.getLogger("stemdeck.pipeline")
 
 _PCT_RE = re.compile(r"(\d{1,3})%")
+# Terminate demucs if stderr produces no output for this many seconds.
+# GPU processing can be silent for minutes; 30 min covers legitimate pauses
+# while still catching genuine hangs (GPU deadlock, OOM stall, etc.).
+_DEMUCS_STALL_TIMEOUT = 1800
 
 
 def separate(job: Job, source: Path, job_dir: Path) -> Path:
@@ -48,11 +54,28 @@ def separate(job: Job, source: Path, job_dir: Path) -> Path:
     # exits non-zero (otherwise the only signal would be a bare exit code).
     buf = ""
     tail: list[str] = []
+    last_output: list[float] = [time.monotonic()]
+
+    def _watchdog() -> None:
+        while proc.poll() is None:
+            time.sleep(30)
+            if time.monotonic() - last_output[0] > _DEMUCS_STALL_TIMEOUT:
+                logger.warning(
+                    "demucs stalled for %ss with no output, terminating job %s",
+                    _DEMUCS_STALL_TIMEOUT,
+                    job.id,
+                )
+                proc.terminate()
+                break
+
+    wt = threading.Thread(target=_watchdog, daemon=True)
+    wt.start()
     try:
         while True:
             ch = proc.stderr.read(1)
             if not ch:
                 break
+            last_output[0] = time.monotonic()
             if ch in ("\r", "\n"):
                 line = buf.strip()
                 buf = ""
@@ -72,6 +95,7 @@ def separate(job: Job, source: Path, job_dir: Path) -> Path:
         proc.wait()
     finally:
         set_proc(job.id, None)
+        wt.join(timeout=5)
 
     # POST /cancel calls proc.terminate() directly, which causes the read loop
     # above to hit EOF and proc.wait() to return a nonzero status. Translate

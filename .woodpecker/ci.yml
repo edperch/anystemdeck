@@ -12,6 +12,8 @@ when:
 steps:
   lint:
     image: ghcr.io/astral-sh/uv:python3.12-bookworm-slim
+    environment:
+      UV_LINK_MODE: copy
     commands:
       - uv sync --frozen --all-extras
       - uv run ruff check app/ tests/
@@ -20,6 +22,8 @@ steps:
 
   test:
     image: ghcr.io/astral-sh/uv:python3.12-bookworm-slim
+    environment:
+      UV_LINK_MODE: copy
     commands:
       - apt-get update && apt-get install -y --no-install-recommends ffmpeg
       - uv sync --frozen --all-extras
@@ -32,12 +36,16 @@ steps:
 
   sast-bandit:
     image: ghcr.io/astral-sh/uv:python3.12-bookworm-slim
+    environment:
+      UV_LINK_MODE: copy
     commands:
       - uv tool install bandit
       - uv tool run bandit -r app/ -ll  # fail on medium+ severity
 
   deps-audit:
     image: ghcr.io/astral-sh/uv:python3.12-bookworm-slim
+    environment:
+      UV_LINK_MODE: copy
     commands:
       - uv tool install pip-audit
       - uv pip compile pyproject.toml -o /tmp/requirements.txt

@@ -1,5 +1,10 @@
 /* ───────────── Top bar ───────────── */
 
+.app:not(.is-import) .appbar {
+  padding-top: 12px;
+  padding-bottom: 14px;
+}
+
 .appbar {
   display: grid;
   grid-template-columns: minmax(220px, 300px) minmax(0, 1fr);
@@ -79,8 +84,8 @@
 }
 
 .appbar-import-panel .import-input-row {
-  grid-template-columns: minmax(0, 1fr) minmax(156px, 220px);
-  gap: 28px;
+  grid-template-columns: minmax(0, 1fr) clamp(140px, 14vw, 220px);
+  gap: clamp(12px, 2vw, 28px);
   padding-bottom: 22px;
 }
 
@@ -134,8 +139,8 @@
 }
 
 .appbar-import-panel .stem-choice-row {
-  grid-template-columns: 156px repeat(6, minmax(92px, 1fr));
-  gap: 14px;
+  grid-template-columns: clamp(110px, 11vw, 156px) repeat(6, minmax(0, 1fr));
+  gap: clamp(8px, 1vw, 14px);
   padding-top: 20px;
 }
 

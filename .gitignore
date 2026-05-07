@@ -20,6 +20,11 @@ dist/
 *.egg
 .eggs/
 
+# Desktop build outputs
+desktop/node_modules/
+desktop/src-tauri/target/
+desktop/src-tauri/gen/
+
 # Test / coverage / type-check caches
 .pytest_cache/
 .ruff_cache/
@@ -30,6 +35,7 @@ htmlcov/
 .tox/
 
 # Runtime job artifacts (downloaded audio + separated stems)
+data/
 jobs/
 .run/
 

@@ -4,7 +4,7 @@ import logging
 import subprocess
 from pathlib import Path
 
-from app.core.config import JOBS_DIR
+from app.core.config import JOBS_DIR, ffmpeg_executable
 from app.core.models import Job
 from app.pipeline.download import _set
 
@@ -104,8 +104,8 @@ def _detect_key(chroma_mean: list[float]) -> tuple[str, str, int]:
         f"{label}={weighted:+.3f}(p{pearson:+.2f}*r{chroma_mean[idx]:.2f})"
         for weighted, pearson, label, idx in raw[:5]
     )
-    logger.warning("chroma: %s", chroma_str)
-    logger.warning("key candidates (top 5): %s", top5_str)
+    logger.debug("chroma: %s", chroma_str)
+    logger.debug("key candidates (top 5): %s", top5_str)
 
     # Pick best major and best minor for the tie-break, both by the
     # weighted score.
@@ -188,7 +188,7 @@ def _load_audio_ffmpeg(
         return None
 
     cmd = [
-        "ffmpeg",
+        ffmpeg_executable(),
         "-nostdin",
         "-loglevel",
         "error",
@@ -218,7 +218,7 @@ def _load_audio_ffmpeg(
 def analyze(job: Job, source: Path) -> tuple[int | None, str | None]:
     """Best-effort BPM and key detection. On failure, returns (None, None)
     and leaves job fields untouched -- the chips stay as placeholders."""
-    logger.warning("analyze: entering for job %s, source=%s", job.id, source)
+    logger.info("analyze: entering for job %s, source=%s", job.id, source)
     _set(job, status="analyzing", progress=0.0, stage="Analyzing audio...")
     try:
         import librosa

@@ -20,7 +20,7 @@ async def test_pipeline_transitions_to_error_on_stage_failure(tmp_path: Path):
         await run_pipeline(job, "https://www.youtube.com/watch?v=dQw4w9WgXcQ", tmp_path)
 
     assert job.status == "error"
-    assert "blew up" in (job.error or "")
+    assert job.error  # generic message returned to client; detail is in server logs
 
 
 @pytest.mark.asyncio

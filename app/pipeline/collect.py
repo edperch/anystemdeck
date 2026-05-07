@@ -6,13 +6,22 @@ import subprocess
 import time
 from pathlib import Path
 
-from app.core.config import DEMUCS_MODEL, JOB_TTL_SECONDS, STEM_NAMES
+from app.core.config import DEMUCS_MODEL, JOB_TTL_SECONDS, STEM_NAMES, ffmpeg_executable
 from app.core.models import Job
 from app.core.registry import all_jobs as registry_all
 from app.core.registry import remove as registry_remove
 from app.core.registry import set_proc
 
 logger = logging.getLogger("stemdeck.collect")
+
+
+def _rmtree(path: Path) -> None:
+    try:
+        shutil.rmtree(path)
+    except FileNotFoundError:
+        pass
+    except Exception:
+        logger.warning("failed to remove %s", path, exc_info=True)
 
 
 def _run_ffmpeg(job: Job, cmd: list[str]) -> bool:
@@ -65,7 +74,7 @@ def collect(job: Job, stems_root: Path, job_dir: Path) -> list[str]:
         if src.exists():
             shutil.move(str(src), target_dir / f"{name}.wav")
             found.append(name)
-    shutil.rmtree(job_dir / DEMUCS_MODEL, ignore_errors=True)
+    _rmtree(job_dir / DEMUCS_MODEL)
     if not found:
         raise RuntimeError("no stems produced by demucs")
     return found
@@ -97,7 +106,7 @@ def make_original_track(job: Job, job_dir: Path, stems_dir: Path) -> Path | None
         return None
     out = stems_dir / "original.wav"
     cmd: list[str] = [
-        "ffmpeg",
+        ffmpeg_executable(),
         "-y",
         "-nostdin",
         "-loglevel",
@@ -144,7 +153,7 @@ def make_selected_mix(job: Job, stems_dir: Path, found: list[str]) -> Path | Non
     inputs = [stems_dir / f"{name}.wav" for name in selected]
     out = stems_dir / "mix.wav"
     cmd: list[str] = [
-        "ffmpeg",
+        ffmpeg_executable(),
         "-y",
         "-nostdin",
         "-loglevel",
@@ -188,5 +197,5 @@ def sweep_old_jobs(jobs_dir: Path) -> None:
                 continue
         elif d.stat().st_mtime >= cutoff:
             continue
-        shutil.rmtree(d, ignore_errors=True)
+        _rmtree(d)
         registry_remove(d.name)

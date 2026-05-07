@@ -11,6 +11,10 @@ from app.core.registry import get as registry_get
 
 router = APIRouter(tags=["events"])
 
+# Close SSE connections that outlive this threshold to prevent zombie
+# connections from accumulating when clients disconnect without a TCP RST.
+_MAX_SSE_SECONDS = 4 * 3600  # 4 hours
+
 
 @router.get("/jobs/{job_id}/events")
 async def job_events(job_id: str) -> StreamingResponse:
@@ -21,7 +25,9 @@ async def job_events(job_id: str) -> StreamingResponse:
     async def stream() -> AsyncIterator[str]:
         last = None
         keepalive_at = 0
-        while True:
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + _MAX_SSE_SECONDS
+        while loop.time() < deadline:
             snapshot = job.to_state()
             serialized = json.dumps(snapshot)
             if serialized != last:

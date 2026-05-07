@@ -1,5 +1,6 @@
 import os
 import re
+import sys
 from pathlib import Path
 
 
@@ -42,10 +43,64 @@ STATIC_DIR = ROOT / "static"
 STEM_NAMES: tuple[str, ...] = ("vocals", "drums", "bass", "guitar", "piano", "other")
 JOB_ID_RE = re.compile(r"^[a-f0-9]{12}$")
 
-# Runtime knobs -- env-backed so Docker / local can tune without a code edit.
-JOBS_DIR = _env_path("STEMDECK_JOBS_DIR", ROOT / "jobs")
+# Runtime knobs -- env-backed so Docker / desktop packaging / local dev can
+# tune without a code edit. STEMDECK_DATA_DIR is the portable app root for
+# mutable runtime data; when unset, dev behavior remains the repo-local jobs/
+# folder.
+PORTABLE_DATA_DIR_ENABLED = bool(os.environ.get("STEMDECK_DATA_DIR", "").strip())
+DATA_DIR = _env_path("STEMDECK_DATA_DIR", ROOT)
+JOBS_DIR = _env_path(
+    "STEMDECK_JOBS_DIR",
+    (DATA_DIR / "jobs") if PORTABLE_DATA_DIR_ENABLED else (ROOT / "jobs"),
+)
+CACHE_DIR = _env_path("STEMDECK_CACHE_DIR", DATA_DIR / "cache")
+DOWNLOADS_DIR = _env_path("STEMDECK_DOWNLOADS_DIR", DATA_DIR / "downloads")
+MODELS_DIR = _env_path("STEMDECK_MODELS_DIR", DATA_DIR / "models")
+LOGS_DIR = _env_path("STEMDECK_LOGS_DIR", DATA_DIR / "logs")
+FFMPEG_DIR = _env_path("STEMDECK_FFMPEG_DIR", DATA_DIR / "ffmpeg")
+FFMPEG_BIN = _env_path(
+    "STEMDECK_FFMPEG",
+    FFMPEG_DIR / ("ffmpeg.exe" if sys.platform.startswith("win") else "ffmpeg"),
+)
 DEMUCS_MODEL = os.environ.get("STEMDECK_DEMUCS_MODEL", "htdemucs_6s").strip() or "htdemucs_6s"
 DEMUCS_DEVICE = _detect_device()
-MAX_DURATION_SEC = _env_int("STEMDECK_MAX_DURATION_SEC", 1200)  # 20 min default
-JOB_TTL_SECONDS = _env_int("STEMDECK_JOB_TTL_SECONDS", 24 * 3600)  # 24 h default
-MAX_PENDING_JOBS = _env_int("STEMDECK_MAX_PENDING_JOBS", 3)
+MAX_DURATION_SEC = max(60, _env_int("STEMDECK_MAX_DURATION_SEC", 1200))  # 20 min default
+JOB_TTL_SECONDS = max(300, _env_int("STEMDECK_JOB_TTL_SECONDS", 24 * 3600))  # 24 h default
+MAX_PENDING_JOBS = max(1, min(50, _env_int("STEMDECK_MAX_PENDING_JOBS", 3)))
+
+
+def ffmpeg_executable() -> str:
+    """Return the preferred FFmpeg executable.
+
+    In portable mode, setup places FFmpeg under DATA_DIR/ffmpeg. Prefer that
+    binary when present; otherwise fall back to PATH so local dev and Docker
+    keep working exactly as before.
+    """
+    return str(FFMPEG_BIN) if FFMPEG_BIN.is_file() else "ffmpeg"
+
+
+def configure_portable_environment() -> None:
+    """Keep generated caches inside the portable data folder when requested.
+
+    This is intentionally best-effort. It only sets variables that are still
+    unset, so explicit caller/env choices win.
+    """
+    if FFMPEG_DIR.is_dir():
+        path = os.environ.get("PATH", "")
+        ffmpeg_path = str(FFMPEG_DIR)
+        if ffmpeg_path not in path.split(os.pathsep):
+            os.environ["PATH"] = ffmpeg_path + (os.pathsep + path if path else "")
+
+    if PORTABLE_DATA_DIR_ENABLED:
+        os.environ.setdefault("XDG_CACHE_HOME", str(CACHE_DIR))
+        os.environ.setdefault("TORCH_HOME", str(MODELS_DIR / "torch"))
+
+
+def ensure_runtime_dirs() -> None:
+    paths = (
+        (JOBS_DIR, CACHE_DIR, DOWNLOADS_DIR, MODELS_DIR, LOGS_DIR)
+        if PORTABLE_DATA_DIR_ENABLED
+        else (JOBS_DIR,)
+    )
+    for path in paths:
+        path.mkdir(parents=True, exist_ok=True)
