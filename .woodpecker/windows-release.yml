@@ -7,7 +7,7 @@ depends_on:
 
 steps:
   build-windows-nvidia:
-    image: local
+    image: powershell
     labels:
       platform: windows/amd64
       backend: local
@@ -17,7 +17,7 @@ steps:
           -StripVenv
 
   build-windows-cpu:
-    image: local
+    image: powershell
     labels:
       platform: windows/amd64
       backend: local
@@ -31,7 +31,7 @@ steps:
           -SkipTauriBuild
 
   scan-windows-artifacts:
-    image: local
+    image: powershell
     labels:
       platform: windows/amd64
       backend: local
@@ -41,7 +41,7 @@ steps:
       - docker run --rm -v "${PWD}/dist:/scan" clamav/clamav:latest clamscan --no-summary --infected /scan
 
   upload-windows-artifacts:
-    image: local
+    image: powershell
     when:
       - event: release
     labels:
