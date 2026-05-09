@@ -108,6 +108,14 @@ function Bundle-PythonRuntime([string]$VenvDir, [string]$VenvPython) {
   Set-PyvenvValue $cfg "executable" (Join-Path $VenvDir "python.exe")
 }
 
+function Invoke-TauriBuild {
+  $TauriCli = Join-Path $DesktopDir "node_modules\@tauri-apps\cli\tauri.js"
+  if (-not (Test-Path $TauriCli)) {
+    throw "Tauri CLI not found at $TauriCli. npm install/ci may have omitted devDependencies."
+  }
+  & node $TauriCli build
+}
+
 function Assert-Fresh-TauriBuild {
   if (-not (Test-Path $TargetExe)) {
     throw "Tauri executable not found at $TargetExe. Remove -SkipTauriBuild or build the NVIDIA package first."
@@ -216,15 +224,15 @@ if ($StripVenv) {
 Push-Location $DesktopDir
 try {
   if (Test-Path "package-lock.json") {
-    npm ci
+    npm ci --include=dev
   } else {
-    npm install
+    npm install --include=dev
   }
 
   if (-not $SkipTauriBuild) {
     $env:CI = "true"  # Woodpecker sets CI=woodpecker; Tauri only accepts true/false
     rustup default stable
-    npm run tauri build
+    Invoke-TauriBuild
   } else {
     Assert-Fresh-TauriBuild
   }
