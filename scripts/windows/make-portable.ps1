@@ -8,6 +8,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+$PSNativeCommandErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
 if ($env:OS -ne "Windows_NT") {
