@@ -120,6 +120,7 @@ try {
 
   if (-not $SkipTauriBuild) {
     $env:CI = "true"  # Woodpecker sets CI=woodpecker; Tauri only accepts true/false
+    rustup default stable
     npm run tauri build
   }
 } finally {
