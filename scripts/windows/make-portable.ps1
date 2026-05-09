@@ -119,6 +119,7 @@ try {
   }
 
   if (-not $SkipTauriBuild) {
+    $env:CI = "true"  # Woodpecker sets CI=woodpecker; Tauri only accepts true/false
     npm run tauri build
   }
 } finally {
