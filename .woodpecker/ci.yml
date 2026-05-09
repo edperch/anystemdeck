@@ -14,7 +14,7 @@ steps:
     image: ghcr.io/astral-sh/uv:python3.12-bookworm-slim
     labels:
       platform: linux/amd64
-      backend: docker
+      backend: kubernetes
     environment:
       UV_LINK_MODE: copy
     commands:
@@ -27,7 +27,7 @@ steps:
     image: ghcr.io/astral-sh/uv:python3.12-bookworm-slim
     labels:
       platform: linux/amd64
-      backend: docker
+      backend: kubernetes
     environment:
       UV_LINK_MODE: copy
     commands:
@@ -39,7 +39,7 @@ steps:
     image: node:20-alpine
     labels:
       platform: linux/amd64
-      backend: docker
+      backend: kubernetes
     commands:
       - for f in static/js/*.js; do node --check "$f"; done
 
@@ -47,7 +47,7 @@ steps:
     image: ghcr.io/astral-sh/uv:python3.12-bookworm-slim
     labels:
       platform: linux/amd64
-      backend: docker
+      backend: kubernetes
     environment:
       UV_LINK_MODE: copy
     commands:
@@ -58,7 +58,7 @@ steps:
     image: ghcr.io/astral-sh/uv:python3.12-bookworm-slim
     labels:
       platform: linux/amd64
-      backend: docker
+      backend: kubernetes
     environment:
       UV_LINK_MODE: copy
     commands:
@@ -85,7 +85,7 @@ steps:
     image: aquasec/trivy:latest
     labels:
       platform: linux/amd64
-      backend: docker
+      backend: kubernetes
     commands:
       - trivy fs
           --scanners vuln,secret,misconfig
@@ -101,6 +101,6 @@ steps:
     image: aquasec/trivy:latest
     labels:
       platform: linux/amd64
-      backend: docker
+      backend: kubernetes
     commands:
       - trivy config --severity HIGH,CRITICAL --exit-code 1 build/
