@@ -17,7 +17,6 @@ function setStatus(message) {
 }
 
 function showError(error) {
-  // Mark any step still spinning as errored, then show the error panel.
   for (const el of steps) {
     if (el.classList.contains("active")) {
       el.classList.replace("active", "error");
@@ -29,7 +28,6 @@ function showError(error) {
   retryBtn.classList.remove("hidden");
 }
 
-// Marks a step active, runs fn(), then marks done — or marks error and rethrows.
 async function runStep(name, fn) {
   setStep(name, "active");
   try {
@@ -42,13 +40,39 @@ async function runStep(name, fn) {
   }
 }
 
-// Resolves after at least `ms` milliseconds AND one animation frame, so state
-// changes are always visually distinct (not batched into the same paint).
 function minDelay(ms) {
   return Promise.all([
     new Promise((r) => setTimeout(r, ms)),
     new Promise((r) => requestAnimationFrame(r)),
   ]);
+}
+
+function formatElapsed(startedAt) {
+  const seconds = Math.floor((Date.now() - startedAt) / 1000);
+  const minutes = Math.floor(seconds / 60);
+  const rest = seconds % 60;
+  return minutes > 0 ? `${minutes}m ${rest}s` : `${rest}s`;
+}
+
+function startProgressStatus(messages) {
+  const startedAt = Date.now();
+  let messageIndex = 0;
+
+  const update = () => {
+    const elapsedSeconds = Math.floor((Date.now() - startedAt) / 1000);
+    while (
+      messageIndex + 1 < messages.length &&
+      elapsedSeconds >= messages[messageIndex + 1].afterSeconds
+    ) {
+      messageIndex += 1;
+    }
+
+    setStatus(`${messages[messageIndex].text} Elapsed: ${formatElapsed(startedAt)}.`);
+  };
+
+  update();
+  const timer = window.setInterval(update, 1000);
+  return () => window.clearInterval(timer);
 }
 
 async function runSetup() {
@@ -57,25 +81,28 @@ async function runSetup() {
   for (const step of steps) step.classList.remove("active", "done", "error");
 
   try {
-    // ── Step 1: runtime (serial — everything else needs the python path) ──
     setStep("runtime", "active");
     setStatus("Checking Python runtime...");
-    // Run with a minimum display time so the active state is always painted
-    // before we transition — probe_runtime resolves in < 1 frame on warm starts.
     const [runtime] = await Promise.all([
       invoke("probe_runtime"),
       minDelay(350),
     ]);
 
-    // Fast path: config from a previous run confirms everything is ready.
     if (runtime.pythonReady && runtime.ffmpegReady && runtime.torchDevice) {
       for (const step of steps) {
         step.classList.remove("active", "error");
-        step.classList.add("done");
+        if (step.dataset.step === "backend") {
+          step.classList.remove("done");
+        } else {
+          step.classList.add("done");
+        }
       }
-      setStatus("All systems ready. Starting StemDeck...");
-      const backend = await invoke("start_backend");
-      window.location.replace(backend.url);
+      await runStep("backend", async () => {
+        setStatus("Runtime is ready. Starting StemDeck backend...");
+        const backend = await invoke("start_backend");
+        setStatus("Opening StemDeck...");
+        window.location.replace(backend.url);
+      });
       return;
     }
 
@@ -87,65 +114,82 @@ async function runSetup() {
     }
     setStep("runtime", "done");
     setStatus(`Python runtime found at ${runtime.pythonPath}`);
-    // Ensure runtime=done is painted before workspace+gpu go active.
     await minDelay(200);
-
-    // ── Steps 2-4: parallel phase ─────────────────────────────────────────
-    //
-    // Dependency graph:
-    //   workspace → ffmpeg  ┐
-    //   gpu                 ├─→ (all done) → model → backend
-    //
-    // workspace and gpu are independent — run them concurrently.
-    // ffmpeg needs workspace (data/ffmpeg/ dir must exist first).
 
     let gpuSummary = "";
 
-    // Chain: workspace → ffmpeg (IIFE keeps async/await consistent)
-    const workspaceChain = (async () => {
-      await runStep("workspace", () => invoke("ensure_workspace"));
+    await runStep("workspace", () => invoke("ensure_workspace"));
 
-      if (runtime.ffmpegReady) {
-        setStep("ffmpeg", "done");
-      } else {
-        await runStep("ffmpeg", async () => {
-          setStatus("Downloading FFmpeg… (this may take a minute)");
+    if (runtime.ffmpegReady) {
+      setStep("ffmpeg", "done");
+    } else {
+      await runStep("ffmpeg", async () => {
+        const stopProgress = startProgressStatus([
+          {
+            afterSeconds: 0,
+            text: "Downloading FFmpeg... this can take a few minutes on first run.",
+          },
+          {
+            afterSeconds: 60,
+            text: "Still downloading FFmpeg... slow networks or antivirus scans can delay this.",
+          },
+        ]);
+
+        try {
           const assets = await invoke("ensure_external_assets");
           if (!assets.ffmpegReady) {
             throw new Error(
               "FFmpeg setup did not complete. Check your internet connection and retry."
             );
           }
-        });
-      }
-    })();
+        } finally {
+          stopProgress();
+        }
+      });
+    }
 
-    // GPU detection + torch install (independent of workspace)
-    const gpuTask = runStep("gpu", async () => {
-      const gpu = await invoke("ensure_torch_device");
-      gpuSummary = gpu.gpuDetected
-        ? gpu.cudaVerified
-          ? `${gpu.gpuName} — CUDA ${gpu.cudaVersion} enabled`
-          : `${gpu.gpuName} found — falling back to CPU (CUDA unverified)`
-        : "No NVIDIA GPU — stem separation will use CPU";
-      return gpu;
+    await runStep("gpu", async () => {
+      const stopProgress = startProgressStatus([
+        {
+          afterSeconds: 0,
+          text: "Checking NVIDIA GPU and compute support...",
+        },
+        {
+          afterSeconds: 20,
+          text: "Installing NVIDIA acceleration if needed... first run can take 5-15 minutes.",
+        },
+        {
+          afterSeconds: 120,
+          text: "Still installing NVIDIA acceleration... CUDA Torch packages are large.",
+        },
+        {
+          afterSeconds: 300,
+          text: "Still working... setup should finish or time out automatically.",
+        },
+      ]);
+
+      try {
+        const gpu = await invoke("ensure_torch_device");
+        gpuSummary = gpu.gpuDetected
+          ? gpu.cudaVerified
+            ? `${gpu.gpuName} - CUDA ${gpu.cudaVersion} enabled`
+            : `${gpu.gpuName} found - falling back to CPU (CUDA unverified)`
+          : "No NVIDIA GPU - stem separation will use CPU";
+        return gpu;
+      } finally {
+        stopProgress();
+      }
     });
 
-    setStatus("Detecting GPU and preparing workspace…");
-    await Promise.all([workspaceChain, gpuTask]);
-
-    // ── Step 5: model (no async work — goes straight to done) ────────────
     setStep("model", "done");
     setStatus("AI separation model will download on first use (~340 MB).");
 
-    // ── Step 6: backend (serial — needs everything above) ─────────────────
     await runStep("backend", async () => {
-      setStatus(gpuSummary ? `${gpuSummary} — starting backend…` : "Starting StemDeck backend…");
+      setStatus(gpuSummary ? `${gpuSummary} - starting backend...` : "Starting StemDeck backend...");
       const backend = await invoke("start_backend");
       setStatus("Opening StemDeck...");
       window.location.replace(backend.url);
     });
-
   } catch (error) {
     showError(error);
   }

@@ -4,7 +4,7 @@ use std::{
     io::{Read, Write},
     net::{TcpListener, TcpStream},
     path::{Path, PathBuf},
-    process::{Child, Command, Stdio},
+    process::{Child, Command, Output, Stdio},
     sync::Mutex,
     thread,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
@@ -85,6 +85,9 @@ fn probe_runtime() -> Result<RuntimeProbe, String> {
     let root = app_root()?;
     let data_dir = root.join("data");
     let python = python_path(&root);
+    if let Some(path) = python.as_deref() {
+        patch_pyvenv_cfg(path);
+    }
     let ffmpeg = ffmpeg_path(&data_dir);
     let torch_device = read_config_str(&data_dir, "torchDevice");
     Ok(RuntimeProbe {
@@ -107,10 +110,15 @@ fn read_config_str(data_dir: &std::path::Path, key: &str) -> Option<String> {
 
 #[tauri::command]
 fn ensure_workspace() -> Result<(), String> {
-    let data = app_root()?.join("data");
+    let root = app_root()?;
+    let data = root.join("data");
     for dir in ["cache", "downloads", "ffmpeg", "jobs", "logs", "models"] {
         fs::create_dir_all(data.join(dir))
             .map_err(|e| format!("failed to create data/{dir}: {e}"))?;
+    }
+    if is_cpu_only_package(&root) {
+        fs::write(data.join("cpu-only"), "")
+            .map_err(|e| format!("failed to write data/cpu-only: {e}"))?;
     }
     let config = data.join("config.json");
     if !config.exists() {
@@ -142,6 +150,7 @@ fn start_backend(state: tauri::State<BackendState>) -> Result<BackendStarted, St
     if let Some(url) = state.url.lock().map_err(|e| e.to_string())?.clone() {
         return Ok(BackendStarted { url });
     }
+    stop_backend(&state);
 
     let root = app_root()?;
     let backend_dir = backend_dir(&root)?;
@@ -149,8 +158,19 @@ fn start_backend(state: tauri::State<BackendState>) -> Result<BackendStarted, St
     let python = python_path(&root).filter(|p| p.is_file()).ok_or_else(|| {
         "Python runtime not found. Expected python/ or .venv/ under StemDeck.".to_string()
     })?;
+    patch_pyvenv_cfg(&python);
     let port = free_port()?;
     let url = format!("http://127.0.0.1:{port}");
+    let log_path = data_dir.join("logs").join("backend.log");
+    if let Some(parent) = log_path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|e| format!("failed to create backend log directory: {e}"))?;
+    }
+    let log_file = File::create(&log_path)
+        .map_err(|e| format!("failed to create backend log {}: {e}", log_path.display()))?;
+    let log_file_for_stderr = log_file
+        .try_clone()
+        .map_err(|e| format!("failed to prepare backend log {}: {e}", log_path.display()))?;
 
     let mut cmd = Command::new(python);
     cmd.args([
@@ -168,8 +188,8 @@ fn start_backend(state: tauri::State<BackendState>) -> Result<BackendStarted, St
         .env("PYTHONUNBUFFERED", "1")
         .env("XDG_CACHE_HOME", data_dir.join("cache"))
         .env("TORCH_HOME", data_dir.join("models").join("torch"))
-        .stdout(Stdio::null())
-        .stderr(Stdio::piped());
+        .stdout(Stdio::from(log_file))
+        .stderr(Stdio::from(log_file_for_stderr));
 
     if let Some(ffmpeg_dir) = ffmpeg_dir_if_present(&data_dir) {
         let existing = env::var_os("PATH").unwrap_or_default();
@@ -186,12 +206,17 @@ fn start_backend(state: tauri::State<BackendState>) -> Result<BackendStarted, St
         cmd.creation_flags(CREATE_NO_WINDOW);
     }
 
-    let child = cmd
+    let mut child = cmd
         .spawn()
         .map_err(|e| format!("failed to start backend: {e}"))?;
-    *state.child.lock().map_err(|e| e.to_string())? = Some(child);
 
-    wait_for_health(port, Duration::from_secs(30))?;
+    if let Err(err) = wait_for_health(port, Duration::from_secs(90), &log_path) {
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err(err);
+    }
+
+    *state.child.lock().map_err(|e| e.to_string())? = Some(child);
     *state.url.lock().map_err(|e| e.to_string())? = Some(url.clone());
     Ok(BackendStarted { url })
 }
@@ -202,7 +227,7 @@ fn ensure_torch_device() -> Result<GpuSetup, String> {
     let data_dir = root.join("data");
 
     // CPU-only portable build: skip GPU detection and pip entirely.
-    if data_dir.join("cpu-only").exists() {
+    if is_cpu_only_package(&root) {
         persist_torch_device(&data_dir, "cpu");
         return Ok(GpuSetup {
             gpu_detected: false,
@@ -216,6 +241,7 @@ fn ensure_torch_device() -> Result<GpuSetup, String> {
     let python = python_path(&root)
         .filter(|p| p.is_file())
         .ok_or_else(|| "Python not found".to_string())?;
+    patch_pyvenv_cfg(&python);
 
     let setup = match detect_nvidia_gpu() {
         Some((gpu_name, cuda_version)) => {
@@ -241,6 +267,10 @@ fn ensure_torch_device() -> Result<GpuSetup, String> {
     // Persist so subsequent launches skip this step entirely.
     persist_torch_device(&data_dir, &setup.torch_device);
     Ok(setup)
+}
+
+fn is_cpu_only_package(root: &Path) -> bool {
+    root.join("cpu-only").is_file() || root.join("data").join("cpu-only").is_file()
 }
 
 fn persist_torch_device(data_dir: &std::path::Path, device: &str) {
@@ -270,7 +300,7 @@ fn detect_nvidia_gpu() -> Option<(String, String)> {
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
     hide_console_window(&mut cmd);
-    let name_out = cmd.output().ok()?;
+    let name_out = command_output_with_timeout(cmd, Duration::from_secs(10), "nvidia-smi").ok()?;
     if !name_out.status.success() {
         return None;
     }
@@ -283,7 +313,8 @@ fn detect_nvidia_gpu() -> Option<(String, String)> {
     let mut smi_cmd = Command::new(smi);
     smi_cmd.stdout(Stdio::piped()).stderr(Stdio::null());
     hide_console_window(&mut smi_cmd);
-    let smi_out = smi_cmd.output().ok()?;
+    let smi_out =
+        command_output_with_timeout(smi_cmd, Duration::from_secs(10), "nvidia-smi").ok()?;
     let smi_text = String::from_utf8_lossy(&smi_out.stdout);
     let cuda_version = parse_cuda_version(&smi_text).unwrap_or_else(|| "12.4".to_string());
 
@@ -332,12 +363,9 @@ fn cuda_tag_from_url(index_url: &str) -> &str {
     index_url.rsplit('/').next().unwrap_or("cu124")
 }
 
-/// Update pyvenv.cfg's `home` line to the actual Scripts directory of the
-/// bundled Python. The venv was created on the build machine, so `home` holds
-/// the builder's Python path (e.g. C:\Users\thale\...). pip validates that
-/// path before running and fails if it doesn't exist on the user's machine.
-/// We patch it once at runtime so every pip call works regardless of where
-/// the user extracted the zip.
+/// Update pyvenv.cfg to the bundled Python runtime. Windows venv launchers read
+/// this file before Python starts, so stale build-machine paths can prevent the
+/// backend from emitting any log output at all.
 fn patch_pyvenv_cfg(python: &Path) {
     let Some(scripts_dir) = python.parent() else {
         return;
@@ -345,17 +373,30 @@ fn patch_pyvenv_cfg(python: &Path) {
     let Some(venv_root) = scripts_dir.parent() else {
         return;
     };
+    let bundled_python = venv_root.join(if cfg!(windows) {
+        "python.exe"
+    } else {
+        "python"
+    });
+    if !bundled_python.is_file() || !venv_root.join("Lib").join("os.py").is_file() {
+        return;
+    }
     let cfg_path = venv_root.join("pyvenv.cfg");
     let Ok(content) = fs::read_to_string(&cfg_path) else {
         return;
     };
-    let scripts_str = scripts_dir.display().to_string();
+    let root_str = venv_root.display().to_string();
+    let python_str = bundled_python.display().to_string();
     let patched: String = content
         .lines()
         .map(|line| {
             let trimmed = line.trim_start();
             if trimmed.starts_with("home") && trimmed[4..].trim_start().starts_with('=') {
-                format!("home = {scripts_str}")
+                format!("home = {root_str}")
+            } else if trimmed.starts_with("executable")
+                && trimmed["executable".len()..].trim_start().starts_with('=')
+            {
+                format!("executable = {python_str}")
             } else {
                 line.to_string()
             }
@@ -389,7 +430,8 @@ fn install_cuda_torch(python: &Path, index_url: &str) -> Result<(), String> {
     let torchaudio_spec = format!("torchaudio==2.6.0+{tag}");
     // --ignore-installed: overwrites even a corrupted/partial install that
     // has no RECORD file. --no-deps: only replace torch/torchaudio wheels.
-    let output = Command::new(python)
+    let mut command = Command::new(python);
+    command
         .args([
             "-m",
             "pip",
@@ -403,9 +445,9 @@ fn install_cuda_torch(python: &Path, index_url: &str) -> Result<(), String> {
             "--quiet",
         ])
         .stdout(Stdio::null())
-        .stderr(Stdio::piped())
-        .output()
-        .map_err(|e| format!("failed to run pip: {e}"))?;
+        .stderr(Stdio::piped());
+    let output =
+        command_output_with_timeout(command, Duration::from_secs(20 * 60), "CUDA torch install")?;
 
     if output.status.success() {
         Ok(())
@@ -435,7 +477,8 @@ fn open_url(url: String) -> Result<(), String> {
         let mut cmd = Command::new("cmd");
         cmd.args(["/c", "start", "", &url]);
         hide_console_window(&mut cmd);
-        cmd.spawn().map_err(|e| format!("failed to open URL: {e}"))?;
+        cmd.spawn()
+            .map_err(|e| format!("failed to open URL: {e}"))?;
     }
     #[cfg(not(windows))]
     {
@@ -563,17 +606,43 @@ fn free_port() -> Result<u16, String> {
     Ok(port)
 }
 
-fn wait_for_health(port: u16, timeout: Duration) -> Result<(), String> {
+fn wait_for_health(port: u16, timeout: Duration, log_path: &Path) -> Result<(), String> {
     let deadline = Instant::now() + timeout;
     loop {
         if Instant::now() >= deadline {
-            return Err("backend did not become healthy before timeout".to_string());
+            let tail = file_tail(log_path, 30);
+            let hint = if tail.trim().is_empty() {
+                format!(
+                    "No backend log output was captured at {}.",
+                    log_path.display()
+                )
+            } else {
+                format!(
+                    "Last backend log lines from {}:\n{}",
+                    log_path.display(),
+                    tail
+                )
+            };
+            return Err(format!(
+                "backend did not become healthy within {} seconds.\n\n{}",
+                timeout.as_secs(),
+                hint
+            ));
         }
         if health_once(port).is_ok() {
             return Ok(());
         }
         thread::sleep(Duration::from_millis(250));
     }
+}
+
+fn file_tail(path: &Path, max_lines: usize) -> String {
+    fs::read_to_string(path)
+        .map(|text| {
+            let lines: Vec<&str> = text.lines().rev().take(max_lines).collect();
+            lines.into_iter().rev().collect::<Vec<_>>().join("\n")
+        })
+        .unwrap_or_default()
 }
 
 fn health_once(port: u16) -> Result<(), String> {
@@ -656,9 +725,8 @@ fn download_file_with_powershell(url: &str, target: &Path) -> Result<(), String>
         .stdout(Stdio::null())
         .stderr(Stdio::piped());
     hide_console_window(&mut command);
-    let output = command
-        .output()
-        .map_err(|e| format!("failed to start FFmpeg download: {e}"))?;
+    let output =
+        command_output_with_timeout(command, Duration::from_secs(5 * 60), "FFmpeg download")?;
     if output.status.success() && target.is_file() {
         Ok(())
     } else {
@@ -729,8 +797,7 @@ fn verify_ffmpeg(path: &Path) -> Result<(), String> {
         .stdout(Stdio::null())
         .stderr(Stdio::piped());
     hide_console_window(&mut command);
-    let output = command
-        .output()
+    let output = command_output_with_timeout(command, Duration::from_secs(15), "FFmpeg check")
         .map_err(|e| format!("failed to run FFmpeg at {}: {e}", path.display()))?;
     if output.status.success() {
         Ok(())
@@ -799,6 +866,51 @@ fn update_setup_config<const N: usize>(
         .map_err(|e| format!("failed to serialize setup config: {e}"))?;
     fs::write(&config_path, body + "\n")
         .map_err(|e| format!("failed to write {}: {e}", config_path.display()))
+}
+
+fn command_output_with_timeout(
+    mut command: Command,
+    timeout: Duration,
+    label: &str,
+) -> Result<Output, String> {
+    let mut child = command
+        .spawn()
+        .map_err(|e| format!("failed to start {label}: {e}"))?;
+    let deadline = Instant::now() + timeout;
+
+    loop {
+        if let Some(status) = child
+            .try_wait()
+            .map_err(|e| format!("failed to wait for {label}: {e}"))?
+        {
+            let mut stdout = Vec::new();
+            if let Some(mut pipe) = child.stdout.take() {
+                let _ = pipe.read_to_end(&mut stdout);
+            }
+
+            let mut stderr = Vec::new();
+            if let Some(mut pipe) = child.stderr.take() {
+                let _ = pipe.read_to_end(&mut stderr);
+            }
+
+            return Ok(Output {
+                status,
+                stdout,
+                stderr,
+            });
+        }
+
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(format!(
+                "{label} timed out after {} seconds",
+                timeout.as_secs()
+            ));
+        }
+
+        thread::sleep(Duration::from_millis(100));
+    }
 }
 
 #[cfg(windows)]

@@ -2,6 +2,7 @@ param(
   [string]$Configuration = "release",
   [string]$OutputRoot    = "dist",
   [string]$PackageName   = "StemDeck-Windows-x64",
+  [string]$PackageVersion,
   [switch]$SkipTauriBuild,
   [switch]$CpuOnly,
   [switch]$StripVenv
@@ -39,6 +40,100 @@ function Copy-Tree([string]$Source, [string]$Destination) {
   Copy-Item -Recurse -Force $Source $Destination
 }
 
+function Copy-TreeContents([string]$Source, [string]$Destination, [string[]]$ExcludeNames = @()) {
+  New-Item -ItemType Directory -Force $Destination | Out-Null
+  Get-ChildItem -LiteralPath $Source -Force |
+    Where-Object { $ExcludeNames -notcontains $_.Name } |
+    ForEach-Object {
+      Copy-Item -LiteralPath $_.FullName -Destination $Destination -Recurse -Force
+    }
+}
+
+function Set-PyvenvValue([string]$ConfigPath, [string]$Key, [string]$Value) {
+  $content = Get-Content -LiteralPath $ConfigPath
+  $pattern = "^\s*$([regex]::Escape($Key))\s*="
+  $line = "$Key = $Value"
+  $found = $false
+  $updated = foreach ($entry in $content) {
+    if ($entry -match $pattern) {
+      $found = $true
+      $line
+    } else {
+      $entry
+    }
+  }
+  if (-not $found) {
+    $updated += $line
+  }
+  $utf8NoBom = New-Object System.Text.UTF8Encoding $false
+  [System.IO.File]::WriteAllLines($ConfigPath, [string[]]$updated, $utf8NoBom)
+}
+
+function Get-PackageVersion {
+  if ($PackageVersion) {
+    return $PackageVersion.TrimStart("v")
+  }
+  $tauriConfig = Get-Content -LiteralPath (Join-Path $TauriDir "tauri.conf.json") -Raw |
+    ConvertFrom-Json
+  return [string]$tauriConfig.version
+}
+
+function Bundle-PythonRuntime([string]$VenvDir, [string]$VenvPython) {
+  $baseExecutable = (& $VenvPython -c "import sys; print(getattr(sys, '_base_executable', sys.executable))").Trim()
+  if (-not (Test-Path $baseExecutable)) {
+    throw "Could not locate base Python executable: $baseExecutable"
+  }
+  $baseHome = Split-Path -Parent $baseExecutable
+  $baseLib = Join-Path $baseHome "Lib"
+  $baseDlls = Join-Path $baseHome "DLLs"
+  if (-not (Test-Path $baseLib)) {
+    throw "Could not locate base Python standard library: $baseLib"
+  }
+
+  Write-Host "Bundling Python runtime from $baseHome..."
+  Copy-Item -Force $baseExecutable (Join-Path $VenvDir "python.exe")
+  $basePythonw = Join-Path $baseHome "pythonw.exe"
+  if (Test-Path $basePythonw) {
+    Copy-Item -Force $basePythonw (Join-Path $VenvDir "pythonw.exe")
+  }
+  Get-ChildItem -LiteralPath $baseHome -Filter "*.dll" -File -Force |
+    Copy-Item -Destination $VenvDir -Force
+  if (Test-Path $baseDlls) {
+    Copy-Tree $baseDlls (Join-Path $VenvDir "DLLs")
+  }
+  Copy-TreeContents $baseLib (Join-Path $VenvDir "Lib") @("site-packages")
+
+  $cfg = Join-Path $VenvDir "pyvenv.cfg"
+  Set-PyvenvValue $cfg "home" $VenvDir
+  Set-PyvenvValue $cfg "executable" (Join-Path $VenvDir "python.exe")
+}
+
+function Assert-Fresh-TauriBuild {
+  if (-not (Test-Path $TargetExe)) {
+    throw "Tauri executable not found at $TargetExe. Remove -SkipTauriBuild or build the NVIDIA package first."
+  }
+
+  $exe = Get-Item $TargetExe
+  $newerSources = @(
+    Get-ChildItem -Path (Join-Path $DesktopDir "ui") -File -Recurse
+    Get-ChildItem -Path (Join-Path $TauriDir "src") -File -Recurse
+    Get-Item (Join-Path $TauriDir "Cargo.toml")
+    Get-Item (Join-Path $TauriDir "tauri.conf.json")
+  ) | Where-Object { $_.LastWriteTimeUtc -gt $exe.LastWriteTimeUtc }
+
+  if ($newerSources.Count -gt 0) {
+    $list = ($newerSources | Select-Object -First 8 | ForEach-Object { "  - $($_.FullName)" }) -join "`n"
+    throw @"
+-SkipTauriBuild would package a stale StemDeck.exe.
+
+The existing executable is older than desktop UI/Tauri source files:
+$list
+
+Remove -SkipTauriBuild or run the NVIDIA package build first so the CPU package reuses a fresh executable.
+"@
+  }
+}
+
 Require-Command "node"
 Require-Command "npm"
 Require-Command "cargo"
@@ -64,11 +159,16 @@ foreach ($Dir in @("cache", "downloads", "ffmpeg", "jobs", "logs", "models")) {
   New-Item -ItemType Directory -Force (Join-Path $Stage "data\$Dir") | Out-Null
 }
 if ($CpuOnly) {
+  New-Item -ItemType File -Force (Join-Path $Stage "cpu-only") | Out-Null
   New-Item -ItemType File -Force (Join-Path $Stage "data\cpu-only") | Out-Null
 }
 
 Copy-Tree (Join-Path $Root "app") (Join-Path $BackendDir "app")
 Copy-Tree (Join-Path $Root "static") (Join-Path $BackendDir "static")
+$PackageVersion = Get-PackageVersion
+$VersionJson = @{ version = $PackageVersion } | ConvertTo-Json -Compress
+$utf8NoBom = New-Object System.Text.UTF8Encoding $false
+[System.IO.File]::WriteAllText((Join-Path $BackendDir "static\version.json"), $VersionJson + "`n", $utf8NoBom)
 Copy-Item -Force (Join-Path $Root "pyproject.toml") (Join-Path $BackendDir "pyproject.toml")
 Copy-Item -Force (Join-Path $Root "uv.lock") (Join-Path $BackendDir "uv.lock")
 Copy-Item -Force (Join-Path $Root "packaging\windows\README-WINDOWS.txt") (Join-Path $Stage "README-WINDOWS.txt")
@@ -94,6 +194,9 @@ if ($CpuOnly) {
 }
 
 & $PythonExe -c "import fastapi, uvicorn, yt_dlp, demucs, torch, torchaudio, librosa, pyloudnorm, soundfile"
+
+Bundle-PythonRuntime $PythonDir $PythonExe
+& $PythonExe -c "import sys, fastapi, uvicorn; print('Portable Python:', sys.executable)"
 
 if ($StripVenv) {
   Write-Host "Stripping venv of build-time artifacts..."
@@ -122,6 +225,8 @@ try {
     $env:CI = "true"  # Woodpecker sets CI=woodpecker; Tauri only accepts true/false
     rustup default stable
     npm run tauri build
+  } else {
+    Assert-Fresh-TauriBuild
   }
 } finally {
   Pop-Location
