@@ -3,7 +3,7 @@ import {
   setLoopStart, setLoopEnd, selectedStems, saveSelectedStems,
 } from "./state.js";
 import { STEM_NAMES } from "./constants.js";
-import { renderEmptyShell } from "./player.js";
+import { renderEmptyShell, buildStripStems } from "./player.js";
 import { wireJobForm } from "./job.js";
 import { wireTransportButtons } from "./transport.js";
 import { togglePlayPause, updateLoopRegionVisual } from "./transport.js";
@@ -55,6 +55,7 @@ function handleStemChoiceClick(stem) {
   }
   saveSelectedStems();
   refreshStemChoiceVisuals();
+  buildStripStems();
 }
 
 function wireStemChoiceButtons() {
@@ -147,6 +148,7 @@ function wireAppShellControls() {
     e.stopPropagation();
     document.getElementById("catalogToggle")?.click();
   });
+
 }
 
 // ─── Keyboard shortcuts ───
@@ -212,4 +214,5 @@ window.addEventListener("unhandledrejection", (e) => {
 
 // ─── Bootstrap ───
 
+buildStripStems();
 renderEmptyShell();
