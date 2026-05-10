@@ -62,6 +62,10 @@ FFMPEG_BIN = _env_path(
     "STEMDECK_FFMPEG",
     FFMPEG_DIR / ("ffmpeg.exe" if sys.platform.startswith("win") else "ffmpeg"),
 )
+FFPROBE_BIN = _env_path(
+    "STEMDECK_FFPROBE",
+    FFMPEG_DIR / ("ffprobe.exe" if sys.platform.startswith("win") else "ffprobe"),
+)
 DEMUCS_MODEL = os.environ.get("STEMDECK_DEMUCS_MODEL", "htdemucs_6s").strip() or "htdemucs_6s"
 DEMUCS_DEVICE = _detect_device()
 MAX_DURATION_SEC = max(60, _env_int("STEMDECK_MAX_DURATION_SEC", 1200))  # 20 min default
@@ -77,6 +81,11 @@ def ffmpeg_executable() -> str:
     keep working exactly as before.
     """
     return str(FFMPEG_BIN) if FFMPEG_BIN.is_file() else "ffmpeg"
+
+
+def ffprobe_executable() -> str:
+    """Return the preferred ffprobe executable (same bundled dir as ffmpeg)."""
+    return str(FFPROBE_BIN) if FFPROBE_BIN.is_file() else "ffprobe"
 
 
 def configure_portable_environment() -> None:
