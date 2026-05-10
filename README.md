@@ -4,7 +4,7 @@
 
 # StemDeck
 
-**Free, local AI stem separation. No account. No upload. No subscription.**
+**Free, local stem separation. No account. No upload. No subscription.**
 
 <div align="center">
   <a href="https://github.com/thcp/stemdeck/stargazers"><img src="https://img.shields.io/github/stars/thcp/stemdeck?style=flat-square" alt="GitHub Stars"></a>
