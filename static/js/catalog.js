@@ -199,6 +199,7 @@ function stateMetadataToTrack(state, fallbackTrack) {
     keyConfidence: state.key_confidence ?? fallbackTrack.keyConfidence,
     lufs: state.lufs ?? fallbackTrack.lufs,
     peakDb: state.peak_db ?? fallbackTrack.peakDb,
+    sourceUrl: state.source_url || fallbackTrack.sourceUrl,
   };
 }
 
@@ -309,7 +310,11 @@ async function loadTrackIntoStudio(trackId) {
   setCurrentTrack(trackId);
 
   const urlInput = document.getElementById("url");
-  if (urlInput && track.sourceUrl) urlInput.value = track.sourceUrl;
+  if (urlInput && track.sourceUrl) {
+    urlInput.value = track.sourceUrl.startsWith("local:")
+      ? track.sourceUrl.slice(6)
+      : track.sourceUrl;
+  }
 
   applyTrackInfoToPanel(track);
   wireUpAudio(trackId, track.audioStems, track.duration || 0, track.thumb);

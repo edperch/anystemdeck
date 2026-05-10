@@ -34,6 +34,7 @@ class Job:
     # download a single track containing just their chosen stems.
     selected_stems: list[str] = field(default_factory=list)
     mix_url: str | None = None  # populated when a strict subset was selected
+    source_url: str | None = None  # original URL or "local:<filename>" for file uploads
     error: str | None = None
     # Set by POST /api/jobs/{id}/cancel; consumed by pipeline stages.
     # Not surfaced via to_state() -- it's internal control state.
@@ -60,6 +61,7 @@ class Job:
             "stems": self.stems,
             "selected_stems": self.selected_stems,
             "mix_url": self.mix_url,
+            "source_url": self.source_url,
             "error": self.error,
         }
 

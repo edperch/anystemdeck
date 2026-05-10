@@ -90,10 +90,11 @@ steps:
         }
       - |
         $scanNote = "Windows portable packages were scanned with ClamAV in CI before upload."
-        $body = gh release view "$env:CI_COMMIT_TAG" --repo "thcp/stemdeck" --json body --jq ".body"
+        $bodyRaw = gh release view "$env:CI_COMMIT_TAG" --repo "thcp/stemdeck" --json body --jq ".body"
+        $body = ($bodyRaw -join "`n")
         if ($body -notlike "*$scanNote*") {
           $notesPath = Join-Path $env:TEMP "stemdeck-release-notes.md"
-          $updatedBody = (($body.TrimEnd()), "", "### Artifact scan", "", "- $scanNote") -join "`n"
+          $updatedBody = ($body.TrimEnd(), "", "### Artifact scan", "", "- $scanNote") -join "`n"
           Set-Content -Path $notesPath -Value $updatedBody -Encoding UTF8
           gh release edit "$env:CI_COMMIT_TAG" --repo "thcp/stemdeck" --notes-file $notesPath
         }

@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import shutil
+import subprocess
 from pathlib import Path
 
 from app.core.models import Job, JobCancelled
@@ -34,30 +35,58 @@ def _check_cancel(job: Job) -> None:
         raise JobCancelled()
 
 
-def _run_blocking(job: Job, url: str, job_dir: Path) -> None:
-    _check_cancel(job)
-    source = download(job, url, job_dir)
+def _prepare_local_source(job: Job, source: Path, job_dir: Path) -> Path:
+    """Transcode an MP3 local upload to 16-bit 44.1 kHz stereo WAV before
+    handing it to Demucs. Avoids silent failures from VBR MP3, non-standard
+    sample rates, or unusual channel layouts. WAV uploads are used as-is.
+
+    Deletes the original source.mp3 after a successful transcode."""
+    if source.suffix.lower() != ".mp3":
+        return source
+
+    from app.core.config import ffmpeg_executable
+
+    dest = job_dir / "source.wav"
+    _set(job, stage="Preparing audio...")
+    cmd = [
+        ffmpeg_executable(),
+        "-nostdin",
+        "-loglevel",
+        "error",
+        "-i",
+        str(source),
+        "-ar",
+        "44100",
+        "-ac",
+        "2",
+        "-sample_fmt",
+        "s16",
+        "-y",
+        str(dest),
+    ]
+    result = subprocess.run(cmd, capture_output=True, timeout=300)
+    if result.returncode != 0:
+        raise RuntimeError(
+            "ffmpeg transcode failed: " + result.stderr.decode("utf-8", errors="replace").strip()
+        )
+    source.unlink(missing_ok=True)
+    return dest
+
+
+def _run_common(job: Job, source: Path, job_dir: Path) -> None:
+    """Analyze → separate → collect → mix. Shared by both YouTube and local
+    upload pipelines after their respective source acquisition steps."""
     _check_cancel(job)
     analyze(job, source)
     _check_cancel(job)
     stems_root = separate(job, source, job_dir)
     found = collect(job, stems_root, job_dir)
     stems_dir = job_dir / "stems"
-    # Source download (100-300 MB) is no longer used by anything below
-    # -- both the original-complement and the selected-mix are built
-    # from the demucs-emitted stems. Reclaim disk before the ffmpeg
-    # amix steps in case they need scratch space.
+    # Source (100-300 MB or the local upload) is no longer needed after
+    # collect; delete it before the ffmpeg amix steps in case scratch space
+    # is tight.
     cleanup_source(job_dir)
     job.stems = [{"name": name, "url": f"/api/jobs/{job.id}/stems/{name}.wav"} for name in found]
-    # Subset post-processing. When the user kept all 6 stems, both of
-    # these are skipped -- the original is the sum of the stems and a
-    # mix would equal the original. When a strict subset was chosen:
-    #   - original.wav: complement of the selection (sum of unselected
-    #     stems) so the studio can play it alongside the isolated
-    #     selected stems and reconstruct the full song without doubling.
-    #   - mix.wav: ffmpeg amix of the selected stems for download.
-    # Update stage so the import-progress UI doesn't keep saying
-    # "Separating stems..." for the extra ~5-30 s ffmpeg adds.
     _check_cancel(job)
     _set(job, stage="Mixing tracks...")
     original_path = make_original_track(job, job_dir, stems_dir)
@@ -72,11 +101,20 @@ def _run_blocking(job: Job, url: str, job_dir: Path) -> None:
     _check_cancel(job)
     mix_path = make_selected_mix(job, stems_dir, found)
     if mix_path is not None:
-        # mix_path may point at mix.wav (multi-stem amix) or directly at
-        # one of the existing stem WAVs (single-stem short-circuit).
-        # Either way, .name gives us the URL segment.
         job.mix_url = f"/api/jobs/{job.id}/stems/{mix_path.name}"
     _check_cancel(job)
+
+
+def _run_blocking(job: Job, url: str, job_dir: Path) -> None:
+    _check_cancel(job)
+    source = download(job, url, job_dir)
+    _run_common(job, source, job_dir)
+
+
+def _run_local_blocking(job: Job, source_path: Path, job_dir: Path) -> None:
+    _check_cancel(job)
+    source = _prepare_local_source(job, source_path, job_dir)
+    _run_common(job, source, job_dir)
 
 
 def _write_metadata(job: Job, job_dir: Path) -> None:
@@ -99,38 +137,62 @@ def _write_metadata(job: Job, job_dir: Path) -> None:
 
 async def run_pipeline(job: Job, url: str, jobs_dir: Path) -> None:
     job_dir = jobs_dir / job.id
-    # One try/except covers everything from directory creation through pipeline
-    # execution. If anything before the lock raises, the job would otherwise
-    # stay stuck on `queued` forever -- transition to `error` instead.
     try:
         job_dir.mkdir(parents=True, exist_ok=True)
         async with _pipeline_lock:
             await asyncio.to_thread(_run_blocking, job, url, job_dir)
-    except JobCancelled:
-        logger.info("pipeline cancelled for job %s", job.id)
+    except Exception as e:
+        if not isinstance(e, JobCancelled) and not job.cancel_requested:
+            logger.exception("pipeline failed for job %s: %s", job.id, e)
+            _set(
+                job,
+                status="error",
+                stage="Error: Processing failed",
+                error="Audio processing failed. Please try another video.",
+            )
+            persist_registry(jobs_dir)
+            return
+        logger.info(
+            "pipeline cancelled%s for job %s",
+            " (wrapped)" if not isinstance(e, JobCancelled) else "",
+            job.id,
+        )
         _set(job, status="cancelled", stage="Cancelled")
         persist_registry(jobs_dir)
-        # Drop partial files so the disk reclaim is immediate.
         _rmtree(job_dir)
         return
+    _set(job, status="done", progress=1.0, stage="Done")
+    _write_metadata(job, job_dir)
+    persist_registry(jobs_dir)
+
+
+async def run_local_pipeline(job: Job, source_path: Path, jobs_dir: Path) -> None:
+    """Run the stem-separation pipeline for a locally uploaded file.
+    The job directory and source file are already present on disk (created
+    by the API handler before this task is scheduled)."""
+    job_dir = jobs_dir / job.id
+    try:
+        async with _pipeline_lock:
+            await asyncio.to_thread(_run_local_blocking, job, source_path, job_dir)
     except Exception as e:
-        # yt-dlp wraps hook exceptions in DownloadError; if the user cancelled
-        # mid-download the underlying cause is JobCancelled but it arrives here
-        # as a generic exception. Detect via the flag and route to cancelled.
-        if job.cancel_requested:
-            logger.info("pipeline cancelled (wrapped) for job %s", job.id)
-            _set(job, status="cancelled", stage="Cancelled")
+        if not isinstance(e, JobCancelled) and not job.cancel_requested:
+            logger.exception("pipeline failed for job %s: %s", job.id, e)
+            _set(
+                job,
+                status="error",
+                stage="Error: Processing failed",
+                error="Audio processing failed. Please try again.",
+            )
             persist_registry(jobs_dir)
-            _rmtree(job_dir)
             return
-        logger.exception("pipeline failed for job %s: %s", job.id, e)
-        _set(
-            job,
-            status="error",
-            stage="Error: Processing failed",
-            error="Audio processing failed. Please try another video.",
+        logger.info(
+            "pipeline cancelled%s for job %s",
+            " (wrapped)" if not isinstance(e, JobCancelled) else "",
+            job.id,
         )
+        _set(job, status="cancelled", stage="Cancelled")
         persist_registry(jobs_dir)
+        _rmtree(job_dir)
         return
     _set(job, status="done", progress=1.0, stage="Done")
     _write_metadata(job, job_dir)
