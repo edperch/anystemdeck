@@ -1,6 +1,6 @@
 [package]
 name = "stemdeck"
-version = "0.1.0-alpha.0"
+version = "0.3.0-alpha.1"
 description = "StemDeck desktop launcher"
 authors = ["StemDeck contributors"]
 edition = "2021"
