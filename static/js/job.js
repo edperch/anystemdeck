@@ -305,16 +305,6 @@ async function cancelCurrentJob() {
   }
 }
 
-function sanitizeFilename(name) {
-  // Strip extension, collapse whitespace, cap at 120 chars — mirrors the
-  // backend _sanitize_title() so title and sourceUrl match on both sides.
-  return name
-    .replace(/\.[^.]+$/, "")
-    .replace(/\s+/g, " ")
-    .trim()
-    .slice(0, 120);
-}
-
 export function wireJobForm() {
   jobCancelBtn.addEventListener("click", cancelCurrentJob);
 
@@ -322,63 +312,35 @@ export function wireJobForm() {
     e.preventDefault();
     reset();
     setSubmitProcessing(true);
-
-    const fileInput = document.getElementById("fileInput");
-    const file = fileInput?.files?.[0] ?? null;
-    const sanitized = file ? sanitizeFilename(file.name) : null;
-    const sourceUrl = file ? `local:${sanitized}` : urlInput.value;
-    const displayTitle = sanitized ?? (urlInput.value || "Processing track");
-
     const postUrlText = document.getElementById("post-url-text");
-    if (postUrlText) postUrlText.textContent = displayTitle;
+    if (postUrlText) postUrlText.textContent = urlInput.value;
 
-    // Show progress box immediately for file uploads — the HTTP upload of a
-    // large file takes time and the UI would otherwise appear frozen.
-    if (file) {
-      jobBox.classList.remove("hidden");
-      jobCancelBtn.classList.add("hidden");
-      jobDetailEl.textContent = "Uploading…";
-      startPhraseRotation("queued");
-      lastStatus = "queued";
-    }
-
-    let fetchInit;
-    if (file) {
-      const fd = new FormData();
-      fd.append("file", file);
-      fd.append("stems", JSON.stringify([...selectedStems]));
-      fetchInit = { method: "POST", body: fd };
-    } else {
-      fetchInit = {
+    let jobId;
+    try {
+      const res = await fetch("/api/jobs", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           url: urlInput.value,
           // Backend uses this to decide whether to ffmpeg-amix a
-          // "selected stems" track (mix.wav) at the end of the pipeline.
+          // "selected stems" track (mix.wav) at the end of the
+          // pipeline. Sent as an array of stem names.
           stems: [...selectedStems],
         }),
-      };
-    }
-
-    let jobId;
-    try {
-      const res = await fetch("/api/jobs", fetchInit);
+      });
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || res.statusText);
       jobId = data.job_id;
     } catch (err) {
-      if (file) jobBox.classList.add("hidden");
       showError(`Failed to start job: ${err.message}`);
       setSubmitProcessing(false);
       return;
     }
-
     setCurrentJobId(jobId);
-    jobSources.set(jobId, sourceUrl);
+    jobSources.set(jobId, urlInput.value);
     addTrackToLibrary({
       id: jobId,
-      title: displayTitle,
+      title: urlInput.value || "Processing track",
       channel: "Processing",
       thumb: "",
       stems: [...selectedStems],
@@ -391,20 +353,14 @@ export function wireJobForm() {
       keyConfidence: null,
       lufs: null,
       peakDb: null,
-      sourceUrl,
+      sourceUrl: urlInput.value,
     });
     setCurrentTrack(jobId);
 
-    if (!file) {
-      // YouTube path: keep progress box hidden until SSE events arrive.
-      jobBox.classList.add("hidden");
-      jobCancelBtn.classList.add("hidden");
-      startPhraseRotation("queued");
-      lastStatus = "queued";
-    } else {
-      // File path: clear the upload message — SSE will take over from here.
-      jobDetailEl.textContent = "";
-    }
+    jobBox.classList.add("hidden");
+    jobCancelBtn.classList.add("hidden");
+    startPhraseRotation("queued");
+    lastStatus = "queued";
 
     startJobPolling(jobId);
     connectEvents(jobId);
