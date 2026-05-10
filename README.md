@@ -32,17 +32,27 @@ If you find StemDeck useful, consider [buying the maker a coffee](https://buymea
 
 ## Features
 
-- **6-stem separation** via Demucs `htdemucs_6s`. Auto-detects the best Torch device (CUDA on NVIDIA, MPS on Apple Silicon, CPU fallback).
-- **YouTube + local file import.** Paste a YouTube URL or drop an MP3/WAV directly onto the import bar.
-- **DAW-style waveform editor.** Min/max sample rendering across all stems with shared normalization, zoom in/out/Fit, loop drag on the ruler, gold playhead overlay, and stem-aligned lanes.
-- **Stem subset extraction.** Click stem chips to pick which stems to keep. Filter-chip semantics: clicking from "all selected" snaps to "only this one"; subsequent clicks add or remove.
-- **"Original" backing track.** When you pick a subset, a 7th lane contains the *complement* (full song minus selected stems), perfect for A/B reference without doubling.
-- **Downloadable selected mix.** A single `mix.wav` of just your selected stems, summed via ffmpeg amix.
-- **Per-stem mixer.** Volume fader, mute, solo, and "monitor" (solo-only) per stem. State syncs between the preview mixer and the stems sidebar.
-- **Live VU per stem.** Post-gain RMS via Web Audio analysers on each stem's gain node with peak hold and slow falloff.
-- **Song analysis.** BPM (librosa beat tracker), key + scale + confidence (Albrecht-Shanahan profiles with root-prominence weighting), integrated LUFS (BS.1770), and sample peak in dBFS.
-- **Cancellable jobs.** Cancel mid-pipeline and the runner terminates the active subprocess immediately, deletes the partial job dir, and returns to ready.
-- **Library panel.** Folder-based track organisation with drag-and-drop, search, and trash.
+**6-stem separation** via Demucs `htdemucs_6s`, with auto-detection of the best Torch device (CUDA on NVIDIA, MPS on Apple Silicon, CPU fallback).
+
+**YouTube and local file import.** Paste a YouTube URL or drop an MP3 or WAV directly onto the import bar.
+
+**DAW-style waveform editor** with min/max sample rendering across all stems, shared normalization, zoom in/out/Fit, loop drag on the ruler, gold playhead overlay, and stem-aligned lanes.
+
+**Stem subset extraction.** Click stem chips to choose which stems to keep. Clicking from "all selected" snaps to "only this one"; subsequent clicks add or remove.
+
+**"Original" backing track.** When you pick a subset, a 7th lane contains the complement (full song minus selected stems), perfect for A/B reference without doubling.
+
+**Downloadable selected mix.** A single `mix.wav` of just your selected stems, summed via ffmpeg amix.
+
+**Per-stem mixer** with volume fader, mute, solo, and "monitor" (solo-only) per stem. State syncs between the preview mixer and the stems sidebar.
+
+**Live VU meters** per stem. Post-gain RMS via Web Audio analysers with peak hold and slow falloff.
+
+**Song analysis** including BPM (librosa beat tracker), key, scale, and confidence (Albrecht-Shanahan profiles), integrated LUFS (BS.1770), and sample peak in dBFS.
+
+**Cancellable jobs.** Cancel mid-pipeline and the runner terminates the active subprocess immediately, deletes the partial job dir, and returns to ready.
+
+**Library panel** with folder-based track organisation, drag-and-drop, search, and trash.
 
 ---
 
@@ -81,26 +91,13 @@ Pre-built portable zips are attached to each [GitHub Release](https://github.com
 | `StemDeck-Windows-x64.zip` | CPU only | ~700 MB |
 | `StemDeck-Windows-x64.NVIDIA.zip` | NVIDIA CUDA | ~1.6 GB |
 
-**Running it:**
-1. Extract the zip anywhere.
-2. Run `StemDeck.exe`.
-3. On first launch the app verifies the bundled Python runtime, downloads FFmpeg and the Demucs model (~170 MB). Subsequent launches skip this and start in seconds.
-
-Everything is self-contained. No Python, no system dependencies required.
+Extract the zip anywhere, run `StemDeck.exe`. On first launch the app verifies the bundled Python runtime and downloads FFmpeg and the Demucs model (~170 MB). Subsequent launches skip this and start in seconds. Everything is self-contained; no Python or system dependencies required.
 
 ---
 
 ## Technologies
 
-- **[Python 3.10+](https://python.org)**: backend runtime, managed via [uv](https://github.com/astral-sh/uv).
-- **[FastAPI](https://fastapi.tiangolo.com)**: REST + Server-Sent Events API.
-- **[Demucs](https://github.com/facebookresearch/demucs)** (`htdemucs_6s`): Meta AI's neural network for 6-stem source separation.
-- **[yt-dlp](https://github.com/yt-dlp/yt-dlp)**: audio download from YouTube URLs.
-- **[FFmpeg](https://ffmpeg.org)**: audio transcoding, amix, and analysis.
-- **[librosa](https://librosa.org)**: BPM detection and chroma-based key analysis.
-- **[pyloudnorm](https://github.com/csteinmetz1/pyloudnorm)**: ITU-R BS.1770 integrated loudness (LUFS).
-- **[Tauri v2](https://tauri.app)**: Rust/WebView2 desktop shell for the Windows app.
-- **Vanilla JS + Web Audio API**: frontend with no framework and no build step. Waveforms are rendered on `<canvas>` using min/max sample rendering.
+StemDeck is built on **[Python 3.10+](https://python.org)** managed via **[uv](https://github.com/astral-sh/uv)**, with a **[FastAPI](https://fastapi.tiangolo.com)** backend serving REST and Server-Sent Events. Stem separation uses **[Demucs](https://github.com/facebookresearch/demucs)** (`htdemucs_6s`), Meta AI's open-source 6-stem neural network. YouTube audio is fetched via **[yt-dlp](https://github.com/yt-dlp/yt-dlp)**; transcoding and mixing use **[FFmpeg](https://ffmpeg.org)**. BPM detection and key analysis run on **[librosa](https://librosa.org)**; loudness measurement uses **[pyloudnorm](https://github.com/csteinmetz1/pyloudnorm)** (ITU-R BS.1770). The Windows desktop shell is **[Tauri v2](https://tauri.app)** (Rust/WebView2). The frontend is vanilla JS with the Web Audio API, no framework and no build step; waveforms are rendered on `<canvas>` using min/max sample rendering.
 
 *Thanks to the creators and maintainers of all the open-source libraries that make StemDeck possible.*
 
@@ -112,10 +109,7 @@ Everything is self-contained. No Python, no system dependencies required.
 
 ### Prerequisites
 
-- Python 3.10+
-- `ffmpeg` on `PATH`
-- [uv](https://github.com/astral-sh/uv)
-- ~170 MB free disk for the Demucs model (downloaded on first run)
+Python 3.10 or newer, `ffmpeg` on your PATH, and [uv](https://github.com/astral-sh/uv). Around 170 MB of free disk for the Demucs model, which downloads automatically on first run.
 
 ### macOS / Linux (one-shot)
 
@@ -163,12 +157,8 @@ Stems land in `./jobs/` on the host. Demucs weights are cached in a named volume
 2. Paste a YouTube URL **or** drop an MP3/WAV file, then click **Process**.
 3. Wait through `Uploading...` / `Downloading...` → `Analyzing...` → `Separating...` → `Mixing tracks...`.
 4. When done, the studio dashboard appears. If you picked a subset, the first lane is **Original** (full song minus your selection); the rest are your isolated stems.
-5. Mix:
-   - **Play / Pause / Stop**: master transport
-   - **M** mute · **S** solo (additive) · **Monitor**: solo-only this stem
-   - **Vol fader**: drag for 1:1; double-click resets to 0 dB; `Shift+wheel` coarse, `wheel` fine
-   - **Reset / Mute / Solo** toolbar buttons act on all stems at once
-6. Drag on the ruler to define a loop region; click `Loop` to enable. `+` / `-` / `Fit` or `Ctrl/Cmd+wheel` to zoom.
+5. Mix: **Play/Pause/Stop** controls the master transport. **M** mutes a stem, **S** solos it (additive; multiple solos stay audible), **Monitor** solos only that stem and clears others. The volume fader moves 1:1 with drag; double-click resets to 0 dB; `Shift+wheel` gives coarse adjustment and plain wheel gives fine. The **Reset**, **Mute**, and **Solo** toolbar buttons act on all stems at once.
+6. Drag on the ruler to define a loop region; click `Loop` to enable. Use `+` / `-` / `Fit` or `Ctrl/Cmd+wheel` to zoom.
 7. **Download Mix** in the footer gives you a WAV of your selected stems summed together.
 
 **Keyboard shortcuts:** `Space` play/pause · `[` seek -5s · `]` seek +5s · `L` loop · `I` loop in · `O` loop out
@@ -203,12 +193,17 @@ Stems land in `./jobs/` on the host. Demucs weights are cached in a named volume
 
 ## Troubleshooting
 
-- **`ffmpeg: command not found`**: install ffmpeg and restart (`./run.sh restart`).
-- **`WARNING: [youtube] No supported JavaScript runtime`**: install deno (`brew install deno` on macOS) and restart. Downloads still work without it but may pick suboptimal formats.
-- **First separation is very slow**: Demucs downloads `htdemucs_6s` weights (~170 MB) on first run; cached afterwards.
-- **Demucs runs on CPU only**: check the startup log for `device=mps` or `device=cuda`. If you see `cpu`, your torch install may be CPU-only.
-- **Page reloaded mid-job**: the job keeps running server-side. Wait for it to finish, then resubmit.
-- **`./run.sh: Permission denied`**: run `chmod +x run.sh`.
+**`ffmpeg: command not found`:** install ffmpeg and restart with `./run.sh restart`.
+
+**`WARNING: [youtube] No supported JavaScript runtime`:** install deno (`brew install deno` on macOS) and restart. Downloads still work without it but may pick suboptimal formats.
+
+**First separation is very slow:** Demucs downloads `htdemucs_6s` weights (~170 MB) on first run; cached afterwards.
+
+**Demucs runs on CPU only:** check the startup log for `device=mps` or `device=cuda`. If you see `cpu`, your torch install may be CPU-only.
+
+**Page reloaded mid-job:** the job keeps running server-side. Wait for it to finish, then resubmit.
+
+**`./run.sh: Permission denied`:** run `chmod +x run.sh`.
 
 ---
 
