@@ -143,7 +143,7 @@ async def _create_youtube_job(request: Request) -> dict[str, str]:
     if not selected:
         selected = list(STEM_NAMES)
 
-    job = registry_register(Job(id=uuid.uuid4().hex[:12], selected_stems=selected))
+    job = registry_register(Job(id=uuid.uuid4().hex[:12], selected_stems=selected, source_url=url))
     task = asyncio.create_task(run_pipeline(job, url, JOBS_DIR))
     task.add_done_callback(_task_error_cb)
     return {"job_id": job.id}
@@ -225,12 +225,14 @@ async def _create_local_job(request: Request) -> dict[str, str]:
         raise
 
     title = _sanitize_title(filename)
+    local_source_url = f"local:{title}"
     job = registry_register(
         Job(
             id=job_id,
             selected_stems=selected,
             title=title,
             duration_sec=duration,
+            source_url=local_source_url,
         )
     )
     task = asyncio.create_task(run_local_pipeline(job, source_path, JOBS_DIR))
