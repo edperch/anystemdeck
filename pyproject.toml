@@ -24,6 +24,9 @@ dependencies = [
     # post-analysis loudness card. Pure Python, depends on scipy which
     # librosa already pulls in.
     "pyloudnorm>=0.1.1",
+    # FastAPI multipart/form-data (file uploads) unconditionally require
+    # python-multipart — it is not an optional extra.
+    "python-multipart>=0.0.9",
 ]
 
 [project.optional-dependencies]
