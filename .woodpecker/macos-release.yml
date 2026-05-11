@@ -30,8 +30,13 @@ steps:
     commands:
       - . ./.macos-release.env
       - command -v zstd
+      - |
+        command -v uv >/dev/null 2>&1 || brew install uv
+        uv python install cpython-3.12-macos-aarch64-none
+        ARM64_PYTHON="$(uv python find cpython-3.12-macos-aarch64-none)"
+        echo "ARM64_PYTHON=$ARM64_PYTHON" >> .macos-release.env
       - scripts/macos/make-iconset.sh
-      - ARCH=arm64 VERSION="$VERSION" scripts/macos/make-runtime-pack.sh
+      - . ./.macos-release.env && ARCH=arm64 VERSION="$VERSION" PYTHON_BIN="$ARM64_PYTHON" scripts/macos/make-runtime-pack.sh
       - ARCH=arm64 VERSION="$VERSION" scripts/macos/make-app.sh
       - ARCH=arm64 VERSION="$VERSION" scripts/macos/make-dmg.sh
 
