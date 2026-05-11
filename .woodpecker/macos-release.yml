@@ -24,6 +24,9 @@ steps:
     image: bash
     depends_on:
       - prepare-macos-version
+    environment:
+      SSL_CERT_FILE: /etc/ssl/cert.pem
+      REQUESTS_CA_BUNDLE: /etc/ssl/cert.pem
     commands:
       - . ./.macos-release.env
       - command -v zstd
@@ -36,6 +39,9 @@ steps:
     image: bash
     depends_on:
       - prepare-macos-version
+    environment:
+      SSL_CERT_FILE: /etc/ssl/cert.pem
+      REQUESTS_CA_BUNDLE: /etc/ssl/cert.pem
     commands:
       - . ./.macos-release.env
       - command -v zstd
