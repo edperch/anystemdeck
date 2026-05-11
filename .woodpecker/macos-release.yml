@@ -46,7 +46,12 @@ steps:
         fi
       - rustup default stable
       - rustup target add x86_64-apple-darwin
-      - ARCH=x64 VERSION="$VERSION" scripts/macos/make-runtime-pack.sh
+      - |
+        command -v uv >/dev/null 2>&1 || brew install uv
+        uv python install cpython-3.12-macos-x86_64-none
+        X64_PYTHON="$(uv python find cpython-3.12-macos-x86_64-none)"
+        echo "X64_PYTHON=$X64_PYTHON" >> .macos-release.env
+      - . ./.macos-release.env && ARCH=x64 VERSION="$VERSION" PYTHON_BIN="$X64_PYTHON" scripts/macos/make-runtime-pack.sh
       - ARCH=x64 VERSION="$VERSION" scripts/macos/make-app.sh
       - ARCH=x64 VERSION="$VERSION" scripts/macos/make-dmg.sh
 
