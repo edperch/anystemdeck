@@ -58,8 +58,8 @@ fi
 RESOURCES="${APP_DIR}/Contents/Resources"
 mkdir -p "$RESOURCES"
 
-if [[ -f "$BUILD_DIR/runtime-manifest.json" ]]; then
-  cp "$BUILD_DIR/runtime-manifest.json" "$RESOURCES/runtime-manifest.json"
+if [[ -f "$BUILD_DIR/runtime-manifest-${ARCH}.json" ]]; then
+  cp "$BUILD_DIR/runtime-manifest-${ARCH}.json" "$RESOURCES/runtime-manifest.json"
 else
   cp "$REPO_ROOT/desktop/ui/runtime-manifest.json" "$RESOURCES/runtime-manifest.json"
 fi
@@ -68,5 +68,5 @@ if [[ -f "$REPO_ROOT/packaging/macos/THIRD_PARTY_NOTICES.txt" ]]; then
   cp "$REPO_ROOT/packaging/macos/THIRD_PARTY_NOTICES.txt" "$RESOURCES/THIRD_PARTY_NOTICES.txt"
 fi
 
-echo "$APP_DIR" > "$BUILD_DIR/app-path.txt"
+echo "$APP_DIR" > "$BUILD_DIR/app-path-${ARCH}.txt"
 echo "==> App ready: $APP_DIR"

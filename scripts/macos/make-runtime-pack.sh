@@ -7,7 +7,7 @@ VERSION="${VERSION#v}"
 RELEASE_BASE_URL="${RELEASE_BASE_URL:-https://github.com/thcp/stemdeck/releases/download/v${VERSION}}"
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 BUILD_DIR="${REPO_ROOT}/.build"
-STAGING="${BUILD_DIR}/runtime-staging"
+STAGING="${BUILD_DIR}/runtime-staging-${ARCH}"
 RUNTIME_DIR="${STAGING}/runtime"
 PYTHON_DIR="${RUNTIME_DIR}/python"
 BACKEND_DIR="${RUNTIME_DIR}/backend"
@@ -177,7 +177,7 @@ SIZE="$(stat -f%z "$ARCHIVE_PATH")"
 SHA256="$(shasum -a 256 "$ARCHIVE_PATH" | awk '{print $1}')"
 RUNTIME_URL="${RELEASE_BASE_URL}/${ARCHIVE_NAME}"
 
-cat > "${BUILD_DIR}/runtime-manifest.json" <<JSON
+cat > "${BUILD_DIR}/runtime-manifest-${ARCH}.json" <<JSON
 {
   "version": "${VERSION}",
   "arch": "${ARCH}",
@@ -192,4 +192,4 @@ echo "==> Runtime pack ready"
 echo "Archive:  ${ARCHIVE_PATH}"
 echo "Size:     ${SIZE}"
 echo "SHA256:   ${SHA256}"
-echo "Manifest: ${BUILD_DIR}/runtime-manifest.json"
+echo "Manifest: ${BUILD_DIR}/runtime-manifest-${ARCH}.json"
