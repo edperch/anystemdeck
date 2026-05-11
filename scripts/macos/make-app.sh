@@ -33,6 +33,10 @@ sed -i '' "s/\"version\": \".*\"/\"version\": \"${VERSION}\"/" "$REPO_ROOT/deskt
 
 cd "$REPO_ROOT/desktop"
 
+# Tauri CLI reads CI env var as a boolean flag; Woodpecker sets CI=woodpecker
+# which fails the boolean parser. Force a valid value.
+export CI=true
+
 npm ci
 if [[ "$ARCH" == "arm64" ]]; then
   npx tauri build --bundles app --target aarch64-apple-darwin
