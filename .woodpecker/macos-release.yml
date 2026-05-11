@@ -99,7 +99,7 @@ steps:
       - |
         for arch in arm64 x64; do
           mountpoint="$(mktemp -d /tmp/stemdeck-dmg.XXXXXX)"
-          hdiutil attach ".build/macos-dist/StemDeck-macOS-${arch}.dmg" -readonly -nobrowse -mountpoint "$mountpoint"
+          hdiutil attach ".build/macos-dist/StemDeck-macOS-$arch.dmg" -readonly -nobrowse -mountpoint "$mountpoint"
           trap 'hdiutil detach "$mountpoint" >/dev/null 2>&1 || true; rmdir "$mountpoint" >/dev/null 2>&1 || true' EXIT
           test -d "$mountpoint/StemDeck.app"
           test -L "$mountpoint/Applications"
