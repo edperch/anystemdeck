@@ -119,9 +119,8 @@ echo "==> Python: $("$PYTHON_BIN" --version)"
 echo "==> Python architecture: ${PYTHON_MACHINE}"
 "$PYTHON_BIN" -m venv --copies --without-pip "$PYTHON_DIR"
 copy_python_runtime_libs "$PYTHON_BIN" "$PYTHON_DIR"
-"$PYTHON_DIR/bin/python" -m ensurepip --upgrade --default-pip
-"$PYTHON_DIR/bin/python" -m pip install --upgrade pip setuptools wheel
-"$PYTHON_DIR/bin/python" -m pip install "$REPO_ROOT"
+uv pip install --python "$PYTHON_DIR/bin/python" pip setuptools wheel
+uv pip install --python "$PYTHON_DIR/bin/python" "$REPO_ROOT"
 
 echo "==> Verifying runtime imports"
 "$PYTHON_DIR/bin/python" - <<'PY'
@@ -150,7 +149,7 @@ JSON
 
 echo "==> Capturing dependency inventory"
 mkdir -p "$RUNTIME_DIR/licenses"
-"$PYTHON_DIR/bin/python" -m pip list --format=json > "$RUNTIME_DIR/licenses/pip-list.json"
+uv pip list --python "$PYTHON_DIR/bin/python" --format=json > "$RUNTIME_DIR/licenses/pip-list.json"
 
 cat > "$RUNTIME_DIR/runtime-manifest.json" <<JSON
 {
