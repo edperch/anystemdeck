@@ -291,10 +291,10 @@ Issues, feature suggestions, and pull requests are welcome. See open issues for 
 
 ## Star History
 
-<a href="https://www.star-history.com/?type=date&repos=thcp%2Fstemdeck">
+<a href="https://www.star-history.com/?repos=stemdeckapp%2Fstemdeck&type=date&legend=top-left">
  <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=thcp/stemdeck&type=date&theme=dark&legend=top-left" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=thcp/stemdeck&type=date&legend=top-left" />
-   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=thcp/stemdeck&type=date&legend=top-left" />
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=stemdeckapp/stemdeck&type=date&theme=dark&legend=top-left" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=stemdeckapp/stemdeck&type=date&legend=top-left" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=stemdeckapp/stemdeck&type=date&legend=top-left" />
  </picture>
 </a>
