@@ -114,7 +114,6 @@ steps:
     image: bash
     when:
       - event: release
-      - event: tag
     depends_on:
       - inspect-macos-artifacts
     environment:

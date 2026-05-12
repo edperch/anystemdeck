@@ -75,7 +75,6 @@ steps:
     image: powershell
     when:
       - event: release
-      - event: tag
     depends_on:
       - scan-windows-artifacts
     environment:
