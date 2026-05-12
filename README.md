@@ -24,6 +24,8 @@ Drop an MP3 or WAV, or paste a YouTube URL. StemDeck splits the audio into up to
 
 > StemDeck is a free, open alternative to cloud stem-splitters like Moises and LALAL.AI. No account, no quota, no upload, no subscription. If you mainly want stems for personal study and prefer to keep things local and free, StemDeck should be enough. If you need the polish, the mobile app, or the extra musician tooling, the commercial products are a better fit.
 
+![StemDeck screenshot](imgs/screenshot/stemdeck.png)
+
 If you find StemDeck useful, consider [buying the maker a coffee](https://buymeacoffee.com/tha.les); these donations are being used to random acts of kindness toward others 
 
 ---
