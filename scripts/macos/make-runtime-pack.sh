@@ -32,49 +32,12 @@ if [[ -z "$PYTHON_BIN" ]]; then
   done
 fi
 
-for cmd in shasum tar "$PYTHON_BIN"; do
+for cmd in ditto shasum tar "$PYTHON_BIN"; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
     echo "ERROR: required command not found on PATH: $cmd" >&2
     exit 1
   fi
 done
-
-copy_python_runtime_libs() {
-  local source_python="$1"
-  local venv_dir="$2"
-  local lib_dir="${venv_dir}/lib"
-  mkdir -p "$lib_dir"
-
-  "$source_python" - <<'PY' | while IFS= read -r path; do
-import os
-import sys
-import sysconfig
-
-names = [
-    sysconfig.get_config_var("LDLIBRARY"),
-    f"libpython{sys.version_info.major}.{sys.version_info.minor}.dylib",
-]
-dirs = [
-    sysconfig.get_config_var("LIBDIR"),
-    os.path.join(sys.base_prefix, "lib"),
-    os.path.join(os.path.dirname(sys.executable), "..", "lib"),
-]
-seen = set()
-for directory in dirs:
-    if not directory:
-        continue
-    directory = os.path.abspath(directory)
-    for name in names:
-        if not name:
-            continue
-        path = os.path.join(directory, name)
-        if os.path.isfile(path) and path not in seen:
-            seen.add(path)
-            print(path)
-PY
-    cp -f "$path" "$lib_dir/"
-  done
-}
 
 PYTHON_VERSION="$("$PYTHON_BIN" - <<'PY'
 import sys
@@ -114,17 +77,65 @@ fi
 rm -rf "$STAGING"
 mkdir -p "$PYTHON_DIR" "$BACKEND_DIR" "$BUILD_DIR"
 
-echo "==> Creating Python runtime (${ARCH})"
+echo "==> Bundling Python installation (${ARCH})"
 echo "==> Python: $("$PYTHON_BIN" --version)"
 echo "==> Python architecture: ${PYTHON_MACHINE}"
-"$PYTHON_BIN" -m venv --copies --without-pip "$PYTHON_DIR"
-copy_python_runtime_libs "$PYTHON_BIN" "$PYTHON_DIR"
-uv pip install --python "$PYTHON_DIR/bin/python" pip setuptools wheel
-uv pip install --python "$PYTHON_DIR/bin/python" "$REPO_ROOT"
 
-echo "==> Verifying runtime imports"
-"$PYTHON_DIR/bin/python" - <<'PY'
-import importlib
+# Get the full PBS (python-build-standalone) installation root.
+# This directory has the complete stdlib in lib/pythonX.Y/ — unlike a venv,
+# which only creates site-packages/ and relies on the original base_prefix
+# (a path that won't exist on user machines) for stdlib.
+PYTHON_BASE_PREFIX="$("$PYTHON_BIN" - <<'PY'
+import sys
+print(sys.base_prefix)
+PY
+)"
+echo "==> Python base prefix: ${PYTHON_BASE_PREFIX}"
+
+if [[ ! -d "${PYTHON_BASE_PREFIX}/lib" ]]; then
+  echo "ERROR: Python base prefix has no lib/ dir: ${PYTHON_BASE_PREFIX}" >&2
+  echo "  Make sure PYTHON_BIN points to a python-build-standalone (UV) Python." >&2
+  exit 1
+fi
+
+# Verify the stdlib is actually present in base_prefix before copying.
+STDLIB_CHECK="$("$PYTHON_BIN" - <<'PY'
+import sys, pathlib
+ver = f"python{sys.version_info.major}.{sys.version_info.minor}"
+p = pathlib.Path(sys.base_prefix) / "lib" / ver / "encodings" / "__init__.py"
+print("ok" if p.is_file() else f"missing:{p}")
+PY
+)"
+if [[ "$STDLIB_CHECK" != "ok" ]]; then
+  echo "ERROR: stdlib not found in base_prefix (${STDLIB_CHECK})" >&2
+  echo "  base_prefix: ${PYTHON_BASE_PREFIX}" >&2
+  exit 1
+fi
+
+# Copy the entire PBS Python installation into the runtime bundle.
+# ditto preserves symlinks, HFS+ metadata, and extended attributes.
+ditto "$PYTHON_BASE_PREFIX" "$PYTHON_DIR"
+
+# PBS Python ships an EXTERNALLY-MANAGED marker that blocks uv from installing
+# packages into it. Remove it so we can treat this copy as our own install.
+find "$PYTHON_DIR/lib" -name "EXTERNALLY-MANAGED" -delete
+
+echo "==> Installing packages into bundled Python"
+# --system is required because $PYTHON_DIR is not a venv (it's a full Python install).
+uv pip install --system --python "$PYTHON_DIR/bin/python" pip setuptools wheel
+uv pip install --system --python "$PYTHON_DIR/bin/python" "$REPO_ROOT"
+
+echo "==> Verifying stdlib and imports"
+PYTHON_DIR="$PYTHON_DIR" PYTHONHOME="$PYTHON_DIR" "$PYTHON_DIR/bin/python" - <<'PY'
+import importlib, os, pathlib, sys
+
+ver = f"python{sys.version_info.major}.{sys.version_info.minor}"
+stdlib = pathlib.Path(os.environ["PYTHON_DIR"]) / "lib" / ver
+if not (stdlib / "encodings" / "__init__.py").is_file():
+    print(f"ERROR: encodings not found in {stdlib}", file=sys.stderr)
+    sys.exit(1)
+print(f"  stdlib OK at {stdlib}")
+
 packages = [
     "fastapi", "uvicorn", "yt_dlp", "demucs", "torch", "torchaudio",
     "librosa", "pyloudnorm", "soundfile",
@@ -149,7 +160,7 @@ JSON
 
 echo "==> Capturing dependency inventory"
 mkdir -p "$RUNTIME_DIR/licenses"
-uv pip list --python "$PYTHON_DIR/bin/python" --format=json > "$RUNTIME_DIR/licenses/pip-list.json"
+uv pip list --system --python "$PYTHON_DIR/bin/python" --format=json > "$RUNTIME_DIR/licenses/pip-list.json"
 
 cat > "$RUNTIME_DIR/runtime-manifest.json" <<JSON
 {
