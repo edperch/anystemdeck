@@ -9,6 +9,7 @@
   <a href="https://github.com/thcp/stemdeck/releases"><img src="https://img.shields.io/github/downloads/thcp/stemdeck/total?style=flat-square&color=52c65f" alt="Total Downloads"></a>
   <a href="https://github.com/thcp/stemdeck/releases/latest"><img src="https://img.shields.io/github/v/release/thcp/stemdeck?style=flat-square" alt="Latest Release"></a>
   <a href="https://github.com/thcp/stemdeck/blob/main/LICENSE"><img src="https://img.shields.io/github/license/thcp/stemdeck?style=flat-square" alt="License"></a>
+  <a href="https://discord.gg/mKgXQ6s5"><img src="https://img.shields.io/badge/Discord-Join-5865F2?style=flat-square&logo=discord&logoColor=white" alt="Discord"></a>
   <img src="https://img.shields.io/badge/CI-Woodpecker-4D9DE0?style=flat-square&logo=woodpecker-ci&logoColor=white" alt="CI: Woodpecker">
   <img src="https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-0078D6?style=flat-square&logo=windows" alt="Platform">
   <img src="https://img.shields.io/badge/Powered_by-Demucs-FF6B35?style=flat-square" alt="Powered by Demucs">
