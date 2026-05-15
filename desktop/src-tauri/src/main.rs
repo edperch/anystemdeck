@@ -347,10 +347,12 @@ fn start_backend(state: tauri::State<BackendState>) -> Result<BackendStarted, St
         (Stdio::null(), Stdio::null())
     });
 
-    // Point Python at its bundled stdlib so it works on machines without UV/Homebrew.
-    // The venv binary has /install as its compiled-in base_prefix (UV standalone build);
-    // PYTHONHOME redirects stdlib lookup to our copied stdlib inside the runtime.
-    let venv_root = python.parent().and_then(|p| p.parent()).map(|p| p.to_path_buf());
+    // Point Python at its bundled stdlib so it works on machines without a
+    // matching system Python. Windows portable builds keep stdlib in base/Lib.
+    let pythonhome = python
+        .parent()
+        .and_then(|bin_dir| bin_dir.parent().map(|venv| (venv, bin_dir)))
+        .and_then(|(venv, bin_dir)| bundled_python_home(venv, bin_dir).map(|(home, _)| home));
     let mut cmd = Command::new(python);
     cmd.args([
         "-m",
@@ -361,8 +363,8 @@ fn start_backend(state: tauri::State<BackendState>) -> Result<BackendStarted, St
         "--port",
         &port.to_string(),
     ]);
-    if let Some(ref venv_root) = venv_root {
-        cmd.env("PYTHONHOME", venv_root);
+    if let Some(ref pythonhome) = pythonhome {
+        cmd.env("PYTHONHOME", pythonhome);
     }
 
     cmd.current_dir(&backend_dir)
@@ -697,7 +699,20 @@ fn python_stdlib_ok(python: &Path) -> bool {
     if !python.is_file() {
         return false;
     }
-    let pythonhome = python.parent().and_then(|b| b.parent());
+    let venv_root = python.parent().and_then(|b| b.parent());
+    // On Windows the portable venv layout puts the stdlib in base/Lib/, not Lib/.
+    // Using the venv root as PYTHONHOME causes `import encodings` to fail because
+    // Python looks for Lib/os.py there and finds only site-packages.
+    let pythonhome = venv_root.map(|venv| {
+        #[cfg(windows)]
+        {
+            let base = venv.join("base");
+            if base.join("Lib").join("os.py").is_file() {
+                return base;
+            }
+        }
+        venv.to_path_buf()
+    });
     let mut cmd = Command::new(python);
     cmd.args(["-c", "import encodings"]);
     if let Some(home) = pythonhome {
