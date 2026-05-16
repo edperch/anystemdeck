@@ -1,3 +1,4 @@
+use flate2::read::GzDecoder;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
@@ -10,7 +11,6 @@ use std::{
     thread,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
-use flate2::read::GzDecoder;
 use tar::Archive;
 use tauri::{Emitter, Manager};
 #[cfg(windows)]
@@ -347,12 +347,6 @@ fn start_backend(state: tauri::State<BackendState>) -> Result<BackendStarted, St
         (Stdio::null(), Stdio::null())
     });
 
-    // Point Python at its bundled stdlib so it works on machines without a
-    // matching system Python. Windows portable builds keep stdlib in base/Lib.
-    let pythonhome = python
-        .parent()
-        .and_then(|bin_dir| bin_dir.parent().map(|venv| (venv, bin_dir)))
-        .and_then(|(venv, bin_dir)| bundled_python_home(venv, bin_dir).map(|(home, _)| home));
     let mut cmd = Command::new(python);
     cmd.args([
         "-m",
@@ -363,13 +357,22 @@ fn start_backend(state: tauri::State<BackendState>) -> Result<BackendStarted, St
         "--port",
         &port.to_string(),
     ]);
-    if let Some(ref pythonhome) = pythonhome {
-        cmd.env("PYTHONHOME", pythonhome);
+    // On macOS, python-build-standalone detects its own prefix by walking up from
+    // bin/ — PYTHONHOME is not needed and actively breaks startup when mis-computed.
+    // On Windows the venv launcher needs PYTHONHOME to locate the bundled stdlib.
+    #[cfg(not(target_os = "macos"))]
+    {
+        let pythonhome = python
+            .parent()
+            .and_then(|bin_dir| bin_dir.parent().map(|venv| (venv, bin_dir)))
+            .and_then(|(venv, bin_dir)| bundled_python_home(venv, bin_dir).map(|(home, _)| home));
+        if let Some(ref pythonhome) = pythonhome {
+            cmd.env("PYTHONHOME", pythonhome);
+        }
     }
 
     cmd.current_dir(&backend_dir)
         .env("STEMDECK_DATA_DIR", &data_dir)
-
         .env("STEMDECK_DESKTOP", "1")
         .env("STEMDECK_PARENT_PID", std::process::id().to_string())
         .env("PYTHONUNBUFFERED", "1")
@@ -699,24 +702,25 @@ fn python_stdlib_ok(python: &Path) -> bool {
     if !python.is_file() {
         return false;
     }
-    let venv_root = python.parent().and_then(|b| b.parent());
-    // On Windows the portable venv layout puts the stdlib in base/Lib/, not Lib/.
-    // Using the venv root as PYTHONHOME causes `import encodings` to fail because
-    // Python looks for Lib/os.py there and finds only site-packages.
-    let pythonhome = venv_root.map(|venv| {
-        #[cfg(windows)]
-        {
-            let base = venv.join("base");
-            if base.join("Lib").join("os.py").is_file() {
-                return base;
-            }
-        }
-        venv.to_path_buf()
-    });
     let mut cmd = Command::new(python);
     cmd.args(["-c", "import encodings"]);
-    if let Some(home) = pythonhome {
-        cmd.env("PYTHONHOME", home);
+    #[cfg(not(target_os = "macos"))]
+    {
+        let venv_root = python.parent().and_then(|b| b.parent());
+        // On Windows the portable venv layout puts the stdlib in base/Lib/, not Lib/.
+        let pythonhome = venv_root.map(|venv| {
+            #[cfg(windows)]
+            {
+                let base = venv.join("base");
+                if base.join("Lib").join("os.py").is_file() {
+                    return base;
+                }
+            }
+            venv.to_path_buf()
+        });
+        if let Some(ref home) = pythonhome {
+            cmd.env("PYTHONHOME", home);
+        }
     }
     cmd.stdout(Stdio::null()).stderr(Stdio::null());
     cmd.status().map(|s| s.success()).unwrap_or(false)
@@ -961,8 +965,7 @@ async fn download_file_with_progress(
 ) -> Result<(), String> {
     let tmp = target.with_extension("download");
     if tmp.exists() {
-        fs::remove_file(&tmp)
-            .map_err(|e| format!("failed to remove {}: {e}", tmp.display()))?;
+        fs::remove_file(&tmp).map_err(|e| format!("failed to remove {}: {e}", tmp.display()))?;
     }
 
     if let Some(path) = url.strip_prefix("file://") {
@@ -1009,13 +1012,19 @@ async fn download_file_with_progress(
             .map_err(|e| format!("failed to write to {}: {e}", tmp.display()))?;
         received += chunk.len() as u64;
         if last_emit.elapsed() >= Duration::from_millis(150) {
-            let _ = app_handle.emit("runtime-download-progress", DownloadProgress { received, total });
+            let _ = app_handle.emit(
+                "runtime-download-progress",
+                DownloadProgress { received, total },
+            );
             last_emit = Instant::now();
         }
     }
     let _ = app_handle.emit(
         "runtime-download-progress",
-        DownloadProgress { received, total: Some(received) },
+        DownloadProgress {
+            received,
+            total: Some(received),
+        },
     );
 
     fs::rename(&tmp, target)
@@ -1113,10 +1122,10 @@ fn extract_tar_archive(archive: &Path, destination: &Path) -> Result<(), String>
         .map_err(|e| format!("failed to open archive {}: {e}", archive.display()))?;
     let is_zst = archive
         .extension()
-        .map_or(false, |ext| ext.eq_ignore_ascii_case("zst"));
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("zst"));
     if is_zst {
-        let decoder = zstd::Decoder::new(file)
-            .map_err(|e| format!("failed to init zstd decoder: {e}"))?;
+        let decoder =
+            zstd::Decoder::new(file).map_err(|e| format!("failed to init zstd decoder: {e}"))?;
         Archive::new(decoder)
             .unpack(destination)
             .map_err(|e| format!("failed to extract runtime pack: {e}"))
