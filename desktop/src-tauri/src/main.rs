@@ -347,6 +347,16 @@ fn start_backend(state: tauri::State<BackendState>) -> Result<BackendStarted, St
         (Stdio::null(), Stdio::null())
     });
 
+    // On macOS, python-build-standalone detects its own prefix by walking up from
+    // bin/ — PYTHONHOME is not needed and actively breaks startup when mis-computed.
+    // On Windows the venv launcher needs PYTHONHOME to locate the bundled stdlib.
+    // Compute before moving python into Command::new.
+    #[cfg(not(target_os = "macos"))]
+    let pythonhome = python
+        .parent()
+        .and_then(|bin_dir| bin_dir.parent().map(|venv| (venv, bin_dir)))
+        .and_then(|(venv, bin_dir)| bundled_python_home(venv, bin_dir).map(|(home, _)| home));
+
     let mut cmd = Command::new(python);
     cmd.args([
         "-m",
@@ -357,18 +367,9 @@ fn start_backend(state: tauri::State<BackendState>) -> Result<BackendStarted, St
         "--port",
         &port.to_string(),
     ]);
-    // On macOS, python-build-standalone detects its own prefix by walking up from
-    // bin/ — PYTHONHOME is not needed and actively breaks startup when mis-computed.
-    // On Windows the venv launcher needs PYTHONHOME to locate the bundled stdlib.
     #[cfg(not(target_os = "macos"))]
-    {
-        let pythonhome = python
-            .parent()
-            .and_then(|bin_dir| bin_dir.parent().map(|venv| (venv, bin_dir)))
-            .and_then(|(venv, bin_dir)| bundled_python_home(venv, bin_dir).map(|(home, _)| home));
-        if let Some(ref pythonhome) = pythonhome {
-            cmd.env("PYTHONHOME", pythonhome);
-        }
+    if let Some(ref pythonhome) = pythonhome {
+        cmd.env("PYTHONHOME", pythonhome);
     }
 
     cmd.current_dir(&backend_dir)
