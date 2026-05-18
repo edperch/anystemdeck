@@ -215,6 +215,38 @@ def _load_audio_ffmpeg(
     return y, sr
 
 
+def compute_stem_presence(stems_dir: Path, selected_stems: list[str]) -> dict[str, int]:
+    """Load each extracted stem WAV, compute mean absolute amplitude, normalize
+    to 0-100. Only the stems that were selected (and therefore extracted) are
+    measured; the rest are omitted from the returned dict."""
+    import numpy as np
+
+    result: dict[str, int] = {}
+    rms_values: dict[str, float] = {}
+
+    for name in selected_stems:
+        wav_path = stems_dir / f"{name}.wav"
+        if not wav_path.is_file():
+            continue
+        loaded = _load_audio_ffmpeg(wav_path, sr=22050, duration=180.0)
+        if loaded is None:
+            continue
+        y, _ = loaded
+        rms_values[name] = float(np.sqrt(np.mean(y ** 2)))
+
+    if not rms_values:
+        return result
+
+    max_rms = max(rms_values.values())
+    if max_rms < 1e-9:
+        return {name: 0 for name in rms_values}
+
+    for name, rms in rms_values.items():
+        result[name] = max(0, min(100, round(rms / max_rms * 100)))
+
+    return result
+
+
 def analyze(job: Job, source: Path) -> tuple[int | None, str | None]:
     """Best-effort BPM and key detection. On failure, returns (None, None)
     and leaves job fields untouched -- the chips stay as placeholders."""
@@ -241,7 +273,7 @@ def analyze(job: Job, source: Path) -> tuple[int | None, str | None]:
         # smear, no kick fundamentals leaking in).
         y_harmonic, y_percussive = librosa.effects.hpss(y)
 
-        tempo_arr, _ = librosa.beat.beat_track(y=y_percussive, sr=sr)
+        tempo_arr, beat_frames = librosa.beat.beat_track(y=y_percussive, sr=sr)
         try:
             tempo = float(tempo_arr[0])  # type: ignore[index]
         except (TypeError, IndexError):
@@ -263,6 +295,22 @@ def analyze(job: Job, source: Path) -> tuple[int | None, str | None]:
         # it's good enough for a UI display and adds ~50 ms to analyze.
         lufs, peak_db = _measure_loudness(y, sr)
 
+        dynamic_range: float | None = None
+        if lufs is not None and peak_db is not None:
+            dynamic_range = round(peak_db - lufs, 1)
+
+        # Beat interval coefficient of variation → stability 0-100.
+        # CV = std/mean of inter-beat intervals; CV=0 is perfectly metronomic.
+        tempo_stability: int | None = None
+        import numpy as np
+        beat_times = librosa.frames_to_time(beat_frames, sr=sr)
+        if len(beat_times) > 2:
+            intervals = np.diff(beat_times)
+            mean_iv = float(intervals.mean())
+            if mean_iv > 0:
+                cv = float(intervals.std() / mean_iv)
+                tempo_stability = max(0, min(100, round((1 - min(cv, 1)) * 100)))
+
         _set(
             job,
             bpm=bpm,
@@ -271,6 +319,8 @@ def analyze(job: Job, source: Path) -> tuple[int | None, str | None]:
             key_confidence=key_confidence,
             lufs=lufs,
             peak_db=peak_db,
+            dynamic_range=dynamic_range,
+            tempo_stability=tempo_stability,
             progress=1.0,
             stage="Analysis complete",
         )

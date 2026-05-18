@@ -4,10 +4,10 @@ import {
   eventSource, setEventSource, setCurrentJobId, currentJobId,
   selectedStems,
 } from "./state.js";
-import { destroyPlayer } from "./player.js";
-import { wireUpAudio } from "./player.js";
+import { destroyPlayer, wireUpAudio, setWaveformLoading, updateFooterTrack } from "./player.js";
 import { stagePhrases } from "./phrases.js";
-import { addTrackToLibrary, setCurrentTrack, updateTrackStatus } from "./catalog.js";
+import { addTrackToLibrary, setCurrentTrack, updateTrackStatus, applyStemPresenceCards } from "./catalog.js";
+import { initSections } from "./sections.js";
 
 // Playful stage label rotation (Claude-Code-style flair). The backend
 // emits truthful stage strings; we surface them in the small #job-detail
@@ -114,7 +114,9 @@ function applyState(state) {
       keyConfidence: state.key_confidence,
       lufs: state.lufs,
       peakDb: state.peak_db,
+      stemPresence: state.stem_presence,
       sourceUrl: jobSources.get(state.job_id) || urlInput.value,
+      createdAt: state.created_at,
     });
     setCurrentTrack(state.job_id);
   }
@@ -124,23 +126,35 @@ function applyState(state) {
   }
   if (state.bpm) bpmChip.textContent = `${state.bpm} BPM`;
   if (state.key) keyChip.textContent = state.key;
+  if (state.title || state.bpm || state.key || state.thumbnail) {
+    updateFooterTrack({
+      title: state.title,
+      thumbnail: state.thumbnail,
+      key: state.key,
+      bpm: state.bpm,
+      stemCount: state.stems ? state.stems.filter((s) => s.name !== "original").length : null,
+    });
+  }
   const summaryKey = document.getElementById("summary-key");
   const summaryBpm = document.getElementById("summary-bpm");
   const summaryScale = document.getElementById("summary-scale");
+  const summaryScaleName = document.getElementById("summary-scale-name");
   const summaryConfidence = document.getElementById("summary-confidence");
   const summaryConfidenceLabel = document.getElementById("summary-confidence-label");
-  const loudnessCard = document.getElementById("loudness-card");
   const summaryLufs = document.getElementById("summary-lufs");
   const summaryPeak = document.getElementById("summary-peak");
+  const summaryDuration = document.getElementById("summary-duration");
   if (summaryKey && state.key) summaryKey.textContent = state.key;
-  if (summaryBpm && state.bpm) {
-    summaryBpm.textContent = "";
-    const bpmNum = document.createTextNode(String(state.bpm) + " ");
-    const bpmUnit = document.createElement("small");
-    bpmUnit.textContent = "BPM";
-    summaryBpm.append(bpmNum, bpmUnit);
-  }
+  if (summaryBpm && state.bpm) summaryBpm.textContent = String(state.bpm);
   if (summaryScale && state.scale) summaryScale.textContent = state.scale;
+  if (summaryScaleName && state.scale) summaryScaleName.textContent = state.scale;
+  if (summaryLufs && state.lufs != null) summaryLufs.textContent = state.lufs.toFixed(1);
+  if (summaryPeak && state.peak_db != null) summaryPeak.textContent = `Peak ${state.peak_db.toFixed(1)} dB`;
+  if (summaryDuration && state.duration) {
+    const m = Math.floor(state.duration / 60);
+    const s = Math.floor(state.duration % 60).toString().padStart(2, "0");
+    summaryDuration.textContent = `${m.toString().padStart(2, "0")}:${s}`;
+  }
   if (summaryConfidence && state.key_confidence != null) {
     const confidence = Math.max(0, Math.min(100, Number(state.key_confidence)));
     const confSpan = document.createElement("span");
@@ -151,13 +165,25 @@ function applyState(state) {
     summaryConfidence.classList.remove("hidden");
     summaryConfidenceLabel?.classList.remove("hidden");
   }
-  // LUFS and peak surface only when the analyzer produced numeric values.
-  // Silence or extremely short clips return null -- we keep the card
-  // hidden in that case rather than render "— LUFS".
-  if (loudnessCard && state.lufs != null && state.peak_db != null) {
-    if (summaryLufs) summaryLufs.textContent = state.lufs.toFixed(1);
-    if (summaryPeak) summaryPeak.textContent = state.peak_db.toFixed(1);
-    loudnessCard.classList.remove("hidden");
+  const summaryDr = document.getElementById("summary-dr");
+  const summaryDrLabel = document.getElementById("summary-dr-label");
+  const summaryStability = document.getElementById("summary-stability");
+  const summaryStabilityLabel = document.getElementById("summary-stability-label");
+  if (summaryDr && state.dynamic_range != null) summaryDr.textContent = String(state.dynamic_range);
+  if (summaryDrLabel && state.dynamic_range != null) {
+    const dr = state.dynamic_range;
+    summaryDrLabel.textContent = dr < 7 ? "Compressed" : dr < 10 ? "Moderate" : dr < 14 ? "High" : "Wide";
+  }
+  if (summaryStability && state.tempo_stability != null) {
+    summaryStability.textContent = `${state.tempo_stability}%`;
+    summaryStability.className = "meta-card-value" + (state.tempo_stability >= 80 ? " stability-high" : "");
+  }
+  if (summaryStabilityLabel && state.tempo_stability != null) {
+    const s = state.tempo_stability;
+    summaryStabilityLabel.textContent = s >= 90 ? "Very Stable" : s >= 70 ? "Stable" : s >= 50 ? "Moderate" : "Variable";
+  }
+  if (state.stem_presence != null) {
+    applyStemPresenceCards(state.stem_presence);
   }
   // Stage label is owned by the phrase-rotation timer below; we don't
   // overwrite it from each SSE tick. The truthful backend stage goes
@@ -178,11 +204,13 @@ function applyState(state) {
   if (state.status === "error") {
     stopJobPolling();
     updateTrackStatus(state.job_id, "error");
+    setWaveformLoading(false);
     showError(state.error || "Unknown error");
     setSubmitProcessing(false);
   } else if (state.status === "cancelled") {
     stopJobPolling();
     updateTrackStatus(state.job_id, "cancelled");
+    setWaveformLoading(false);
     jobBox.classList.add("hidden");
     setSubmitProcessing(false);
   } else if (state.status === "done") {
@@ -196,7 +224,9 @@ function applyState(state) {
         state.stems || [],
         state.duration || 0,
         state.thumbnail,
+        state.mix_url ?? null,
       );
+      initSections(state.job_id, state.sections, state.duration || 0);
     }
     setSubmitProcessing(false);
   }
@@ -336,6 +366,7 @@ export function wireJobForm() {
     const postUrlText = document.getElementById("post-url-text");
     if (postUrlText) postUrlText.textContent = displayTitle;
 
+    setWaveformLoading(true);
     // Show progress box immediately for file uploads — the HTTP upload of a
     // large file takes time and the UI would otherwise appear frozen.
     if (file) {

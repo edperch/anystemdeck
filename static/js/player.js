@@ -13,7 +13,9 @@ import {
   masterVolume, masterFader, mixerState,
   setMultitrack, setCurrentJobId, setTrackIndex, setTotalDuration,
   setLoopEnabled, setLoopStart, setLoopEnd, setMasterVolume,
-  setWaveZoom, waveScroll, selectedStems,
+  waveScroll, selectedStems,
+  footerTitle, footerMeta, footerThumb,
+  setFooterWaveDrawFn,
 } from "./state.js";
 import {
   loadMixIntoState, resetMixerState, refreshMixerVisuals,
@@ -27,6 +29,7 @@ import {
   updatePresencePlayhead,
 } from "./transport.js";
 import { stopVuLoop } from "./audio.js";
+import { destroySections } from "./sections.js";
 
 // Stem-selection filter: the import-page stem-choice toggles set
 // selectedStems (state.js). Backend always processes all 6 -- we
@@ -36,11 +39,22 @@ const _STEM_ROW_SELECTORS = [
   ".stem-list span[data-stem]",
   ".presence-bars i[data-stem]",
   ".presence-labels span",
-  ".stem-waveform-row[data-stem]",
 ];
 
 function applyStemSelectionFilter(presentNames) {
-  const visibleTrackCount = Math.max(1, presentNames.size || TRACK_NAMES.length);
+  // Waveform rows: original hides if absent; STEM_NAMES rows always show, grayed if absent
+  for (const el of document.querySelectorAll(".stem-waveform-row[data-stem]")) {
+    const stem = el.dataset.stem;
+    if (stem === "original") {
+      el.classList.toggle("hidden", !presentNames.has(stem));
+      el.classList.remove("unavailable");
+    } else {
+      el.classList.remove("hidden");
+      el.classList.toggle("unavailable", !presentNames.has(stem));
+    }
+  }
+  const originalRow = presentNames.has("original") ? 1 : 0;
+  const visibleTrackCount = originalRow + STEM_NAMES.length;
   const app = document.querySelector(".app");
   app?.style.setProperty("--visible-track-count", String(visibleTrackCount));
   app?.style.setProperty(
@@ -59,8 +73,9 @@ function applyStemSelectionFilter(presentNames) {
   for (const name of STEM_NAMES) {
     if (presentNames.has(name)) visibleMixerNames.push(name);
   }
+  const mixerCap = STEM_NAMES.length + (presentNames.has("original") ? 1 : 0);
   for (const name of STEM_NAMES) {
-    if (visibleMixerNames.length >= STEM_NAMES.length) break;
+    if (visibleMixerNames.length >= mixerCap) break;
     if (!visibleMixerNames.includes(name)) visibleMixerNames.push(name);
   }
   const visibleMixerSet = new Set(visibleMixerNames);
@@ -103,6 +118,10 @@ function clearStemSelectionFilter() {
       el.classList.remove("hidden");
     }
   }
+  for (const el of document.querySelectorAll(".stem-waveform-row[data-stem]")) {
+    el.classList.remove("hidden");
+    el.classList.remove("unavailable");
+  }
   for (const row of document.querySelectorAll(".mixer-column .lane-header[data-stem], .energy-row[data-stem]")) {
     row.classList.remove("hidden");
     row.classList.remove("unavailable");
@@ -134,7 +153,7 @@ function resetAnalysisCards() {
 
 function renderPlaceholderTracks() {
   multitrackContainer.innerHTML = "";
-  for (const name of TRACK_NAMES) {
+  for (const name of ["original", ...STEM_NAMES]) {
     const ph = document.createElement("div");
     ph.className = "lane-placeholder";
     ph.dataset.stem = name;
@@ -145,11 +164,14 @@ function renderPlaceholderTracks() {
 
 const OVERVIEW_WAVE_POINTS = 1500;
 const STEM_VU_FPS = 30;
-const WAVEFORM_LANE_HEIGHT = 64;
+const WAVEFORM_LANE_HEIGHT = 70;
 const WAVEFORM_SEPARATOR_HEIGHT = 2;
 let visualRenderToken = 0;
 let visualAudioContext = null;
 let stemVuRafId = null;
+let _footerWavePeaks = null;
+let _lastFooterProgress = 0;
+const _FOOTER_BARS = 300;
 
 function isAudioBufferLike(value) {
   return value && typeof value.getChannelData === "function";
@@ -480,6 +502,7 @@ function renderAllDecodedVisuals(stems, token) {
 export function destroyPlayer() {
   document.querySelector(".app")?.classList.remove("is-import");
   document.querySelector(".app")?.classList.add("no-track");
+  destroySections();
   stopVuLoop();
   stopStemVuLoop();
   if (multitrack) {
@@ -528,7 +551,6 @@ export function destroyPlayer() {
   setLoopEnd(0);
   setMasterVolume(0.5);
   setTrackIndex({});
-  setWaveZoom(1);
   applyWaveZoom();
   buildPresenceRuler(0);
   updateFooterTimes(0);
@@ -538,6 +560,13 @@ export function destroyPlayer() {
   playBtn.classList.remove("playing");
   stopBtn.classList.remove("stopped");
   loopRegionEl.classList.add("hidden");
+  _footerWavePeaks = null;
+  _lastFooterProgress = 0;
+  _footerWaveResizeObs?.disconnect();
+  setFooterWaveDrawFn(null);
+  const cv = document.getElementById("footer-waveform");
+  if (cv) { const c = cv.getContext("2d"); c?.clearRect(0, 0, cv.width, cv.height); }
+  updateFooterTrack({});
 }
 
 export function renderEmptyShell() {
@@ -546,10 +575,11 @@ export function renderEmptyShell() {
   stopStemVuLoop();
   ensureMixerStateDefaults();
   mixerEl.innerHTML = "";
-  for (const name of TRACK_NAMES) {
+  for (const name of ["original", ...STEM_NAMES]) {
     const { row } = renderMixerRow({ name, url: "#" });
     mixerEl.appendChild(row);
   }
+  requestAnimationFrame(() => _applyLaneHeight(1 + STEM_NAMES.length));
   applyStemSelectionFilter(new Set(STEM_NAMES));
   titleEl.textContent = "Ready to import a track";
   bpmChip.textContent = "\u2014 BPM";
@@ -565,7 +595,9 @@ export function renderEmptyShell() {
 function renderAllMiniWaves(mt, stems) {
   const wsArr = mt.wavesurfers || mt._wavesurfers;
   if (!wsArr?.length) return;
-  stems.forEach((stem, i) => {
+  stems.forEach((stem) => {
+    const i = trackIndex[stem.name];
+    if (i === undefined) return;
     const ws = wsArr[i];
     if (!ws) return;
     const color = STEM_COLORS[stem.name] || "#a0a0a0";
@@ -581,11 +613,25 @@ function renderAllMiniWaves(mt, stems) {
   });
 }
 
-function setWaveformLoading(loading) {
+let _loadingShownAt = 0;
+const _LOADING_MIN_MS = 900;
+let _currentStems = [];
+let _mixUrl = null;
+
+export function setWaveformLoading(loading) {
   const el = document.getElementById("waveLoadingOverlay");
   if (!el) return;
-  el.classList.toggle("hidden", !loading);
-  if (!loading) el.classList.remove("stalled");
+  if (loading) {
+    _loadingShownAt = performance.now();
+    el.classList.remove("hidden");
+  } else {
+    const elapsed = performance.now() - _loadingShownAt;
+    const delay = Math.max(0, _LOADING_MIN_MS - elapsed);
+    window.setTimeout(() => {
+      el.classList.add("hidden");
+      el.classList.remove("stalled");
+    }, delay);
+  }
 }
 
 export function buildStripStems() {
@@ -605,7 +651,22 @@ export function buildStripStems() {
   }
 }
 
-export function wireUpAudio(jobId, stems, duration, thumbnail) {
+function _applyLaneHeight(count) {
+  const wavePanel = document.querySelector(".daw-wave-panel");
+  const panelH = wavePanel?.clientHeight ?? 0;
+  const laneH = panelH > 0 && count > 0
+    ? Math.max(WAVEFORM_LANE_HEIGHT, Math.floor(panelH / count))
+    : WAVEFORM_LANE_HEIGHT;
+  const appEl = document.querySelector(".app");
+  appEl?.style.setProperty("--lane-h", `${laneH + 2}px`);
+  appEl?.style.setProperty(
+    "--wave-widget-track-stack-h",
+    `${count * laneH + (count - 1) * WAVEFORM_SEPARATOR_HEIGHT}px`,
+  );
+  return laneH;
+}
+
+export function wireUpAudio(jobId, stems, duration, thumbnail, mixUrl = null) {
   const app = document.querySelector(".app");
   app?.classList.remove("is-import");
   app?.classList.remove("no-track");
@@ -650,7 +711,16 @@ export function wireUpAudio(jobId, stems, duration, thumbnail) {
   // original.wav, so it's simply not in `stems` and the mixer/sidebar
   // rows for it stay hidden.)
   stems = stems.filter((s) => s.name === "original" || selectedStems.has(s.name));
+  _currentStems = stems;
+  _mixUrl = mixUrl || null;
   applyStemSelectionFilter(new Set(stems.map((s) => s.name)));
+  updateFooterTrack({ thumbnail, stemCount: stems.filter((s) => s.name !== "original").length });
+
+  // Reset and re-init footer waveform from the mix/original stem
+  _footerWavePeaks = null;
+  setFooterWaveDrawFn(null);
+  const mixStem = stems.find((s) => s.name === "original") || stems[0];
+  if (mixStem?.url) initFooterWaveform(mixStem.url);
 
   for (const stem of stems) {
     const row = mixerEl.querySelector(`.lane-header[data-stem="${stem.name}"]`);
@@ -673,19 +743,27 @@ export function wireUpAudio(jobId, stems, duration, thumbnail) {
   clearOverviewWaveforms();
   renderAllDecodedVisuals(stems, token);
 
-  setTrackIndex(Object.fromEntries(stems.map((s, i) => [s.name, i])));
+  // "original" is prepended at row 0 only when it actually has a URL so it
+  // appears at the top. Omitting it when absent avoids a phantom 70px gap.
+  // STEM_NAMES follow at the next consecutive rows so mixer lanes stay aligned.
+  const stemsByName = Object.fromEntries(stems.map((s) => [s.name, s]));
+  const orderedNames = [...(stemsByName["original"] ? ["original"] : []), ...STEM_NAMES];
+  setTrackIndex(Object.fromEntries(orderedNames.map((name, i) => [name, i])));
   multitrackContainer.innerHTML = "";
+
+  const laneH = _applyLaneHeight(orderedNames.length);
+
   const mt = Multitrack.create(
-    stems.map((s, i) => ({
+    orderedNames.map((name, i) => ({
       id: i,
-      url: s.url,
+      url: stemsByName[name]?.url ?? null,
       draggable: false,
       startPosition: 0,
-      volume: 1,
+      volume: stemsByName[name] ? 1 : 0,
       options: {
-        waveColor: STEM_COLORS[s.name] || "#a0a0a0",
+        waveColor: STEM_COLORS[name] || "#a0a0a0",
         progressColor: PROGRESS_COLOR,
-        height: WAVEFORM_LANE_HEIGHT,
+        height: laneH,
         barWidth: 3,
         barGap: 2,
         barRadius: 2,
@@ -702,7 +780,7 @@ export function wireUpAudio(jobId, stems, duration, thumbnail) {
       // div scrolls. Fitting to view keeps the three perfectly aligned.
       minPxPerSec: 0,
       rightButtonDrag: false,
-      cursorWidth: 1.5,
+      cursorWidth: 0,
       cursorColor: "#e54e4e",
       trackBackground: "transparent",
       trackBorderColor: "rgba(148, 163, 184, 0.08)",
@@ -727,13 +805,13 @@ export function wireUpAudio(jobId, stems, duration, thumbnail) {
     const ctx = mt.audioContext;
     console.debug(
       `[player] canplay — ${stems.length} stems, ctx=${ctx?.state}, audios:`,
-      mt.audios?.map((a, i) => `${stems[i]?.name}:${a?.constructor?.name}`),
+      mt.audios?.map((a, i) => `${orderedNames[i]}:${a?.constructor?.name}`),
     );
-    // Log any audio element load errors
+    // Log load errors only for stems that actually have a source URL
     mt.audios?.forEach((a, i) => {
-      if (a instanceof HTMLMediaElement) {
+      if (a instanceof HTMLMediaElement && stemsByName[orderedNames[i]]?.url) {
         a.addEventListener("error", () =>
-          console.error(`[player] audio error stem[${i}] ${stems[i]?.name}:`, a.error?.message, a.error?.code),
+          console.error(`[player] audio error stem[${i}] ${orderedNames[i]}:`, a.error?.message, a.error?.code),
         { once: true });
       }
     });
@@ -775,11 +853,188 @@ export function wireUpAudio(jobId, stems, duration, thumbnail) {
     ws.on("play", () => {
       playBtn.classList.add("playing");
       stopBtn.classList.remove("stopped");
+      applyMix();
     });
     ws.on("pause", () => {
       playBtn.classList.remove("playing");
       updateStopVisual();
     });
     ws.on("seeking", updateStopVisual);
+  });
+}
+
+export function drawFooterPlaceholder() {
+  _drawPlaceholderWave();
+  const bar = document.getElementById("footer-waveform")?.closest(".footer-wave-bar");
+  if (bar) {
+    new ResizeObserver(() => { if (!_footerWavePeaks) _drawPlaceholderWave(); }).observe(bar);
+  }
+}
+
+function _drawPlaceholderWave() {
+  const canvas = document.getElementById("footer-waveform");
+  if (!canvas) return;
+  const dpr = window.devicePixelRatio || 1;
+  const w = canvas.clientWidth, h = canvas.clientHeight;
+  if (!w || !h) return;
+  canvas.width = Math.round(w * dpr);
+  canvas.height = Math.round(h * dpr);
+  const ctx = canvas.getContext("2d");
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  const n = 300;
+  const barW = canvas.width / n;
+  const gap = 1;
+  const cy = canvas.height / 2;
+  for (let i = 0; i < n; i++) {
+    const t = i / n;
+    const amp = 0.15 + 0.55 * (
+      0.5 * Math.abs(Math.sin(t * Math.PI * 3.7 + 0.5)) +
+      0.3 * Math.abs(Math.sin(t * Math.PI * 9.1 + 1.2)) +
+      0.2 * Math.abs(Math.sin(t * Math.PI * 21.3 + 2.8))
+    );
+    const barH = Math.max(3, amp * canvas.height * 0.78);
+    const x = Math.round(i * barW);
+    const nextX = i === n - 1 ? canvas.width : Math.round((i + 1) * barW);
+    const bw = Math.max(1, nextX - x - gap);
+    ctx.fillStyle = "rgba(255,255,255,0.07)";
+    ctx.fillRect(x, cy - barH / 2, bw, barH);
+  }
+}
+
+function _drawFooterWave(progress) {
+  _lastFooterProgress = progress;
+  const canvas = document.getElementById("footer-waveform");
+  if (!canvas) return;
+  if (!_footerWavePeaks) { _drawPlaceholderWave(); return; }
+  const dpr = window.devicePixelRatio || 1;
+  const w = canvas.clientWidth;
+  const h = canvas.clientHeight;
+  if (!w || !h) return;
+  if (canvas.width !== Math.round(w * dpr) || canvas.height !== Math.round(h * dpr)) {
+    canvas.width = Math.round(w * dpr);
+    canvas.height = Math.round(h * dpr);
+  }
+  const ctx = canvas.getContext("2d");
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  const n = _footerWavePeaks.length;
+  let maxAbs = 0;
+  for (const [mn, mx] of _footerWavePeaks) {
+    if (mx > maxAbs) maxAbs = mx;
+    if (-mn > maxAbs) maxAbs = -mn;
+  }
+  const norm = maxAbs > 0 ? 1 / maxAbs : 1;
+  const cy = canvas.height / 2;
+  const barW = canvas.width / n;
+  const gap = 1;
+  const playedIdx = Math.floor(progress * n);
+  for (let i = 0; i < n; i++) {
+    const [mn, mx] = _footerWavePeaks[i];
+    const top = cy - mx * norm * cy * 0.78;
+    const bot = cy - mn * norm * cy * 0.78;
+    const barH = Math.max(3, bot - top);
+    const x = Math.round(i * barW);
+    const nextX = i === n - 1 ? canvas.width : Math.round((i + 1) * barW);
+    const bw = Math.max(1, nextX - x - gap);
+    ctx.fillStyle = i < playedIdx ? "#f4b740" : "rgba(255,255,255,0.13)";
+    ctx.fillRect(x, top, bw, barH);
+  }
+  if (progress > 0.001 && progress < 0.999) {
+    const px = progress * canvas.width;
+    ctx.beginPath();
+    ctx.arc(px, cy, 4 * dpr, 0, Math.PI * 2);
+    ctx.fillStyle = "#f4b740";
+    ctx.fill();
+  }
+}
+
+let _footerWaveResizeObs = null;
+async function initFooterWaveform(stemUrl) {
+  const canvas = document.getElementById("footer-waveform");
+  if (!canvas || !stemUrl) return;
+  const AudioCtx = window.AudioContext || window.webkitAudioContext;
+  if (!AudioCtx) return;
+  try {
+    visualAudioContext ??= new AudioCtx();
+    const res = await fetch(stemUrl, { cache: "force-cache" });
+    if (!res.ok) return;
+    const buf = await visualAudioContext.decodeAudioData(await res.arrayBuffer());
+    _footerWavePeaks = bufferMinMaxPeaks(buf, _FOOTER_BARS);
+    setFooterWaveDrawFn(_drawFooterWave);
+    _drawFooterWave(0);
+    // Redraw on resize so the canvas fills its container correctly
+    _footerWaveResizeObs?.disconnect();
+    _footerWaveResizeObs = new ResizeObserver(() => _drawFooterWave(_lastFooterProgress));
+    _footerWaveResizeObs.observe(canvas.parentElement || canvas);
+  } catch (e) {
+    console.warn("[player] footer waveform:", e);
+  }
+}
+
+export function updateFooterTrack({ title, thumbnail, key, bpm, stemCount } = {}) {
+  if (footerThumb) {
+    const artEl = footerThumb.closest(".footer-art");
+    if (thumbnail) {
+      footerThumb.src = thumbnail;
+      footerThumb.onload = () => {
+        footerThumb.classList.add("loaded");
+        artEl?.classList.add("has-art");
+      };
+      footerThumb.onerror = () => {
+        footerThumb.classList.remove("loaded");
+        artEl?.classList.remove("has-art");
+      };
+    } else {
+      footerThumb.removeAttribute("src");
+      footerThumb.classList.remove("loaded");
+      artEl?.classList.remove("has-art");
+    }
+  }
+  if (footerTitle && title !== undefined) footerTitle.textContent = title;
+  if (footerMeta) {
+    const parts = [];
+    if (key) parts.push(key);
+    if (bpm) parts.push(`${Math.round(bpm)} BPM`);
+    if (stemCount != null) parts.push(`${stemCount} Stems`);
+    if (key !== undefined || bpm !== undefined || stemCount !== undefined)
+      footerMeta.textContent = parts.join(" • ");
+  }
+}
+
+function _triggerDownload(url, filename) {
+  const fullUrl = url.startsWith("http") ? url : `${location.origin}${url}`;
+  if (window.__TAURI__?.core?.invoke) {
+    window.__TAURI__.core.invoke("open_url", { url: fullUrl });
+    return;
+  }
+  const a = document.createElement("a");
+  a.href = fullUrl;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+
+function _exportMixUrl() {
+  if (_mixUrl) return _mixUrl;
+  const orig = _currentStems.find((s) => s.name === "original");
+  return orig?.url ?? null;
+}
+
+export function downloadCurrentMix() {
+  const url = _exportMixUrl();
+  if (!url) return;
+  _triggerDownload(url, "mix.wav");
+}
+
+export function downloadCurrentMixMp3() {
+  const url = _exportMixUrl();
+  if (!url) return;
+  _triggerDownload(url.replace(/\.wav$/, ".mp3"), "mix.mp3");
+}
+
+export function downloadCurrentStems() {
+  const stems = _currentStems.filter((s) => s.name !== "original");
+  stems.forEach((s, i) => {
+    window.setTimeout(() => _triggerDownload(s.url, `${s.name}.wav`), i * 150);
   });
 }

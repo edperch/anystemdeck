@@ -37,17 +37,16 @@ export const loopRegionEl = $("loop-region");
 export const playheadMarker = document.querySelector(".playhead-marker");
 export const waveScroll = $("wave-scroll");
 export const waveCanvas = $("wave-canvas");
-export const zoomInBtn = $("zoom-in");
-export const zoomOutBtn = $("zoom-out");
-export const zoomFitBtn = $("zoom-fit");
-export const zoomTrack = $("zoom-track");
 export const presenceRulerEl = $("presence-ruler");
 export const presencePlayheadEl = $("presence-playhead");
 export const footerTimeElapsed = $("footer-time-elapsed");
 export const footerTimeTotal = $("footer-time-total");
 export const stemListEl = document.querySelector(".stem-list");
 export const npScrubEl = document.querySelector(".np-scrub");
-export const npScrubFill = document.querySelector(".np-scrub > span");
+export const npScrubFill     = $("footer-scrub-fill");
+export const footerTitle     = $("footer-title");
+export const footerMeta      = $("footer-meta");
+export const footerThumb     = $("footer-thumb");
 
 // ─── Mutable state ───
 
@@ -65,7 +64,6 @@ export let totalDuration = 0;
 export let loopEnabled = false;
 export let loopStart = 0;
 export let loopEnd = 0;
-export let waveZoom = 1;
 
 // Selected stems for extraction. The set determines (a) which stem
 // rows render in the studio dashboard after a job completes and (b)
@@ -121,9 +119,12 @@ export function setTotalDuration(v) { totalDuration = v; }
 export function setLoopEnabled(v) { loopEnabled = v; }
 export function setLoopStart(v) { loopStart = v; }
 export function setLoopEnd(v) { loopEnd = v; }
-export function setWaveZoom(v) { waveZoom = v; }
 export function setAudioContext(v) { audioContext = v; }
 export function setMasterVolume(v) { masterVolume = v; }
 export function setVuRafId(v) { vuRafId = v; }
 export function setMasterBusGain(v) { masterBusGain = v; }
 export function setMasterLimiter(v) { masterLimiter = v; }
+
+// Footer waveform draw callback — set by player.js, called by transport.js
+export let footerWaveDrawFn = null;
+export function setFooterWaveDrawFn(fn) { footerWaveDrawFn = fn; }

@@ -27,6 +27,11 @@ class Job:
     key_confidence: int | None = None  # 0-100 percent
     lufs: float | None = None  # ITU-R BS.1770 integrated loudness (dB)
     peak_db: float | None = None  # sample peak in dBFS (close to true peak)
+    dynamic_range: float | None = None  # peak_db - integrated LUFS (dB)
+    tempo_stability: int | None = None  # 0-100, beat interval consistency
+    stem_presence: dict[str, int] | None = None  # per-stem RMS 0-100
+    sections: list[dict] | None = None  # [{id, name, start, end, color}]
+    tags: list[str] | None = None  # YouTube tags + categories, lowercased, max 8
     stems: list[dict[str, str]] = field(default_factory=list)
     # Subset of stems the user chose at submit. The pipeline produces all
     # 6 regardless (Demucs htdemucs_6s is fixed), but after collect we
@@ -58,11 +63,17 @@ class Job:
             "key_confidence": self.key_confidence,
             "lufs": self.lufs,
             "peak_db": self.peak_db,
+            "dynamic_range": self.dynamic_range,
+            "tempo_stability": self.tempo_stability,
+            "stem_presence": self.stem_presence,
+            "sections": self.sections,
+            "tags": self.tags,
             "stems": self.stems,
             "selected_stems": self.selected_stems,
             "mix_url": self.mix_url,
             "source_url": self.source_url,
             "error": self.error,
+            "created_at": self.created_at,
         }
 
     def to_record(self) -> dict[str, Any]:

@@ -1,10 +1,13 @@
 // catalog.js — library panel: folders, tracks, collapse, drag-and-drop
 import { STEM_NAMES } from "./constants.js";
-import { wireUpAudio } from "./player.js";
+import { wireUpAudio, updateFooterTrack } from "./player.js";
+import { initSections } from "./sections.js";
 import { bpmChip, keyChip, saveSelectedStems, selectedStems, titleEl } from "./state.js";
+import { fmtTime } from "./utils.js";
 
 const STORAGE_KEY = "stemdeck.folders";
 const STORAGE_VERSION = 2; // bump to wipe stale seeded data
+const DELETED_JOBS_KEY = "stemdeck.deleted_jobs";
 
 let folders = [];
 let tracks = {};
@@ -19,13 +22,26 @@ const PROCESSING_STATUSES = new Set(["queued", "downloading", "analyzing", "sepa
 const FOLDER_COLORS = ["#d8a84a", "#e85f6f", "#64c86f", "#4f9de8", "#a985f4"];
 const DEFAULT_FOLDER_COLOR = FOLDER_COLORS[0];
 const TRACK_DRAG_TYPE = "application/x-stemdeck-track";
+const FOLDER_DRAG_TYPE = "application/x-stemdeck-folder";
+
+function getDeletedJobIds() {
+  try { return new Set(JSON.parse(localStorage.getItem(DELETED_JOBS_KEY) || "[]")); }
+  catch { return new Set(); }
+}
+
+function markJobsDeleted(ids) {
+  const set = getDeletedJobIds();
+  for (const id of ids) set.add(id);
+  try { localStorage.setItem(DELETED_JOBS_KEY, JSON.stringify([...set])); }
+  catch (e) { console.warn("[catalog] failed to persist deleted jobs", e); }
+}
 
 function normalizeFolderColor(color) {
   return FOLDER_COLORS.includes(color) ? color : DEFAULT_FOLDER_COLOR;
 }
 
-function makeFolder({ id = `f-${Date.now()}`, name = "New folder", collapsed = false, items = [] } = {}) {
-  return { id, name, collapsed, items, color: DEFAULT_FOLDER_COLOR };
+function makeFolder({ id = `f-${Date.now()}`, name = "New folder", collapsed = false, items = [], parentId = null } = {}) {
+  return { id, name, collapsed, items, color: DEFAULT_FOLDER_COLOR, parentId: parentId ?? null };
 }
 
 function ensureTrash() {
@@ -46,7 +62,13 @@ function removeTrackFromFolders(trackId) {
 }
 
 function normalizeSource(value) {
-  return String(value || "").trim();
+  const s = String(value || "").trim();
+  if (!s) return s;
+  // Normalize YouTube URLs to the bare video ID so that youtu.be/xxx,
+  // youtube.com/watch?v=xxx, and variants with &t= / ?si= all match.
+  const yt = s.match(/(?:youtu\.be\/|[?&]v=)([a-zA-Z0-9_-]{11})/);
+  if (yt) return `yt:${yt[1]}`;
+  return s;
 }
 
 function normalizeSearch(value) {
@@ -56,11 +78,16 @@ function normalizeSearch(value) {
 function trackMatchesSearch(track) {
   const q = normalizeSearch(catalogSearchQuery);
   if (!q) return true;
+  if (q.startsWith("#")) {
+    const tag = q.slice(1);
+    return (track?.tags ?? []).some((t) => String(t).toLowerCase() === tag);
+  }
   return [
     track?.title,
     track?.channel,
     track?.sourceUrl,
     ...(track?.stems || []),
+    ...(track?.tags || []),
   ].some((value) => String(value || "").toLowerCase().includes(q));
 }
 
@@ -106,6 +133,13 @@ function loadState() {
       if ((data.v ?? 1) >= STORAGE_VERSION) {
         folders = data.folders ?? [];
         tracks = data.tracks ?? {};
+        // Migrate old timestamp-based "Unsorted" folder to reserved ID.
+        const oldUnsorted = folders.find((f) => f.id !== TRASH_ID && f.name === "Unsorted" && f.id !== "f-unsorted");
+        if (oldUnsorted) { oldUnsorted.id = "f-unsorted"; changed = true; }
+        // Ensure all folders have parentId field.
+        for (const f of folders) {
+          if (!Object.prototype.hasOwnProperty.call(f, "parentId")) { f.parentId = null; changed = true; }
+        }
         // Drop title-less entries left over from before metadata persistence.
         const noTitle = Object.keys(tracks).filter((id) => !tracks[id].title);
         if (noTitle.length) {
@@ -129,7 +163,13 @@ function loadState() {
       }
     }
   }
-  changed = purgeTrash() || changed;
+  // Remove trash refs whose track data is missing (orphaned), but don't auto-empty.
+  const trashFolder = folders.find((f) => f.id === TRASH_ID);
+  if (trashFolder) {
+    const before = trashFolder.items.length;
+    trashFolder.items = trashFolder.items.filter((id) => tracks[id]);
+    if (trashFolder.items.length !== before) changed = true;
+  }
   if (changed) saveState();
 }
 
@@ -145,14 +185,31 @@ function saveState() {
 export function addTrackToLibrary(track) {
   // track: { id, title, channel, thumb, stems, status, sourceUrl }
   const existingId = findTrackBySource(track.sourceUrl, track.id);
-  if (existingId) replaceTrackId(existingId, track.id);
-  tracks[track.id] = { ...(tracks[track.id] || {}), ...track };
+  if (existingId) {
+    const trash = getTrashFolder();
+    const inTrash = trash?.items.includes(existingId);
+    if (inTrash) {
+      // Old track was trashed — delete it silently so the new import lands
+      // in the library instead of inheriting the trash placement.
+      delete tracks[existingId];
+      for (const f of folders) f.items = f.items.filter((id) => id !== existingId);
+    } else {
+      replaceTrackId(existingId, track.id);
+    }
+  }
+  const existing = tracks[track.id] || {};
+  tracks[track.id] = {
+    ...existing,
+    ...track,
+    createdAt: existing.createdAt ?? track.createdAt ?? (Date.now() / 1000),
+    favorite: existing.favorite ?? false,
+  };
   const alreadyPlaced = folders.some((folder) => folder.items.includes(track.id));
   if (!alreadyPlaced) {
     // Put into first non-trash folder or create an "Unsorted" folder.
     let target = folders.find((folder) => folder.id !== TRASH_ID);
     if (!target) {
-      target = makeFolder({ id: `f-${Date.now()}`, name: "Unsorted" });
+      target = makeFolder({ id: "f-unsorted", name: "Unsorted" });
       folders.unshift(target);
     }
     target.items.unshift(track.id);
@@ -199,37 +256,139 @@ function stateMetadataToTrack(state, fallbackTrack) {
     keyConfidence: state.key_confidence ?? fallbackTrack.keyConfidence,
     lufs: state.lufs ?? fallbackTrack.lufs,
     peakDb: state.peak_db ?? fallbackTrack.peakDb,
+    stemPresence: state.stem_presence ?? fallbackTrack.stemPresence,
+    dynamicRange: state.dynamic_range ?? fallbackTrack.dynamicRange,
+    tempoStability: state.tempo_stability ?? fallbackTrack.tempoStability,
+    tags: state.tags ?? fallbackTrack.tags ?? [],
+    sections: state.sections ?? fallbackTrack.sections ?? null,
     sourceUrl: state.source_url || fallbackTrack.sourceUrl,
+    mixUrl: state.mix_url ?? fallbackTrack.mixUrl ?? null,
+    createdAt: fallbackTrack.createdAt ?? state.created_at,
+    favorite: fallbackTrack.favorite ?? false,
   };
+}
+
+function fmtExtracted(ts) {
+  if (!ts) return "—";
+  return new Date(ts * 1000).toLocaleString("en-US", {
+    month: "long", day: "numeric", year: "numeric",
+    hour: "numeric", minute: "2-digit",
+  });
+}
+
+function deriveSource(sourceUrl) {
+  if (!sourceUrl) return "—";
+  if (sourceUrl.startsWith("local:")) return "Local file";
+  if (sourceUrl.includes("youtube.com") || sourceUrl.includes("youtu.be")) return "YouTube";
+  return "Web";
+}
+
+function deriveQuality(sourceUrl) {
+  if (!sourceUrl) return "—";
+  if (sourceUrl.startsWith("local:")) {
+    const ext = sourceUrl.split(".").pop()?.toLowerCase();
+    if (ext === "wav") return "Lossless (WAV)";
+    if (ext === "mp3") return "Compressed (MP3)";
+    return "Local file";
+  }
+  if (sourceUrl.includes("youtube.com") || sourceUrl.includes("youtu.be")) return "High";
+  return "—";
+}
+
+function drLabel(dr) {
+  if (dr < 7) return "Compressed";
+  if (dr < 10) return "Moderate";
+  if (dr < 14) return "High";
+  return "Wide";
+}
+
+function stabilityLabel(pct) {
+  if (pct >= 90) return "Very Stable";
+  if (pct >= 70) return "Stable";
+  if (pct >= 50) return "Moderate";
+  return "Variable";
+}
+
+export function applyStemPresenceCards(stemPresence) {
+  const cards = document.querySelectorAll(".stem-presence-panel .stem-card");
+  cards.forEach((card) => {
+    const stem = card.dataset.stem;
+    const pct = stemPresence?.[stem];
+    const label = card.querySelector(".stem-card-pct");
+    if (pct != null && pct > 0) {
+      card.classList.remove("inactive");
+      if (label) label.textContent = `${pct}%`;
+    } else {
+      card.classList.add("inactive");
+      if (label) label.textContent = pct === 0 ? "0%" : "—";
+    }
+  });
 }
 
 function applyTrackInfoToPanel(track) {
   titleEl.textContent = track.title || "Untitled track";
   bpmChip.textContent = track.bpm ? `${track.bpm} BPM` : "— BPM";
   keyChip.textContent = track.key || "— —";
+  updateFooterTrack({
+    title: track.title,
+    thumbnail: track.thumb,
+    key: track.key,
+    bpm: track.bpm,
+    stemCount: (track.audioStems || track.stems || []).filter((s) => (s.name ?? s) !== "original").length || null,
+  });
+  applyStemPresenceCards(track.stemPresence);
 
   const summaryKey = document.getElementById("summary-key");
   const summaryBpm = document.getElementById("summary-bpm");
   const summaryScale = document.getElementById("summary-scale");
+  const summaryScaleName = document.getElementById("summary-scale-name");
   const summaryConfidence = document.getElementById("summary-confidence");
   const summaryConfidenceLabel = document.getElementById("summary-confidence-label");
-  const loudnessCard = document.getElementById("loudness-card");
   const summaryLufs = document.getElementById("summary-lufs");
   const summaryPeak = document.getElementById("summary-peak");
+  const summaryDuration = document.getElementById("summary-duration");
 
   if (summaryKey) summaryKey.textContent = track.key || "—";
-  if (summaryBpm) {
-    summaryBpm.textContent = "";
-    if (track.bpm) {
-      const bpmNum = document.createTextNode(`${track.bpm} `);
-      const bpmUnit = document.createElement("small");
-      bpmUnit.textContent = "BPM";
-      summaryBpm.append(bpmNum, bpmUnit);
-    } else {
-      summaryBpm.innerHTML = "— <small>BPM</small>";
-    }
-  }
+  if (summaryBpm) summaryBpm.textContent = track.bpm ? String(track.bpm) : "—";
   if (summaryScale) summaryScale.textContent = track.scale || "";
+  if (summaryScaleName) summaryScaleName.textContent = track.scale || "—";
+  if (summaryLufs) summaryLufs.textContent = track.lufs != null ? Number(track.lufs).toFixed(1) : "—";
+  if (summaryPeak) summaryPeak.textContent = track.peakDb != null ? `Peak ${Number(track.peakDb).toFixed(1)} dB` : "";
+  if (summaryDuration) summaryDuration.textContent = track.duration ? fmtTime(track.duration) : "—";
+
+  const trackExtracted = document.getElementById("track-extracted");
+  const trackSource = document.getElementById("track-source");
+  const trackQuality = document.getElementById("track-quality");
+  const favBtn = document.getElementById("fav-btn");
+  if (trackExtracted) trackExtracted.textContent = fmtExtracted(track.createdAt);
+  if (trackSource) trackSource.textContent = deriveSource(track.sourceUrl);
+  if (trackQuality) trackQuality.textContent = deriveQuality(track.sourceUrl);
+  if (favBtn) {
+    favBtn.classList.toggle("active", Boolean(track.favorite));
+    favBtn.setAttribute("aria-pressed", String(Boolean(track.favorite)));
+    favBtn.onclick = () => {
+      if (!_currentTrackId) return;
+      const t = tracks[_currentTrackId];
+      if (!t) return;
+      t.favorite = !t.favorite;
+      favBtn.classList.toggle("active", t.favorite);
+      favBtn.setAttribute("aria-pressed", String(t.favorite));
+      saveState();
+    };
+  }
+
+  const summaryDr = document.getElementById("summary-dr");
+  const summaryDrLabel = document.getElementById("summary-dr-label");
+  const summaryStability = document.getElementById("summary-stability");
+  const summaryStabilityLabel = document.getElementById("summary-stability-label");
+  if (summaryDr) summaryDr.textContent = track.dynamicRange != null ? String(track.dynamicRange) : "—";
+  if (summaryDrLabel) summaryDrLabel.textContent = track.dynamicRange != null ? drLabel(track.dynamicRange) : "";
+  if (summaryStability) {
+    summaryStability.textContent = track.tempoStability != null ? `${track.tempoStability}%` : "—";
+    summaryStability.className = "meta-card-value" + (track.tempoStability != null && track.tempoStability >= 80 ? " stability-high" : "");
+  }
+  if (summaryStabilityLabel) summaryStabilityLabel.textContent = track.tempoStability != null ? stabilityLabel(track.tempoStability) : "";
+
   if (summaryConfidence) {
     summaryConfidence.textContent = "";
     summaryConfidence.style.removeProperty("--confidence-pct");
@@ -245,14 +404,6 @@ function applyTrackInfoToPanel(track) {
       summaryConfidenceLabel?.classList.remove("hidden");
     }
   }
-  if (loudnessCard) {
-    const hasLoudness = track.lufs != null && track.peakDb != null;
-    loudnessCard.classList.toggle("hidden", !hasLoudness);
-    if (hasLoudness) {
-      if (summaryLufs) summaryLufs.textContent = Number(track.lufs).toFixed(1);
-      if (summaryPeak) summaryPeak.textContent = Number(track.peakDb).toFixed(1);
-    }
-  }
 }
 
 function moveTrackToTrash(trackId) {
@@ -266,9 +417,9 @@ function moveTrackToTrash(trackId) {
 }
 
 function setCatalogView(view) {
-  catalogView = view === "trash" ? "trash" : "library";
+  catalogView = ["trash", "favorites"].includes(view) ? view : "library";
   const app = document.querySelector(".app");
-  if (catalogView === "trash") {
+  if (catalogView === "trash" || catalogView === "favorites") {
     app?.classList.remove("cat-collapsed");
     localStorage.setItem("stemdeck.catalog.collapsed", "0");
   }
@@ -292,17 +443,17 @@ async function loadTrackIntoStudio(trackId) {
   if (!track) return;
   const hadStoredAudio = Boolean(track.audioStems?.length);
 
-  if (!track.audioStems?.length || !hasTrackAnalysis(track)) {
-    try {
-      const res = await fetch(`/api/jobs/${trackId}`);
-      if (res.ok) {
-        const state = await res.json();
-        track = stateMetadataToTrack(state, track);
-        tracks[trackId] = track;
-        saveState();
-      }
-    } catch { /* ignore; the stored track may be from a previous server run */ }
-  }
+  // Always fetch fresh state so server-side changes (sections, analysis, stems)
+  // are reflected — cached localStorage data can be stale.
+  try {
+    const res = await fetch(`/api/jobs/${trackId}`);
+    if (res.ok) {
+      const state = await res.json();
+      track = stateMetadataToTrack(state, track);
+      tracks[trackId] = track;
+      saveState();
+    }
+  } catch { /* ignore; use stored track if server unreachable */ }
 
   if (!track.audioStems?.length) return;
   if (track.status !== "done" && !hadStoredAudio) return;
@@ -317,7 +468,8 @@ async function loadTrackIntoStudio(trackId) {
   }
 
   applyTrackInfoToPanel(track);
-  wireUpAudio(trackId, track.audioStems, track.duration || 0, track.thumb);
+  wireUpAudio(trackId, track.audioStems, track.duration || 0, track.thumb, track.mixUrl ?? null);
+  initSections(trackId, track.sections, track.duration || 0);
 }
 
 export function setCurrentTrack(trackId) {
@@ -339,8 +491,11 @@ function createFolder() {
 }
 
 function deleteFolder(folderId) {
+  if (folderId === TRASH_ID) return;
+  // Cascade: delete children first.
+  for (const child of folders.filter((f) => f.parentId === folderId)) deleteFolder(child.id);
   const idx = folders.findIndex((f) => f.id === folderId);
-  if (idx === -1 || folders[idx].id === TRASH_ID) return;
+  if (idx === -1) return;
   const [folder] = folders.splice(idx, 1);
   const trash = getTrashFolder();
   for (const trackId of folder.items) {
@@ -348,6 +503,37 @@ function deleteFolder(folderId) {
       trash.items.unshift(trackId);
     }
   }
+  saveState();
+  render();
+}
+
+function reorderFolder(draggedId, targetId, before) {
+  if (draggedId === targetId) return;
+  const dragged = folders.find((f) => f.id === draggedId);
+  const target = folders.find((f) => f.id === targetId);
+  if (!dragged || !target) return;
+  folders.splice(folders.indexOf(dragged), 1);
+  const toIdx = folders.indexOf(target);
+  folders.splice(before ? toIdx : toIdx + 1, 0, dragged);
+  saveState();
+  render();
+}
+
+function isFolderDescendant(ancestorId, candidateId) {
+  let cur = folders.find((f) => f.id === candidateId);
+  while (cur?.parentId) {
+    if (cur.parentId === ancestorId) return true;
+    cur = folders.find((f) => f.id === cur.parentId);
+  }
+  return false;
+}
+
+function reparentFolder(childId, newParentId) {
+  if (childId === newParentId) return;
+  if (isFolderDescendant(childId, newParentId)) return; // would create cycle
+  const child = folders.find((f) => f.id === childId);
+  if (!child) return;
+  child.parentId = newParentId;
   saveState();
   render();
 }
@@ -451,6 +637,7 @@ function openFolderEditor(folderId) {
 // ─── Drag-and-drop ───
 
 let dragId = null;
+let folderDragId = null;
 
 function isTrackDragEvent(event) {
   return dragId != null || Boolean(event?.dataTransfer?.types?.includes(TRACK_DRAG_TYPE));
@@ -564,7 +751,7 @@ function restoreTrackFromTrash(trackId) {
   trash.items = trash.items.filter((id) => id !== trackId);
   let target = folders.find((f) => f.id !== TRASH_ID);
   if (!target) {
-    target = makeFolder({ id: `f-${Date.now()}`, name: "Unsorted" });
+    target = makeFolder({ id: "f-unsorted", name: "Unsorted" });
     folders.unshift(target);
   }
   if (!target.items.includes(trackId)) target.items.push(trackId);
@@ -612,6 +799,58 @@ function wireLibraryDeleteKeys() {
     e.preventDefault();
     moveTrackToTrash(_currentTrackId);
   });
+}
+
+// ─── Rendering helpers ───
+
+function getRecentTracks(trashIds, n = 3) {
+  return Object.entries(tracks)
+    .filter(([id, t]) => !trashIds.has(id) && t.title)
+    .sort(([, a], [, b]) => (b.createdAt ?? 0) - (a.createdAt ?? 0))
+    .slice(0, n)
+    .map(([id]) => id);
+}
+
+function getAllTags(trashIds) {
+  const counts = {};
+  for (const [id, track] of Object.entries(tracks)) {
+    if (trashIds.has(id)) continue;
+    for (const tag of track.tags ?? []) {
+      counts[tag] = (counts[tag] || 0) + 1;
+    }
+  }
+  return Object.entries(counts).sort(([, a], [, b]) => b - a);
+}
+
+function makeSectionEl(labelText) {
+  const section = document.createElement("div");
+  section.className = "lib-section";
+  const head = document.createElement("div");
+  head.className = "lib-section-head";
+  head.textContent = labelText;
+  section.appendChild(head);
+  return section;
+}
+
+function renderRecentItem(trackId) {
+  const track = tracks[trackId];
+  if (!track) return null;
+  const el = document.createElement("div");
+  el.className = `cat-item${trackId === _currentTrackId ? " active" : ""}`;
+  el.dataset.id = trackId;
+  const duration = track.duration ? fmtTime(track.duration) : "";
+  const stemCount = track.stems?.length ?? 0;
+  const sub = [duration, `${stemCount} stem${stemCount !== 1 ? "s" : ""}`].filter(Boolean).join(" · ");
+  el.innerHTML = `
+    <div class="cat-thumb">${thumbHtml(track)}</div>
+    <div class="cat-meta">
+      <div class="cat-title">${track.title ?? "Unknown track"}</div>
+      <div class="cat-sub"><span>${sub}</span></div>
+    </div>
+    <div class="cat-status${PROCESSING_STATUSES.has(track.status) ? " processing" : ""}"></div>
+  `;
+  wireTrackDragAndLoad(el, trackId);
+  return el;
 }
 
 // ─── Rendering ───
@@ -679,43 +918,66 @@ function renderTrackItem(trackId, { inTrash = false } = {}) {
 
 function renderFolder(folder) {
   const isTrash = folder.id === TRASH_ID;
+  const isSubfolder = Boolean(folder.parentId);
   if (!isTrash) folder.color = normalizeFolderColor(folder.color);
 
   const el = document.createElement("div");
-  el.className = `folder${folder.collapsed ? " collapsed" : ""}`;
+  el.className = `folder${folder.collapsed ? " collapsed" : ""}${isSubfolder ? " subfolder" : ""}`;
   el.dataset.id = folder.id;
 
   const head = document.createElement("div");
   head.className = "folder-head";
   if (!isTrash) head.style.setProperty("--folder-color", folder.color);
+
   const folderIcon = isTrash
     ? `<svg class="f-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"></path></svg>`
     : `<svg class="f-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>`;
+
   head.innerHTML = `
+    ${isTrash ? "" : `<span class="f-grip" title="Drag to reorder">
+      <svg viewBox="0 0 24 24" width="10" height="10" fill="currentColor" aria-hidden="true">
+        <circle cx="9" cy="5" r="1.5"/><circle cx="15" cy="5" r="1.5"/>
+        <circle cx="9" cy="12" r="1.5"/><circle cx="15" cy="12" r="1.5"/>
+        <circle cx="9" cy="19" r="1.5"/><circle cx="15" cy="19" r="1.5"/>
+      </svg>
+    </span>`}
     <svg class="f-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"></polyline></svg>
     ${folderIcon}
     <span class="f-name">${folder.name}</span>
     <span class="f-count">${folder.items.length}</span>
-    ${isTrash ? "" : `<button class="f-del" type="button" aria-label="Delete folder" title="Delete folder">
-      <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"></path></svg>
-    </button>`}
+    ${isTrash ? "" : `
+      <button class="f-subfolder" type="button" aria-label="New subfolder" title="New subfolder">
+        <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
+          <path d="M12 11v6M9 14h6"/>
+        </svg>
+      </button>
+      <button class="f-del" type="button" aria-label="Delete folder" title="Delete folder">
+        <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"></path></svg>
+      </button>
+    `}
   `;
 
   const body = document.createElement("div");
   body.className = "folder-body";
 
   const visibleItems = folder.items.filter((id) => trackMatchesSearch(tracks[id]));
+  const childFolders = folders.filter((f) => f.parentId === folder.id);
 
-  if (catalogSearchQuery && visibleItems.length === 0) {
+  if (catalogSearchQuery && visibleItems.length === 0 && childFolders.length === 0) {
     return null;
   }
 
-  if (visibleItems.length === 0) {
+  if (visibleItems.length === 0 && childFolders.length === 0) {
     body.innerHTML = '<span class="folder-empty">Empty folder</span>';
   } else {
     for (const id of visibleItems) {
       const item = renderTrackItem(id);
       if (item) body.appendChild(item);
+    }
+    for (const child of childFolders) {
+      const childEl = renderFolder(child);
+      if (childEl) body.appendChild(childEl);
     }
   }
 
@@ -723,9 +985,9 @@ function renderFolder(folder) {
 
   let folderClickTimer = null;
 
-  // Toggle folder collapse on a single click. Double-click is reserved for edit.
+  // Toggle folder collapse on single click.
   head.addEventListener("click", (e) => {
-    if (e.target.closest(".f-del")) return;
+    if (e.target.closest(".f-del, .f-subfolder, .f-grip")) return;
     if (e.detail !== 1) return;
     window.clearTimeout(folderClickTimer);
     folderClickTimer = window.setTimeout(() => {
@@ -735,34 +997,85 @@ function renderFolder(folder) {
     }, 180);
   });
 
-  // Edit folder name + color on double-click (not for trash).
   if (!isTrash) {
     head.addEventListener("dblclick", (e) => {
-      if (e.target.closest(".f-del")) return;
+      if (e.target.closest(".f-del, .f-subfolder, .f-grip")) return;
       window.clearTimeout(folderClickTimer);
       e.stopPropagation();
       openFolderEditor(folder.id);
     });
   }
 
-  // Delete
   head.querySelector(".f-del")?.addEventListener("click", (e) => {
     e.stopPropagation();
     deleteFolder(folder.id);
   });
 
-  // Drag-over for drop target
+  head.querySelector(".f-subfolder")?.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const child = makeFolder({ parentId: folder.id });
+    folders.push(child);
+    folder.collapsed = false;
+    el.classList.remove("collapsed");
+    saveState();
+    render();
+    openFolderEditor(child.id);
+  });
+
+  // Folder drag handle — reorder folders.
+  const grip = head.querySelector(".f-grip");
+  if (grip) {
+    grip.draggable = true;
+    grip.addEventListener("dragstart", (e) => {
+      folderDragId = folder.id;
+      e.dataTransfer.effectAllowed = "move";
+      e.dataTransfer.setData(FOLDER_DRAG_TYPE, folder.id);
+      e.stopPropagation();
+      requestAnimationFrame(() => el.classList.add("folder-dragging"));
+    });
+    grip.addEventListener("dragend", () => {
+      folderDragId = null;
+      el.classList.remove("folder-dragging");
+      for (const f of document.querySelectorAll(".folder.drop-before, .folder.drop-after, .folder.drop-into")) {
+        f.classList.remove("drop-before", "drop-after", "drop-into");
+      }
+    });
+  }
+
+  // Dragover: folder reorder/nest indicator OR track drop target.
   el.addEventListener("dragover", (e) => {
+    if (folderDragId && folderDragId !== folder.id && !isTrash) {
+      if (isFolderDescendant(folderDragId, folder.id)) return; // prevent cycle
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "move";
+      const rect = head.getBoundingClientRect();
+      const rel = (e.clientY - rect.top) / rect.height;
+      el.classList.toggle("drop-before", rel < 0.25);
+      el.classList.toggle("drop-into", rel >= 0.25 && rel < 0.75);
+      el.classList.toggle("drop-after", rel >= 0.75);
+      return;
+    }
     if (!isTrackDragEvent(e)) return;
     e.preventDefault();
     e.dataTransfer.dropEffect = "move";
     el.classList.add("drop-target");
   });
   el.addEventListener("dragleave", (e) => {
-    if (!el.contains(e.relatedTarget)) el.classList.remove("drop-target");
+    if (!el.contains(e.relatedTarget)) {
+      el.classList.remove("drop-target", "drop-before", "drop-after", "drop-into");
+    }
   });
   el.addEventListener("drop", (e) => {
     e.preventDefault();
+    if (folderDragId && folderDragId !== folder.id && !isTrash) {
+      const rect = head.getBoundingClientRect();
+      const rel = (e.clientY - rect.top) / rect.height;
+      el.classList.remove("drop-before", "drop-after", "drop-into");
+      if (rel < 0.25) reorderFolder(folderDragId, folder.id, true);
+      else if (rel >= 0.75) reorderFolder(folderDragId, folder.id, false);
+      else reparentFolder(folderDragId, folder.id);
+      return;
+    }
     el.classList.remove("drop-target");
     dropOnFolder(folder.id, getDraggedTrackId(e));
   });
@@ -770,10 +1083,34 @@ function renderFolder(folder) {
   return el;
 }
 
+function renderStrip(strip, nonTrash) {
+  if (!strip) return;
+  const folderTrackIds = new Set(folders.flatMap((folder) => folder.items));
+  for (const [trackId, track] of Object.entries(tracks)) {
+    if (folderTrackIds.has(trackId)) continue;
+    strip.appendChild(makeStripItem({
+      className: trackId === _currentTrackId ? "active" : "",
+      id: trackId,
+      title: track.title,
+      html: thumbHtml(track),
+      trackId,
+    }));
+  }
+  for (const folder of nonTrash) {
+    const folderColor = normalizeFolderColor(folder.color);
+    strip.appendChild(makeStripItem({
+      className: "folder-thumb",
+      id: folder.id,
+      title: `${folder.name} (${folder.items.length})`,
+      html: folderThumbHtml(false),
+      color: folderColor,
+    }));
+  }
+}
+
 function render() {
   const list = document.getElementById("catalogList");
   const strip = document.getElementById("catalogStrip");
-  const count = document.getElementById("catCount");
   const catalog = document.getElementById("catalogPanel");
   const searchInput = document.getElementById("catalogSearch");
   if (!list) return;
@@ -783,27 +1120,27 @@ function render() {
 
   const trash = getTrashFolder();
   const trashIds = new Set(trash?.items || []);
-  const totalTracks = Object.keys(tracks).filter((id) => !trashIds.has(id)).length;
   const isTrashView = catalogView === "trash";
+  const isFavoritesView = catalogView === "favorites";
+  const isLibraryView = !isTrashView && !isFavoritesView;
 
   catalog?.classList.toggle("trash-view", isTrashView);
-  document.querySelector(".rail-library")?.classList.toggle("active", !isTrashView);
-  document.querySelector(".rail-library")?.setAttribute("aria-pressed", String(!isTrashView));
+  catalog?.classList.toggle("favorites-view", isFavoritesView);
+
+  document.querySelector(".rail-library")?.classList.toggle("active", isLibraryView);
+  document.querySelector(".rail-library")?.setAttribute("aria-pressed", String(isLibraryView));
+  document.querySelector(".rail-favorites")?.classList.toggle("active", isFavoritesView);
+  document.querySelector(".rail-favorites")?.setAttribute("aria-pressed", String(isFavoritesView));
   document.querySelector(".rail-trash")?.classList.toggle("active", isTrashView);
   document.querySelector(".rail-trash")?.setAttribute("aria-pressed", String(isTrashView));
-  if (count) {
-    const n = isTrashView ? trashIds.size : totalTracks;
-    count.textContent = isTrashView
-      ? `${n} deleted`
-      : `${n} track${n !== 1 ? "s" : ""}`;
-  }
+
   if (searchInput) {
-    searchInput.placeholder = isTrashView
-      ? "Search trash…"
-      : "Search library…";
+    searchInput.placeholder = isTrashView ? "Search trash…" : isFavoritesView ? "Search favorites…" : "Search library…";
   }
 
-  const nonTrash = folders.filter((f) => f.id !== TRASH_ID);
+  const nonTrash = folders.filter((f) => f.id !== TRASH_ID && !f.parentId);
+
+  // ── Trash view ──
   if (isTrashView) {
     const visibleTrashItems = (trash?.items || []).filter((id) => trackMatchesSearch(tracks[id]));
     if (!trash?.items.length) {
@@ -819,42 +1156,85 @@ function render() {
     return;
   }
 
-  let renderedFolders = 0;
+  // ── Favorites view ──
+  if (isFavoritesView) {
+    const favIds = Object.entries(tracks)
+      .filter(([id, t]) => !trashIds.has(id) && t.favorite && trackMatchesSearch(t))
+      .sort(([, a], [, b]) => (b.createdAt ?? 0) - (a.createdAt ?? 0))
+      .map(([id]) => id);
+    if (!favIds.length) {
+      list.innerHTML = `<span class="folder-empty trash-empty">${catalogSearchQuery ? "No favorites match your search" : "No favorites yet — click ♥ on a track to save it"}</span>`;
+    } else {
+      for (const id of favIds) {
+        const item = renderRecentItem(id);
+        if (item) list.appendChild(item);
+      }
+    }
+    renderStrip(strip, nonTrash);
+    return;
+  }
+
+  // ── Library view — Recent · Stem Collections · Tags ──
+
+  // Recent section
+  const recentIds = getRecentTracks(trashIds).filter((id) => trackMatchesSearch(tracks[id]));
+  if (recentIds.length) {
+    const section = makeSectionEl("Recent");
+    for (const id of recentIds) {
+      const item = renderRecentItem(id);
+      if (item) section.appendChild(item);
+    }
+    list.appendChild(section);
+  }
+
+  // Stem Collections section
+  const collectionsSection = makeSectionEl("Stem Collections");
+  let hasCollections = false;
   for (const folder of nonTrash) {
     const el = renderFolder(folder);
     if (!el) continue;
-    list.appendChild(el);
-    renderedFolders += 1;
+    collectionsSection.appendChild(el);
+    hasCollections = true;
   }
-  if (catalogSearchQuery && renderedFolders === 0) {
+  if (hasCollections) list.appendChild(collectionsSection);
+
+  // Empty state when search yields nothing
+  if (catalogSearchQuery && !recentIds.length && !hasCollections) {
     list.innerHTML = '<span class="folder-empty trash-empty">No tracks match your search</span>';
+    return;
   }
 
-  // Collapsed strip: top-level structure only. Show unfiled songs,
-  // folders only. Trash lives in the side rail.
-  if (strip) {
-    const folderTrackIds = new Set(folders.flatMap((folder) => folder.items));
-    for (const [trackId, track] of Object.entries(tracks)) {
-      if (folderTrackIds.has(trackId)) continue;
-      strip.appendChild(makeStripItem({
-        className: trackId === _currentTrackId ? "active" : "",
-        id: trackId,
-        title: track.title,
-        html: thumbHtml(track),
-        trackId,
-      }));
+  // Tags section
+  const tags = getAllTags(trashIds);
+  if (tags.length) {
+    const section = makeSectionEl("Tags");
+    const row = document.createElement("div");
+    row.className = "lib-tags-row";
+    const activeTag = catalogSearchQuery.startsWith("#") ? catalogSearchQuery.slice(1) : null;
+    for (const [tag, count] of tags) {
+      const chip = document.createElement("button");
+      chip.className = `lib-tag-chip${activeTag === tag ? " active" : ""}`;
+      chip.type = "button";
+      chip.dataset.tag = tag;
+      chip.innerHTML = `${tag} <span class="lib-tag-count">${count}</span>`;
+      chip.addEventListener("click", () => {
+        const input = document.getElementById("catalogSearch");
+        if (catalogSearchQuery === `#${tag}`) {
+          catalogSearchQuery = "";
+          if (input) input.value = "";
+        } else {
+          catalogSearchQuery = `#${tag}`;
+          if (input) input.value = `#${tag}`;
+        }
+        render();
+      });
+      row.appendChild(chip);
     }
-    for (const folder of nonTrash) {
-      const folderColor = normalizeFolderColor(folder.color);
-      strip.appendChild(makeStripItem({
-        className: "folder-thumb",
-        id: folder.id,
-        title: `${folder.name} (${folder.items.length})`,
-        html: folderThumbHtml(false),
-        color: folderColor,
-      }));
-    }
+    section.appendChild(row);
+    list.appendChild(section);
   }
+
+  renderStrip(strip, nonTrash);
 }
 
 // ─── Catalog panel collapse ───
@@ -868,9 +1248,12 @@ function wireCatalogToggle() {
   const collapsed = localStorage.getItem("stemdeck.catalog.collapsed") === "1";
   if (collapsed) app.classList.add("cat-collapsed");
 
-  toggle.addEventListener("click", () => {
-    const isNowCollapsed = app.classList.toggle("cat-collapsed");
-    localStorage.setItem("stemdeck.catalog.collapsed", isNowCollapsed ? "1" : "0");
+  toggle.addEventListener("click", (e) => {
+    // Only expand — never collapse from within the sidebar.
+    if (!app.classList.contains("cat-collapsed")) return;
+    app.classList.remove("cat-collapsed");
+    localStorage.setItem("stemdeck.catalog.collapsed", "0");
+    toggle.querySelector("input")?.focus();
   });
   toggle.addEventListener("keydown", (e) => {
     if (e.code === "Enter" || e.code === "Space") { e.preventDefault(); toggle.click(); }
@@ -879,7 +1262,19 @@ function wireCatalogToggle() {
 
 function wireCatalogRailViews() {
   document.querySelector(".rail-library")?.addEventListener("click", () => setCatalogView("library"));
+  document.querySelector(".rail-favorites")?.addEventListener("click", () => setCatalogView("favorites"));
   document.querySelector(".rail-trash")?.addEventListener("click", () => setCatalogView("trash"));
+  document.getElementById("clearBinBtn")?.addEventListener("click", () => {
+    const trash = getTrashFolder();
+    const toDelete = [...(trash?.items || [])];
+    markJobsDeleted(toDelete); // persist before purge so reload can't re-import
+    purgeTrash();
+    saveState();
+    render();
+    for (const id of toDelete) {
+      fetch(`/api/jobs/${id}`, { method: "DELETE" }).catch(() => {});
+    }
+  });
 }
 
 function wireCatalogSearch() {
@@ -987,8 +1382,12 @@ async function syncWithServer() {
     const res = await fetch("/api/jobs", { cache: "no-store" });
     if (!res.ok) return;
     const jobs = await res.json();
+    const trashIds = new Set(getTrashFolder()?.items || []);
+    const deletedIds = getDeletedJobIds();
     for (const state of jobs) {
       if (tracks[state.job_id]) continue;
+      if (trashIds.has(state.job_id)) continue;   // soft-deleted, skip
+      if (deletedIds.has(state.job_id)) continue; // hard-deleted, skip
       const track = stateMetadataToTrack(state, { id: state.job_id, status: state.status });
       track.id = state.job_id;
       addTrackToLibrary(track);
