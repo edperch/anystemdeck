@@ -120,10 +120,10 @@ fn main() {
             };
             let _ = fs::create_dir_all(&data_dir);
 
-            let version_file   = data_dir.join("last_version.txt");
+            let version_file = data_dir.join("last_version.txt");
             let migration_flag = data_dir.join("store_migration_done");
             let current = env!("CARGO_PKG_VERSION");
-            let last    = fs::read_to_string(&version_file).unwrap_or_default();
+            let last = fs::read_to_string(&version_file).unwrap_or_default();
 
             if last.trim() != current {
                 if migration_flag.exists() {
@@ -181,8 +181,7 @@ fn main() {
 fn documents_stemdeck_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     let documents = app.path().document_dir().map_err(|e| e.to_string())?;
     let dir = documents.join("StemDeck");
-    fs::create_dir_all(&dir)
-        .map_err(|e| format!("failed to create ~/Documents/StemDeck: {e}"))?;
+    fs::create_dir_all(&dir).map_err(|e| format!("failed to create ~/Documents/StemDeck: {e}"))?;
     Ok(dir)
 }
 
@@ -200,7 +199,9 @@ fn documents_dir_for_jobs(app: &tauri::AppHandle) -> PathBuf {
             let _ = fs::create_dir_all(&jobs);
             jobs
         }
-        Err(_) => local_data_dir().map(|d| d.join("jobs")).unwrap_or_else(|_| PathBuf::from("jobs")),
+        Err(_) => local_data_dir()
+            .map(|d| d.join("jobs"))
+            .unwrap_or_else(|_| PathBuf::from("jobs")),
     }
 }
 
@@ -445,7 +446,10 @@ fn ensure_external_assets() -> Result<AssetStatus, String> {
 }
 
 #[tauri::command]
-fn start_backend(app_handle: tauri::AppHandle, state: tauri::State<BackendState>) -> Result<BackendStarted, String> {
+fn start_backend(
+    app_handle: tauri::AppHandle,
+    state: tauri::State<BackendState>,
+) -> Result<BackendStarted, String> {
     if let Some(url) = state.url.lock().map_err(|e| e.to_string())?.clone() {
         return Ok(BackendStarted { url });
     }
@@ -1868,8 +1872,8 @@ mod tests {
         // Simulate failure by checking: if write errors, last stays "0.4.0"
         let result = fs::write(dir.path().join("readonly_dir/last_version.txt"), "0.5.0");
         assert!(result.is_err()); // the write failed
-        // Original file unchanged — next launch will see "0.4.0" != "0.5.0" again,
-        // but migration_flag is absent so no cleanup fires. Correct behavior.
+                                  // Original file unchanged — next launch will see "0.4.0" != "0.5.0" again,
+                                  // but migration_flag is absent so no cleanup fires. Correct behavior.
         let last = fs::read_to_string(&version_file).unwrap_or_default();
         assert_eq!(last.trim(), "0.4.0");
     }
