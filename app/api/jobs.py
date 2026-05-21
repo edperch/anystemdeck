@@ -25,7 +25,7 @@ from app.core.registry import all_jobs as registry_all_jobs
 from app.core.registry import get as registry_get
 from app.core.registry import get_proc as registry_get_proc
 from app.core.registry import persist as registry_persist
-from app.core.registry import register as registry_register
+from app.core.registry import register_if_capacity as registry_register_if_capacity
 from app.core.registry import remove as registry_remove
 from app.pipeline import run_local_pipeline, run_pipeline
 from app.pipeline.download import InvalidYouTubeURL, validate_youtube_url
@@ -114,6 +114,8 @@ class JobRequest(BaseModel):
 
 @router.post("")
 async def create_job(request: Request) -> dict[str, str]:
+    """Submit a YouTube URL (JSON body) or upload an audio file (multipart/form-data)
+    to start a stem-separation job. Returns the new job ID."""
     ct = request.headers.get("content-type", "")
     if "multipart/form-data" in ct:
         return await _create_local_job(request)
@@ -135,24 +137,22 @@ async def _create_youtube_job(request: Request) -> dict[str, str]:
     except InvalidYouTubeURL as e:
         raise HTTPException(status_code=422, detail=str(e)) from e
 
-    pending = sum(1 for j in registry_all_jobs().values() if j.status == "queued")
-    if pending >= MAX_PENDING_JOBS:
-        raise HTTPException(status_code=503, detail="Server busy, please try again later")
-
     selected = [s for s in payload.stems if s in STEM_NAMES] if payload.stems else list(STEM_NAMES)
     if not selected:
         selected = list(STEM_NAMES)
 
-    job = registry_register(Job(id=uuid.uuid4().hex[:12], selected_stems=selected, source_url=url))
+    job = Job(id=uuid.uuid4().hex[:12], selected_stems=selected, source_url=url)
+    if not registry_register_if_capacity(job, MAX_PENDING_JOBS):
+        raise HTTPException(status_code=503, detail="Server busy, please try again later")
     task = asyncio.create_task(run_pipeline(job, url, JOBS_DIR))
     task.add_done_callback(_task_error_cb)
     return {"job_id": job.id}
 
 
 async def _create_local_job(request: Request) -> dict[str, str]:
-    # Reject busy server BEFORE touching disk so no orphan dir is created.
-    pending = sum(1 for j in registry_all_jobs().values() if j.status == "queued")
-    if pending >= MAX_PENDING_JOBS:
+    # Fast pre-check: if already at capacity, reject before touching disk.
+    # The real atomic check happens in register_if_capacity after the upload.
+    if sum(1 for j in registry_all_jobs().values() if j.status == "queued") >= MAX_PENDING_JOBS:
         raise HTTPException(status_code=503, detail="Server busy, please try again later")
 
     # Quick pre-check on Content-Length to fail fast for obviously oversized
@@ -226,15 +226,16 @@ async def _create_local_job(request: Request) -> dict[str, str]:
 
     title = _sanitize_title(filename)
     local_source_url = f"local:{title}"
-    job = registry_register(
-        Job(
-            id=job_id,
-            selected_stems=selected,
-            title=title,
-            duration_sec=duration,
-            source_url=local_source_url,
-        )
+    job = Job(
+        id=job_id,
+        selected_stems=selected,
+        title=title,
+        duration_sec=duration,
+        source_url=local_source_url,
     )
+    if not registry_register_if_capacity(job, MAX_PENDING_JOBS):
+        shutil.rmtree(job_dir, ignore_errors=True)
+        raise HTTPException(status_code=503, detail="Server busy, please try again later")
     task = asyncio.create_task(run_local_pipeline(job, source_path, JOBS_DIR))
     task.add_done_callback(_task_error_cb)
     return {"job_id": job.id}
@@ -242,6 +243,7 @@ async def _create_local_job(request: Request) -> dict[str, str]:
 
 @router.get("")
 def list_jobs() -> list[dict]:
+    """List all completed jobs in the library, sorted by creation time."""
     return [
         job.to_state()
         for job in sorted(registry_all_jobs().values(), key=lambda j: j.created_at)
@@ -251,6 +253,7 @@ def list_jobs() -> list[dict]:
 
 @router.get("/{job_id}")
 def get_job(job_id: str) -> dict:
+    """Get the current state of a job by ID."""
     job = registry_get(job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="job not found")
@@ -259,6 +262,7 @@ def get_job(job_id: str) -> dict:
 
 @router.post("/{job_id}/cancel")
 def cancel_job(job_id: str) -> dict:
+    """Request cancellation of a running job. Idempotent for terminal jobs."""
     job = registry_get(job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="job not found")
@@ -315,6 +319,7 @@ class SectionsBody(BaseModel):
 
 @router.patch("/{job_id}/sections")
 def update_sections(job_id: str, body: SectionsBody) -> dict:
+    """Save named timeline sections (intro, verse, chorus, etc.) for a done job."""
     if not JOB_ID_RE.match(job_id):
         raise HTTPException(status_code=404, detail="job not found")
     job = registry_get(job_id)
@@ -349,6 +354,7 @@ def update_sections(job_id: str, body: SectionsBody) -> dict:
 
 @router.delete("/{job_id}")
 def delete_job(job_id: str) -> dict[str, str]:
+    """Delete a completed or failed job and remove its stem files from disk."""
     if not JOB_ID_RE.match(job_id):
         raise HTTPException(status_code=404, detail="job not found")
     job = registry_get(job_id)

@@ -6,10 +6,10 @@
 
 <div align="center">
   <a href="https://ci.popchores.app/repos/2"><img src="https://ci.popchores.app/api/badges/2/status.svg?event=push" alt="CI"></a>
-  <a href="https://github.com/thcp/stemdeck/stargazers"><img src="https://img.shields.io/github/stars/thcp/stemdeck?style=flat-square" alt="GitHub Stars"></a>
-  <a href="https://github.com/thcp/stemdeck/releases"><img src="https://img.shields.io/github/downloads/thcp/stemdeck/total?style=flat-square&color=52c65f" alt="Total Downloads"></a>
-  <a href="https://github.com/thcp/stemdeck/releases/latest"><img src="https://img.shields.io/github/v/release/thcp/stemdeck?style=flat-square" alt="Latest Release"></a>
-  <a href="https://github.com/thcp/stemdeck/blob/main/LICENSE"><img src="https://img.shields.io/github/license/thcp/stemdeck?style=flat-square" alt="License"></a>
+  <a href="https://github.com/stemdeckapp/stemdeck/stargazers"><img src="https://img.shields.io/github/stars/stemdeckapp/stemdeck?style=flat-square" alt="GitHub Stars"></a>
+  <a href="https://github.com/stemdeckapp/stemdeck/releases"><img src="https://img.shields.io/github/downloads/stemdeckapp/stemdeck/total?style=flat-square&color=52c65f" alt="Total Downloads"></a>
+  <a href="https://github.com/stemdeckapp/stemdeck/releases/latest"><img src="https://img.shields.io/github/v/release/stemdeckapp/stemdeck?style=flat-square" alt="Latest Release"></a>
+  <a href="https://github.com/stemdeckapp/stemdeck/blob/main/LICENSE"><img src="https://img.shields.io/github/license/stemdeckapp/stemdeck?style=flat-square" alt="License"></a>
 </div>
 
 <br>
@@ -35,7 +35,7 @@ Drop an MP3 or WAV, or paste a YouTube URL. StemDeck splits the audio into up to
 
 ![StemDeck screenshot](imgs/screenshot/stemdeck.png)
 
-If you find StemDeck useful, consider [buying the maker a coffee](                    buymeacoffee.com/stemdeckapp); these donations are being used to random acts of kindness toward others 
+If you find StemDeck useful, consider [buying the maker a coffee](https://www.buymeacoffee.com/stemdeckapp); these donations are being used to random acts of kindness toward others 
 
 ---
 
@@ -127,7 +127,7 @@ Extract the zip anywhere, run `StemDeck.exe`. On first launch the app verifies t
 
 <br>
 
-StemDeck is built on **[Python 3.10+](https://python.org)** managed via **[uv](https://github.com/astral-sh/uv)**, with a **[FastAPI](https://fastapi.tiangolo.com)** backend serving REST and Server-Sent Events. Stem separation uses **[Demucs](https://github.com/facebookresearch/demucs)** (`htdemucs_6s`), Meta AI's open-source 6-stem neural network. YouTube audio is fetched via **[yt-dlp](https://github.com/yt-dlp/yt-dlp)**; transcoding and mixing use **[FFmpeg](https://ffmpeg.org)**. BPM detection and key analysis run on **[librosa](https://librosa.org)**; loudness measurement uses **[pyloudnorm](https://github.com/csteinmetz1/pyloudnorm)** (ITU-R BS.1770). The macOS and Windows desktop shells are **[Tauri v2](https://tauri.app)** (Rust/WKWebView on macOS, Rust/WebView2 on Windows). The frontend is vanilla JS with the Web Audio API, no framework and no build step; waveforms are rendered on `<canvas>` using min/max sample rendering.
+StemDeck is built on **[Python 3.12](https://python.org)** managed via **[uv](https://github.com/astral-sh/uv)**, with a **[FastAPI](https://fastapi.tiangolo.com)** backend serving REST and Server-Sent Events. Stem separation uses **[Demucs](https://github.com/facebookresearch/demucs)** (`htdemucs_6s`), Meta AI's open-source 6-stem neural network. YouTube audio is fetched via **[yt-dlp](https://github.com/yt-dlp/yt-dlp)**; transcoding and mixing use **[FFmpeg](https://ffmpeg.org)**. BPM detection and key analysis run on **[librosa](https://librosa.org)**; loudness measurement uses **[pyloudnorm](https://github.com/csteinmetz1/pyloudnorm)** (ITU-R BS.1770). The macOS and Windows desktop shells are **[Tauri v2](https://tauri.app)** (Rust/WKWebView on macOS, Rust/WebView2 on Windows). The frontend is vanilla JS with the Web Audio API, no framework and no build step; waveforms are rendered on `<canvas>` using min/max sample rendering.
 
 *Thanks to the creators and maintainers of all the open-source libraries that make StemDeck possible.*
 
@@ -137,7 +137,7 @@ StemDeck is built on **[Python 3.10+](https://python.org)** managed via **[uv](h
 
 ### macOS Native App
 
-Requires Rust, Node.js, and Python 3.10–3.13. Builds a self-contained `.app` that downloads its own runtime on first launch.
+Requires Rust, Node.js, and Python 3.12. Builds a self-contained `.app` that downloads its own runtime on first launch.
 
 ```sh
 # First time only — add the cross-compilation targets
@@ -167,11 +167,11 @@ open desktop/src-tauri/target/aarch64-apple-darwin/release/bundle/macos/StemDeck
 
 ---
 
-### Web Server (macOS / Linux / Windows with Python 3.10+)
+### Web Server (macOS / Linux / Windows with Python 3.12+)
 
 #### Prerequisites
 
-Python 3.10 or newer, `ffmpeg` on your PATH, and [uv](https://github.com/astral-sh/uv). Around 170 MB of free disk for the Demucs model, which downloads automatically on first run.
+Python 3.12 or newer, `ffmpeg` on your PATH, and [uv](https://github.com/astral-sh/uv). Around 170 MB of free disk for the Demucs model, which downloads automatically on first run.
 
 #### macOS / Linux (one-shot)
 
@@ -234,9 +234,22 @@ Stems land in `./jobs/` on the host. Demucs weights are cached in a named volume
 | `STEMDECK_DEMUCS_DEVICE` | auto | Force Torch device: `cuda`, `mps`, or `cpu`. |
 | `STEMDECK_DEMUCS_MODEL` | `htdemucs_6s` | Demucs model name. |
 | `STEMDECK_JOBS_DIR` | `./jobs` | Where job directories land. |
+| `STEMDECK_DATA_DIR` | (none) | Portable mode root; sets all sub-dirs below to live inside it. |
+| `STEMDECK_CACHE_DIR` | `<data>/cache` | Torch model cache directory. |
+| `STEMDECK_DOWNLOADS_DIR` | `<data>/downloads` | yt-dlp download scratch space. |
+| `STEMDECK_MODELS_DIR` | `<data>/models` | Demucs model weights directory. |
+| `STEMDECK_LOGS_DIR` | `<data>/logs` | Log file output directory. |
+| `STEMDECK_FFMPEG_DIR` | (none) | Directory containing a bundled ffmpeg binary. |
+| `STEMDECK_FFMPEG` | `ffmpeg` | Path to the ffmpeg executable. |
+| `STEMDECK_FFPROBE` | `ffprobe` | Path to the ffprobe executable. |
 | `STEMDECK_MAX_DURATION_SEC` | `1200` | Reject audio longer than this (seconds). |
 | `STEMDECK_JOB_TTL_SECONDS` | `86400` | How long to keep job dirs on disk. |
 | `STEMDECK_MAX_PENDING_JOBS` | `3` | Max queued jobs before returning 503. |
+| `STEMDECK_TIMEOUT_FFMPEG` | `300` | ffmpeg subprocess timeout (seconds). |
+| `STEMDECK_TIMEOUT_ANALYZE` | `120` | Audio analysis timeout (seconds). |
+| `STEMDECK_TIMEOUT_DEMUCS_STALL` | `1800` | Kill Demucs if no output for this many seconds. |
+
+`run.sh` also reads: `HOST` (default `127.0.0.1`), `PORT` (default `8765`), `RELOAD=1` (enable uvicorn auto-reload for development), `FOREGROUND=1` (run in foreground instead of backgrounding).
 
 ---
 
@@ -244,11 +257,15 @@ Stems land in `./jobs/` on the host. Demucs weights are cached in a named volume
 
 | Method | Path | Purpose |
 |---|---|---|
+| GET | `/api/health` | Server health and version info |
 | POST | `/api/jobs` | JSON `{url, stems?}` or multipart `file + stems` → `{job_id}` |
+| GET | `/api/jobs` | List completed (library) jobs |
 | GET | `/api/jobs/{id}` | Job state snapshot |
 | GET | `/api/jobs/{id}/events` | SSE stream of job state |
 | POST | `/api/jobs/{id}/cancel` | Terminate active subprocess and cancel job |
-| GET | `/api/jobs/{id}/stems/{name}.wav` | Stream/download a single stem (range requests) |
+| PATCH | `/api/jobs/{id}/sections` | Save waveform section markers for a job |
+| GET | `/api/jobs/{id}/stems/{name}.wav` | Stream a single stem WAV file |
+| GET | `/api/jobs/{id}/stems/{name}.mp3` | Transcode and stream a stem as MP3 |
 | DELETE | `/api/jobs/{id}` | Remove job dir from disk (terminal jobs only) |
 
 ---

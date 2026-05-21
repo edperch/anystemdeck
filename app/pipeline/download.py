@@ -9,7 +9,7 @@ from pathlib import Path
 from yt_dlp import YoutubeDL
 
 from app.core.config import MAX_DURATION_SEC
-from app.core.models import Job, JobCancelled
+from app.core.models import Job, JobCancelled, _set
 
 logger = logging.getLogger("stemdeck.download")
 
@@ -133,15 +133,6 @@ def normalize_youtube_url(url: str) -> str:
             return f"https://www.youtube.com/watch?v={vid}"
 
     return url
-
-
-def _set(job: Job, **fields: object) -> None:
-    """Mutate Job fields. Polling SSE picks the change up automatically."""
-    for k, v in fields.items():
-        if k == "stage":
-            job.stage_message = v  # type: ignore[assignment]
-        else:
-            setattr(job, k, v)
 
 
 def download(job: Job, url: str, job_dir: Path) -> Path:

@@ -20,9 +20,8 @@ import {
 import {
   loadMixIntoState, resetMixerState, refreshMixerVisuals,
   setLaneControlsEnabled, ensureMixerStateDefaults, applyMix,
-  renderRealMiniWave,
+  renderRealMiniWave, renderMixerRow,
 } from "./mixer.js";
-import { renderMixerRow } from "./mixer.js";
 import {
   buildRuler, updatePlayheadMarker, updateLoopRegionVisual,
   applyWaveZoom, buildPresenceRuler, updateFooterTimes,
@@ -171,6 +170,7 @@ let visualAudioContext = null;
 let stemVuRafId = null;
 let _footerWavePeaks = null;
 let _lastFooterProgress = 0;
+let _footerPlaceholderResizeObs = null;
 const _FOOTER_BARS = 300;
 
 function isAudioBufferLike(value) {
@@ -468,37 +468,6 @@ function startStemVuLoop(stems, decodedMap, token) {
   stemVuRafId = requestAnimationFrame(tick);
 }
 
-async function decodeStemForVisuals(stem) {
-  const AudioCtx = window.AudioContext || window.webkitAudioContext;
-  if (!AudioCtx) throw new Error("Web Audio is not available");
-  visualAudioContext ??= new AudioCtx();
-  const res = await fetch(stem.url, { cache: "force-cache" });
-  if (!res.ok) throw new Error(`Failed to fetch ${stem.name} stem: ${res.status}`);
-  const data = await res.arrayBuffer();
-  return visualAudioContext.decodeAudioData(data);
-}
-
-function renderAllDecodedVisuals(stems, token) {
-  clearOverviewWaveforms();
-  const decoded = new Map();
-  const promises = stems.map((stem) => {
-    const color = STEM_COLORS[stem.name] || "#a0a0a0";
-    return decodeStemForVisuals(stem)
-      .then((buf) => {
-        if (token !== visualRenderToken) return;
-        decoded.set(stem.name, buf);
-        renderDecodedStemVisuals(stem.name, buf, color);
-      })
-      .catch((err) => console.warn(`[visuals] ${stem.name}: ${err.message}`));
-  });
-  Promise.all(promises).then(() => {
-    if (token !== visualRenderToken) return;
-    renderAllOverviewWaveforms(stems, decoded);
-    renderStemEnergyBaseline(stems, decoded);
-    startStemVuLoop(stems, decoded, token);
-  });
-}
-
 export function destroyPlayer() {
   document.querySelector(".app")?.classList.remove("is-import");
   document.querySelector(".app")?.classList.add("no-track");
@@ -508,6 +477,10 @@ export function destroyPlayer() {
   if (multitrack) {
     multitrack.destroy();
     setMultitrack(null);
+  }
+  if (visualAudioContext) {
+    visualAudioContext.close().catch(() => {});
+    visualAudioContext = null;
   }
   renderPlaceholderTracks();
   clearOverviewWaveforms();
@@ -562,6 +535,8 @@ export function destroyPlayer() {
   loopRegionEl.classList.add("hidden");
   _footerWavePeaks = null;
   _lastFooterProgress = 0;
+  _footerPlaceholderResizeObs?.disconnect();
+  _footerPlaceholderResizeObs = null;
   _footerWaveResizeObs?.disconnect();
   setFooterWaveDrawFn(null);
   const cv = document.getElementById("footer-waveform");
@@ -746,7 +721,6 @@ export function wireUpAudio(jobId, stems, duration, thumbnail, mixUrl = null, ti
   }
 
   clearOverviewWaveforms();
-  renderAllDecodedVisuals(stems, token);
 
   // "original" is prepended at row 0 only when it actually has a URL so it
   // appears at the top. Omitting it when absent avoids a phantom 70px gap.
@@ -838,6 +812,33 @@ export function wireUpAudio(jobId, stems, duration, thumbnail, mixUrl = null, ti
     // instances. We pick wavesurfers[0] as the master clock since all
     // stems are kept in sync by the bundle's startSync() loop.
     const wsArr = mt.wavesurfers || mt._wavesurfers;
+
+    // Render overview waveforms, energy bars, and VU loop from wavesurfer's
+    // already-decoded buffers rather than issuing a separate full-file fetch
+    // per stem. The duplicate downloads race with streaming and cause audio
+    // chopping in WKWebView due to its tighter per-origin connection limit.
+    if (wsArr?.length) {
+      const decoded = new Map();
+      const waits = stems.map((stem) => {
+        const idx = orderedNames.indexOf(stem.name);
+        const wsi = idx >= 0 ? wsArr[idx] : null;
+        if (!wsi) return Promise.resolve();
+        const buf = wsi.getDecodedData?.();
+        if (isAudioBufferLike(buf)) { decoded.set(stem.name, buf); return Promise.resolve(); }
+        return new Promise((resolve) => {
+          wsi.once?.("decode", (b) => { if (isAudioBufferLike(b)) decoded.set(stem.name, b); resolve(); });
+          window.setTimeout(resolve, 15000);
+        });
+      });
+      Promise.all(waits).then(() => {
+        if (token !== visualRenderToken) return;
+        clearOverviewWaveforms();
+        renderAllOverviewWaveforms(stems, decoded);
+        renderStemEnergyBaseline(stems, decoded);
+        startStemVuLoop(stems, decoded, token);
+      });
+    }
+
     const ws = wsArr?.[0];
     if (!ws) return;
 
@@ -872,7 +873,9 @@ export function drawFooterPlaceholder() {
   _drawPlaceholderWave();
   const bar = document.getElementById("footer-waveform")?.closest(".footer-wave-bar");
   if (bar) {
-    new ResizeObserver(() => { if (!_footerWavePeaks) _drawPlaceholderWave(); }).observe(bar);
+    _footerPlaceholderResizeObs?.disconnect();
+    _footerPlaceholderResizeObs = new ResizeObserver(() => { if (!_footerWavePeaks) _drawPlaceholderWave(); });
+    _footerPlaceholderResizeObs.observe(bar);
   }
 }
 

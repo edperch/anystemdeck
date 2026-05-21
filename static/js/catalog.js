@@ -5,6 +5,15 @@ import { initSections } from "./sections.js";
 import { bpmChip, keyChip, saveSelectedStems, selectedStems, titleEl } from "./state.js";
 import { fmtTime, storeGet, storeSet } from "./utils.js";
 
+// Escape user-supplied strings before inserting into innerHTML.
+function esc(s) {
+  return String(s ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
 const STORAGE_KEY = "stemdeck.folders";
 const STORAGE_VERSION = 2; // bump to wipe stale seeded data
 const DELETED_JOBS_KEY = "stemdeck.deleted_jobs";
@@ -151,7 +160,7 @@ async function loadState() {
       }
       // else: stale version → start fresh
     }
-  } catch { /* ignore */ }
+  } catch (e) { console.warn("[catalog] failed to load state:", e); }
 
   try {
     const arr = await storeGet(DELETED_JOBS_KEY, []);
@@ -458,7 +467,7 @@ async function loadTrackIntoStudio(trackId) {
       tracks[trackId] = track;
       saveState();
     }
-  } catch { /* ignore; use stored track if server unreachable */ }
+  } catch (e) { console.warn("[catalog] server sync failed, using stored track:", e); }
 
   if (!track.audioStems?.length) return;
   if (track.status !== "done" && !hadStoredAudio) return;
@@ -849,8 +858,8 @@ function renderRecentItem(trackId) {
   el.innerHTML = `
     <div class="cat-thumb">${thumbHtml(track)}</div>
     <div class="cat-meta">
-      <div class="cat-title">${track.title ?? "Unknown track"}</div>
-      <div class="cat-sub"><span>${sub}</span></div>
+      <div class="cat-title">${esc(track.title ?? "Unknown track")}</div>
+      <div class="cat-sub"><span>${esc(sub)}</span></div>
     </div>
     <div class="cat-status${PROCESSING_STATUSES.has(track.status) ? " processing" : ""}"></div>
   `;
@@ -861,7 +870,7 @@ function renderRecentItem(trackId) {
 // ─── Rendering ───
 
 function thumbHtml(track) {
-  if (track.thumb) return `<img src="${track.thumb}" alt="" loading="lazy" />`;
+  if (track.thumb) return `<img src="${esc(track.thumb)}" alt="" loading="lazy" />`;
   return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9 18V5l12-2v13"></path><circle cx="6" cy="18" r="3"></circle><circle cx="18" cy="16" r="3"></circle></svg>`;
 }
 
@@ -895,21 +904,22 @@ function renderTrackItem(trackId, { inTrash = false } = {}) {
   el.innerHTML = `
     <div class="cat-thumb">${thumbHtml(track)}</div>
     <div class="cat-meta">
-      <div class="cat-title">${track.title ?? "Unknown track"}</div>
+      <div class="cat-title">${esc(track.title ?? "Unknown track")}</div>
       <div class="cat-sub">
-        <span>${track.channel ?? ""}</span>
+        <span>${esc(track.channel ?? "")}</span>
         <span class="dot">·</span>
         <span>${inTrash ? "Removed" : `${stemCount} stem${stemCount !== 1 ? "s" : ""}`}</span>
       </div>
     </div>
     <div class="cat-status${PROCESSING_STATUSES.has(track.status) ? " processing" : ""}"></div>
-    ${inTrash ? "" : `<button class="cat-del" type="button" aria-label="Move ${track.title ?? "track"} to Trash" title="Move to Trash">
+    ${inTrash ? "" : `<button class="cat-del" type="button" title="Move to Trash">
       <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
         <polyline points="3 6 5 6 21 6"></polyline>
         <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"></path>
       </svg>
     </button>`}
   `;
+  el.querySelector(".cat-del")?.setAttribute("aria-label", `Move ${track.title ?? "track"} to Trash`);
 
   el.querySelector(".cat-del")?.addEventListener("click", (e) => {
     e.stopPropagation();
@@ -1221,7 +1231,11 @@ function render() {
       chip.className = `lib-tag-chip${activeTag === tag ? " active" : ""}`;
       chip.type = "button";
       chip.dataset.tag = tag;
-      chip.innerHTML = `${tag} <span class="lib-tag-count">${count}</span>`;
+      chip.textContent = tag;
+      const countSpan = document.createElement("span");
+      countSpan.className = "lib-tag-count";
+      countSpan.textContent = String(count);
+      chip.appendChild(countSpan);
       chip.addEventListener("click", () => {
         const input = document.getElementById("catalogSearch");
         if (catalogSearchQuery === `#${tag}`) {
@@ -1399,7 +1413,7 @@ async function loadCurrentVersion() {
     if (!res.ok) return;
     const data = await res.json();
     setDisplayedVersion(data.version);
-  } catch { /* backend unavailable during bootstrap -- keep fallback */ }
+  } catch (e) { console.warn("[catalog] version fetch failed:", e); }
 }
 
 async function checkForUpdate() {
@@ -1414,7 +1428,7 @@ async function checkForUpdate() {
     if (!latest || latest === currentVersion) return;
     el.classList.add("has-update");
     el.innerHTML = `<a href="${RELEASES_URL}/tag/${data.tag_name}" target="_blank" rel="noopener noreferrer">new release available</a>`;
-  } catch { /* network unavailable — silently skip */ }
+  } catch (e) { console.warn("[catalog] update check failed:", e); }
 }
 
 function wireAboutDialog() {
@@ -1456,7 +1470,7 @@ async function syncWithServer() {
       track.id = state.job_id;
       addTrackToLibrary(track);
     }
-  } catch { /* backend unavailable — skip silently */ }
+  } catch (e) { console.warn("[catalog] failed to load jobs from backend:", e); }
 }
 
 export async function initCatalog() {

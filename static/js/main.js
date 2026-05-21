@@ -75,7 +75,6 @@ function wireAllButton() {
   }
 
   allBtn.addEventListener("click", () => {
-    const noneSelected = selectedStems.size === 0;
     const allSelected = selectedStems.size === STEM_NAMES.length;
     if (allSelected) {
       selectedStems.clear();

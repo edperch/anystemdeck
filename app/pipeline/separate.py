@@ -10,7 +10,7 @@ import time
 from pathlib import Path
 
 from app.core.config import DEMUCS_DEVICE, DEMUCS_MODEL, TIMEOUT_DEMUCS_STALL
-from app.core.models import Job, JobCancelled
+from app.core.models import Job, JobCancelled, _set
 from app.core.registry import set_proc
 
 logger = logging.getLogger("stemdeck.pipeline")
@@ -22,8 +22,6 @@ _PCT_RE = re.compile(r"(\d{1,3})%")
 
 
 def separate(job: Job, source: Path, job_dir: Path) -> Path:
-    from app.pipeline.download import _set
-
     _set(job, status="separating", progress=0.0, stage="Separating stems...")
 
     cmd = [
@@ -65,10 +63,14 @@ def separate(job: Job, source: Path, job_dir: Path) -> Path:
     buf = ""
     tail: list[str] = []
     last_output: list[float] = [time.monotonic()]
+    # Event set by the reader loop when the process exits normally so the
+    # watchdog can wake up immediately instead of waiting out its 30 s sleep.
+    _done_evt = threading.Event()
 
     def _watchdog() -> None:
-        while proc.poll() is None:
-            time.sleep(30)
+        while not _done_evt.wait(timeout=30):
+            if proc.poll() is not None:
+                return
             if time.monotonic() - last_output[0] > TIMEOUT_DEMUCS_STALL:
                 logger.warning(
                     "demucs stalled for %ss with no output, terminating job %s",
@@ -76,7 +78,7 @@ def separate(job: Job, source: Path, job_dir: Path) -> Path:
                     job.id,
                 )
                 proc.terminate()
-                break
+                return
 
     wt = threading.Thread(target=_watchdog, daemon=True)
     wt.start()
@@ -104,8 +106,9 @@ def separate(job: Job, source: Path, job_dir: Path) -> Path:
 
         proc.wait()
     finally:
+        _done_evt.set()
         set_proc(job.id, None)
-        wt.join(timeout=5)
+        wt.join(timeout=2)
 
     # POST /cancel calls proc.terminate() directly, which causes the read loop
     # above to hit EOF and proc.wait() to return a nonzero status. Translate

@@ -5,6 +5,7 @@ import ctypes
 import json
 import logging
 import os
+import signal
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from importlib.metadata import PackageNotFoundError
@@ -95,13 +96,19 @@ async def _desktop_parent_watchdog(parent_pid: int) -> None:
     while True:
         if not _process_exists(parent_pid):
             _log.info("desktop parent process exited; stopping backend")
-            os._exit(0)
+            # Send SIGTERM to ourselves so uvicorn runs its shutdown sequence
+            # instead of bypassing cleanup with os._exit().
+            os.kill(os.getpid(), signal.SIGTERM)
+            return
         await asyncio.sleep(1)
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
-    asyncio.create_task(_sweep_loop())
+    _background_tasks = set()
+    t = asyncio.create_task(_sweep_loop())
+    _background_tasks.add(t)
+    t.add_done_callback(_background_tasks.discard)
     if os.environ.get("STEMDECK_DESKTOP") == "1":
         parent_pid = os.environ.get("STEMDECK_PARENT_PID")
         if parent_pid:
@@ -111,11 +118,18 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
                 _log.warning("invalid STEMDECK_PARENT_PID=%r", parent_pid)
             else:
                 if parent_pid_int > 0 and parent_pid_int != os.getpid():
-                    asyncio.create_task(_desktop_parent_watchdog(parent_pid_int))
+                    wt = asyncio.create_task(_desktop_parent_watchdog(parent_pid_int))
+                    _background_tasks.add(wt)
+                    wt.add_done_callback(_background_tasks.discard)
     yield
 
 
-app = FastAPI(title="StemDeck", lifespan=lifespan)
+app = FastAPI(
+    title="StemDeck",
+    description="Paste a YouTube URL or upload an audio file, get audio stems split into a DAW-style player.",
+    version=app_version(),
+    lifespan=lifespan,
+)
 
 
 @app.get("/health", include_in_schema=False)
@@ -151,7 +165,5 @@ async def no_cache_static(request: Request, call_next):
 app.include_router(router, prefix="/api")
 app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")
 
-# Ensure runtime directories exist at startup (module-level side effect
-# moved from the old monolithic main.py; this is the canonical entrypoint).
 ensure_runtime_dirs()
 restore_registry(JOBS_DIR)

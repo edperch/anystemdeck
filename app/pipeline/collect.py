@@ -181,8 +181,8 @@ def make_selected_mix(job: Job, stems_dir: Path, found: list[str]) -> Path | Non
 
 def sweep_old_jobs(jobs_dir: Path) -> None:
     """Delete job directories older than JOB_TTL_SECONDS and remove them from
-    the in-memory registry. Called once per new job submission so stale data
-    doesn't accumulate on disk.
+    the in-memory registry. Called hourly from the background sweep loop
+    started at app startup.
 
     Prefers Job.created_at over directory mtime (which can be touched by
     unrelated filesystem events), and never deletes the directory of an

@@ -14,7 +14,7 @@ export async function storeGet(key, fallback = null) {
   try {
     const raw = localStorage.getItem(key);
     return raw !== null ? JSON.parse(raw) : fallback;
-  } catch { return fallback; }
+  } catch (e) { console.warn("[store] localStorage get failed for", key, e); return fallback; }
 }
 
 export async function storeSet(key, value) {
@@ -33,7 +33,7 @@ export async function storeSet(key, value) {
 const _storePending = new Map();
 export function storeSetDebounced(key, value, delayMs = 300) {
   if (_storePending.has(key)) clearTimeout(_storePending.get(key));
-  const snapshot = JSON.parse(JSON.stringify(value));
+  const snapshot = structuredClone(value);
   _storePending.set(key, setTimeout(() => {
     _storePending.delete(key);
     storeSet(key, snapshot);

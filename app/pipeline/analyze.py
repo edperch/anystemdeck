@@ -5,8 +5,7 @@ import subprocess
 from pathlib import Path
 
 from app.core.config import JOBS_DIR, TIMEOUT_ANALYZE, ffmpeg_executable
-from app.core.models import Job
-from app.pipeline.download import _set
+from app.core.models import Job, _set
 
 logger = logging.getLogger("stemdeck.analyze")
 

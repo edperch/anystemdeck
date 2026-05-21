@@ -29,6 +29,17 @@ def register(job: Job) -> Job:
     return job
 
 
+def register_if_capacity(job: Job, max_pending: int) -> bool:
+    """Atomically check pending count and register if under capacity.
+    Returns True if registered, False if the queue is full."""
+    with _lock:
+        pending = sum(1 for j in _jobs.values() if j.status == "queued")
+        if pending >= max_pending:
+            return False
+        _jobs[job.id] = job
+    return True
+
+
 def get(job_id: str) -> Job | None:
     with _lock:
         return _jobs.get(job_id)
@@ -71,12 +82,10 @@ def persist(jobs_dir: Path) -> None:
             for job in sorted(_jobs.values(), key=lambda item: item.created_at)
             if job.status in _TERMINAL
         ]
+        payload = json.dumps({"version": REGISTRY_VERSION, "jobs": records}, indent=2) + "\n"
     path = jobs_dir / _REGISTRY_FILE
     tmp = path.with_suffix(".json.tmp")
-    tmp.write_text(
-        json.dumps({"version": REGISTRY_VERSION, "jobs": records}, indent=2) + "\n",
-        encoding="utf-8",
-    )
+    tmp.write_text(payload, encoding="utf-8")
     tmp.replace(path)
 
 

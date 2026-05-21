@@ -168,6 +168,34 @@ export function updateLoopRegionVisual() {
 // timeupdate) — click handlers only mutate the transport, never the
 // button's CSS class. That way manual seeks (e.g. clicking the ruler)
 // keep the button states in sync without extra plumbing.
+// WKWebView (Tauri desktop) has small audio buffers. After a seek, all
+// audio elements drop their buffers and issue new range requests simultaneously.
+// Calling play() before they reach HAVE_FUTURE_DATA (readyState >= 3) causes
+// choppiness. Wait for all elements to be ready, with a hard 1.5 s fallback so
+// the user is never stuck. Desktop browsers buffer aggressively enough that
+// this wait is skipped entirely (readyState is already >= 3 by the time play
+// is pressed after a seek).
+function _playWhenReady() {
+  if (!multitrack) return;
+  const inTauri = Boolean(window.__TAURI__?.core?.invoke);
+  if (!inTauri) { multitrack.play(); return; }
+
+  const audios = (multitrack.audios ?? [])
+    .filter((a) => a instanceof HTMLMediaElement && a.src);
+  const notReady = audios.filter((a) => a.readyState < 3);
+  if (!notReady.length) { multitrack.play(); return; }
+
+  let fired = false;
+  const fire = () => { if (!fired && multitrack && !multitrack.isPlaying()) { fired = true; multitrack.play(); } };
+  const waits = notReady.map((a) => new Promise((res) => {
+    if (a.readyState >= 3) { res(); return; }
+    const onReady = () => { a.removeEventListener("canplay", onReady); res(); };
+    a.addEventListener("canplay", onReady);
+  }));
+  Promise.all(waits).then(fire);
+  window.setTimeout(fire, 1500);
+}
+
 export function togglePlayPause() {
   if (!multitrack) return;
   if (multitrack.isPlaying()) {
@@ -185,7 +213,7 @@ export function togglePlayPause() {
   if (loopEnabled && totalDuration > 0) {
     multitrack.setTime(loopStart);
   }
-  multitrack.play();
+  _playWhenReady();
 }
 
 export function stopTransport() {
