@@ -20,9 +20,8 @@ import {
 import {
   loadMixIntoState, resetMixerState, refreshMixerVisuals,
   setLaneControlsEnabled, ensureMixerStateDefaults, applyMix,
-  renderRealMiniWave,
+  renderRealMiniWave, renderMixerRow,
 } from "./mixer.js";
-import { renderMixerRow } from "./mixer.js";
 import {
   buildRuler, updatePlayheadMarker, updateLoopRegionVisual,
   applyWaveZoom, buildPresenceRuler, updateFooterTimes,
@@ -171,6 +170,7 @@ let visualAudioContext = null;
 let stemVuRafId = null;
 let _footerWavePeaks = null;
 let _lastFooterProgress = 0;
+let _footerPlaceholderResizeObs = null;
 const _FOOTER_BARS = 300;
 
 function isAudioBufferLike(value) {
@@ -566,6 +566,8 @@ export function destroyPlayer() {
   loopRegionEl.classList.add("hidden");
   _footerWavePeaks = null;
   _lastFooterProgress = 0;
+  _footerPlaceholderResizeObs?.disconnect();
+  _footerPlaceholderResizeObs = null;
   _footerWaveResizeObs?.disconnect();
   setFooterWaveDrawFn(null);
   const cv = document.getElementById("footer-waveform");
@@ -876,7 +878,9 @@ export function drawFooterPlaceholder() {
   _drawPlaceholderWave();
   const bar = document.getElementById("footer-waveform")?.closest(".footer-wave-bar");
   if (bar) {
-    new ResizeObserver(() => { if (!_footerWavePeaks) _drawPlaceholderWave(); }).observe(bar);
+    _footerPlaceholderResizeObs?.disconnect();
+    _footerPlaceholderResizeObs = new ResizeObserver(() => { if (!_footerWavePeaks) _drawPlaceholderWave(); });
+    _footerPlaceholderResizeObs.observe(bar);
   }
 }
 

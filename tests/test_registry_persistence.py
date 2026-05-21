@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 from app.core.models import Job
@@ -11,11 +12,10 @@ from app.core.registry import persist as persist_registry
 from app.core.registry import restore as restore_registry
 
 
-def setup_function():
+@pytest.fixture(autouse=True)
+def _isolate_registry():
     _jobs.clear()
-
-
-def teardown_function():
+    yield
     _jobs.clear()
 
 

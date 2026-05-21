@@ -1,4 +1,6 @@
 use flate2::read::GzDecoder;
+#[cfg(unix)]
+use libc;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
@@ -462,7 +464,7 @@ fn start_backend(
         "Python runtime not found. Expected python/ or .venv/ under StemDeck.".to_string()
     })?;
     patch_pyvenv_cfg(&python);
-    let port = free_port()?;
+    let (port, port_guard) = free_port()?;
     let url = format!("http://127.0.0.1:{port}");
     let log_path = data_dir.join("logs").join("backend.log");
     let (stdout, stderr) = prepare_backend_stdio(&log_path).unwrap_or_else(|_| {
@@ -528,6 +530,8 @@ fn start_backend(
     let mut child = cmd
         .spawn()
         .map_err(|e| format!("failed to start backend: {e}"))?;
+    // Release the reserved port immediately after spawn so uvicorn can bind it.
+    drop(port_guard);
 
     if let Err(err) = wait_for_health(port, Duration::from_secs(90), &log_path) {
         let _ = child.kill();
@@ -962,6 +966,20 @@ fn open_url(url: String) -> Result<(), String> {
 fn stop_backend(state: &BackendState) {
     if let Ok(mut guard) = state.child.lock() {
         if let Some(child) = guard.as_mut() {
+            // Send SIGTERM first so uvicorn can drain in-progress requests
+            // before we escalate to SIGKILL.
+            #[cfg(unix)]
+            {
+                unsafe { libc::kill(child.id() as libc::pid_t, libc::SIGTERM) };
+                let deadline = Instant::now() + Duration::from_secs(3);
+                while Instant::now() < deadline {
+                    if child.try_wait().ok().flatten().is_some() {
+                        *guard = None;
+                        return;
+                    }
+                    thread::sleep(Duration::from_millis(100));
+                }
+            }
             let _ = child.kill();
             let _ = child.wait();
         }
@@ -1396,16 +1414,21 @@ fn ffmpeg_dir_if_present(data_dir: &Path) -> Option<PathBuf> {
     }
 }
 
-fn free_port() -> Result<u16, String> {
+/// Bind to port 0 and return both the chosen port and the live listener.
+/// Caller must hold the listener until just after the child process is
+/// spawned, then drop it so the child can bind the same port.  Holding the
+/// socket until spawn narrows the TOCTOU window to a single OS context
+/// switch rather than the entire command-setup period.
+fn free_port() -> Result<(u16, TcpListener), String> {
     let listener =
         TcpListener::bind("127.0.0.1:0").map_err(|e| format!("port bind failed: {e}"))?;
     let port = listener.local_addr().map_err(|e| e.to_string())?.port();
-    drop(listener);
-    Ok(port)
+    Ok((port, listener))
 }
 
 fn wait_for_health(port: u16, timeout: Duration, log_path: &Path) -> Result<(), String> {
     let deadline = Instant::now() + timeout;
+    let mut interval = Duration::from_millis(250);
     loop {
         if Instant::now() >= deadline {
             let tail = file_tail(log_path, 30);
@@ -1430,7 +1453,10 @@ fn wait_for_health(port: u16, timeout: Duration, log_path: &Path) -> Result<(), 
         if health_once(port).is_ok() {
             return Ok(());
         }
-        thread::sleep(Duration::from_millis(250));
+        thread::sleep(interval);
+        // Exponential backoff capped at 2 s to reduce busy-polling while
+        // still detecting fast startups quickly.
+        interval = (interval * 2).min(Duration::from_secs(2));
     }
 }
 
@@ -1602,12 +1628,11 @@ fn download_windows_ffmpeg(data_dir: &Path) -> Result<(), String> {
 #[cfg(windows)]
 fn download_file_with_powershell(url: &str, target: &Path) -> Result<(), String> {
     let target_str = target.display().to_string();
-    // Embed url and path directly — PowerShell 5.1 -Command consumes the
-    // entire remaining argv, so $args[] is always empty when passed this way.
-    let script = format!(
-        "$ProgressPreference = 'SilentlyContinue'; \
-         Invoke-WebRequest -Uri '{url}' -OutFile '{target_str}'"
-    );
+    // Pass URL and destination via environment variables to avoid quote injection
+    // in the PowerShell -Command string (a URL with a single quote would break
+    // the original string-interpolation approach).
+    let script = "$ProgressPreference = 'SilentlyContinue'; \
+         Invoke-WebRequest -Uri $env:STEMDECK_DL_URL -OutFile $env:STEMDECK_DL_DEST";
     let mut command = Command::new("powershell.exe");
     command
         .args([
@@ -1615,8 +1640,10 @@ fn download_file_with_powershell(url: &str, target: &Path) -> Result<(), String>
             "-ExecutionPolicy",
             "Bypass",
             "-Command",
-            &script,
+            script,
         ])
+        .env("STEMDECK_DL_URL", url)
+        .env("STEMDECK_DL_DEST", &target_str)
         .stdout(Stdio::null())
         .stderr(Stdio::piped());
     hide_console_window(&mut command);

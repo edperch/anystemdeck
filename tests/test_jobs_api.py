@@ -109,6 +109,7 @@ def test_cancel_after_done_is_idempotent(client):
 
 # ─── Capacity (503) ───────────────────────────────────────────────────────────
 
+
 def test_youtube_503_when_queue_full(client):
     for _ in range(MAX_PENDING_JOBS):
         r = client.post("/api/jobs", json={"url": "https://youtu.be/dQw4w9WgXcQ"})
@@ -130,6 +131,7 @@ def test_upload_503_when_queue_full(upload_client):
 
 
 # ─── File upload ─────────────────────────────────────────────────────────────
+
 
 def test_upload_rejects_unsupported_extension(upload_client):
     data = io.BytesIO(b"OGG data")
@@ -173,6 +175,7 @@ def test_upload_wav_returns_job_id(upload_client):
 
 # ─── Sections endpoint ────────────────────────────────────────────────────────
 
+
 @pytest.fixture
 def done_job(client, tmp_path, monkeypatch):
     import app.api.jobs as jobs_mod
@@ -188,9 +191,7 @@ def done_job(client, tmp_path, monkeypatch):
 
 def test_sections_happy_path(client, done_job, tmp_path):
     payload = {
-        "sections": [
-            {"id": "sec1", "name": "Verse", "start": 0.0, "end": 30.0, "color": "#ff0000"}
-        ]
+        "sections": [{"id": "sec1", "name": "Verse", "start": 0.0, "end": 30.0, "color": "#ff0000"}]
     }
     r = client.patch(f"/api/jobs/{done_job.id}/sections", json=payload)
     assert r.status_code == 200
@@ -229,9 +230,7 @@ def test_sections_invalid_color_returns_422(client, done_job):
 
 def test_sections_invalid_id_returns_422(client, done_job):
     payload = {
-        "sections": [
-            {"id": "has space", "name": "x", "start": 0.0, "end": 5.0, "color": "#fff"}
-        ]
+        "sections": [{"id": "has space", "name": "x", "start": 0.0, "end": 5.0, "color": "#fff"}]
     }
     r = client.patch(f"/api/jobs/{done_job.id}/sections", json=payload)
     assert r.status_code == 422
@@ -239,7 +238,24 @@ def test_sections_invalid_id_returns_422(client, done_job):
 
 # ─── SSE job_id validation ────────────────────────────────────────────────────
 
+
 def test_sse_rejects_malformed_job_id(client):
     for bad_id in ("../etc", "ABC", "abcdefabcdef0"):
         r = client.get(f"/api/jobs/{bad_id}/events")
         assert r.status_code == 404, f"SSE should 404 for id {bad_id!r}"
+
+
+def test_sse_503_when_connection_cap_reached(client):
+    """#86/#88: SSE endpoint rejects with 503 when _MAX_SSE_CONNECTIONS is reached."""
+    import app.api.events as events_mod
+
+    original = events_mod._sse_active
+    try:
+        events_mod._sse_active = events_mod._MAX_SSE_CONNECTIONS
+        job = Job(id="abcdefabcdef")
+        job.status = "done"
+        _jobs[job.id] = job
+        r = client.get(f"/api/jobs/{job.id}/events")
+        assert r.status_code == 503
+    finally:
+        events_mod._sse_active = original

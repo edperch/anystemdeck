@@ -6,7 +6,8 @@ from unittest.mock import patch
 import pytest
 
 from app.core.models import Job, JobCancelled
-from app.pipeline.runner import run_pipeline
+from app.core.registry import _jobs
+from app.pipeline.runner import run_local_pipeline, run_pipeline
 
 
 @pytest.mark.asyncio
@@ -78,3 +79,60 @@ async def test_pipeline_recovers_from_mkdir_failure(tmp_path: Path):
     await run_pipeline(job, "https://www.youtube.com/watch?v=dQw4w9WgXcQ", bad_jobs_dir)
 
     assert job.status == "error"
+
+
+@pytest.mark.asyncio
+async def test_pipeline_error_cleans_up_job_dir(tmp_path: Path):
+    """#82: failed pipeline must remove the job directory so no orphan is left."""
+    job = Job(id="abcdefabcde9")
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("ffmpeg died")
+
+    with patch("app.pipeline.runner._run_blocking", side_effect=boom):
+        await run_pipeline(job, "https://www.youtube.com/watch?v=dQw4w9WgXcQ", tmp_path)
+
+    assert job.status == "error"
+    assert not (tmp_path / job.id).exists(), "job dir should be removed on error"
+
+
+@pytest.mark.asyncio
+async def test_pipeline_error_calls_persist(tmp_path: Path):
+    """#83: persist is called after an error so the registry stays consistent."""
+    job = Job(id="abcdefabcde8")
+    _jobs[job.id] = job
+    persist_calls = []
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("separated badly")
+
+    def fake_persist(jobs_dir):
+        persist_calls.append(jobs_dir)
+
+    with (
+        patch("app.pipeline.runner._run_blocking", side_effect=boom),
+        patch("app.pipeline.runner.persist_registry", side_effect=fake_persist),
+    ):
+        await run_pipeline(job, "https://www.youtube.com/watch?v=dQw4w9WgXcQ", tmp_path)
+
+    assert job.status == "error"
+    assert len(persist_calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_local_pipeline_error_cleans_up_job_dir(tmp_path: Path):
+    """#82: local upload error path also removes the job directory."""
+    job = Job(id="abcdefabcde7")
+    job_dir = tmp_path / job.id
+    job_dir.mkdir(parents=True)
+    source = job_dir / "source.mp3"
+    source.write_bytes(b"ID3")
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("demucs blew up")
+
+    with patch("app.pipeline.runner._run_local_blocking", side_effect=boom):
+        await run_local_pipeline(job, source, tmp_path)
+
+    assert job.status == "error"
+    assert not (tmp_path / job.id).exists(), "job dir should be removed on local error"

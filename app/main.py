@@ -5,6 +5,7 @@ import ctypes
 import json
 import logging
 import os
+import signal
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from importlib.metadata import PackageNotFoundError
@@ -95,7 +96,10 @@ async def _desktop_parent_watchdog(parent_pid: int) -> None:
     while True:
         if not _process_exists(parent_pid):
             _log.info("desktop parent process exited; stopping backend")
-            os._exit(0)
+            # Send SIGTERM to ourselves so uvicorn runs its shutdown sequence
+            # instead of bypassing cleanup with os._exit().
+            os.kill(os.getpid(), signal.SIGTERM)
+            return
         await asyncio.sleep(1)
 
 
@@ -161,7 +165,5 @@ async def no_cache_static(request: Request, call_next):
 app.include_router(router, prefix="/api")
 app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")
 
-# Ensure runtime directories exist at startup (module-level side effect
-# moved from the old monolithic main.py; this is the canonical entrypoint).
 ensure_runtime_dirs()
 restore_registry(JOBS_DIR)

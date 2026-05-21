@@ -127,7 +127,7 @@ Extract the zip anywhere, run `StemDeck.exe`. On first launch the app verifies t
 
 <br>
 
-StemDeck is built on **[Python 3.10+](https://python.org)** managed via **[uv](https://github.com/astral-sh/uv)**, with a **[FastAPI](https://fastapi.tiangolo.com)** backend serving REST and Server-Sent Events. Stem separation uses **[Demucs](https://github.com/facebookresearch/demucs)** (`htdemucs_6s`), Meta AI's open-source 6-stem neural network. YouTube audio is fetched via **[yt-dlp](https://github.com/yt-dlp/yt-dlp)**; transcoding and mixing use **[FFmpeg](https://ffmpeg.org)**. BPM detection and key analysis run on **[librosa](https://librosa.org)**; loudness measurement uses **[pyloudnorm](https://github.com/csteinmetz1/pyloudnorm)** (ITU-R BS.1770). The macOS and Windows desktop shells are **[Tauri v2](https://tauri.app)** (Rust/WKWebView on macOS, Rust/WebView2 on Windows). The frontend is vanilla JS with the Web Audio API, no framework and no build step; waveforms are rendered on `<canvas>` using min/max sample rendering.
+StemDeck is built on **[Python 3.12](https://python.org)** managed via **[uv](https://github.com/astral-sh/uv)**, with a **[FastAPI](https://fastapi.tiangolo.com)** backend serving REST and Server-Sent Events. Stem separation uses **[Demucs](https://github.com/facebookresearch/demucs)** (`htdemucs_6s`), Meta AI's open-source 6-stem neural network. YouTube audio is fetched via **[yt-dlp](https://github.com/yt-dlp/yt-dlp)**; transcoding and mixing use **[FFmpeg](https://ffmpeg.org)**. BPM detection and key analysis run on **[librosa](https://librosa.org)**; loudness measurement uses **[pyloudnorm](https://github.com/csteinmetz1/pyloudnorm)** (ITU-R BS.1770). The macOS and Windows desktop shells are **[Tauri v2](https://tauri.app)** (Rust/WKWebView on macOS, Rust/WebView2 on Windows). The frontend is vanilla JS with the Web Audio API, no framework and no build step; waveforms are rendered on `<canvas>` using min/max sample rendering.
 
 *Thanks to the creators and maintainers of all the open-source libraries that make StemDeck possible.*
 
@@ -137,7 +137,7 @@ StemDeck is built on **[Python 3.10+](https://python.org)** managed via **[uv](h
 
 ### macOS Native App
 
-Requires Rust, Node.js, and Python 3.10–3.13. Builds a self-contained `.app` that downloads its own runtime on first launch.
+Requires Rust, Node.js, and Python 3.12. Builds a self-contained `.app` that downloads its own runtime on first launch.
 
 ```sh
 # First time only — add the cross-compilation targets
@@ -167,11 +167,11 @@ open desktop/src-tauri/target/aarch64-apple-darwin/release/bundle/macos/StemDeck
 
 ---
 
-### Web Server (macOS / Linux / Windows with Python 3.10+)
+### Web Server (macOS / Linux / Windows with Python 3.12+)
 
 #### Prerequisites
 
-Python 3.10 or newer, `ffmpeg` on your PATH, and [uv](https://github.com/astral-sh/uv). Around 170 MB of free disk for the Demucs model, which downloads automatically on first run.
+Python 3.12 or newer, `ffmpeg` on your PATH, and [uv](https://github.com/astral-sh/uv). Around 170 MB of free disk for the Demucs model, which downloads automatically on first run.
 
 #### macOS / Linux (one-shot)
 

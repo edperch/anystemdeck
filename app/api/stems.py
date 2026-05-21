@@ -19,6 +19,7 @@ _ALLOWED_NAMES = frozenset(STEM_NAMES) | {"original", "mix"}
 
 @router.api_route("/jobs/{job_id}/stems/{name}.wav", methods=["GET", "HEAD"])
 def get_stem(job_id: str, name: str) -> FileResponse:
+    """Download a WAV stem (vocals, drums, bass, guitar, piano, other, original, mix)."""
     if not JOB_ID_RE.match(job_id):
         raise HTTPException(status_code=404, detail="job not found")
     if name not in _ALLOWED_NAMES:
@@ -36,6 +37,7 @@ def get_stem(job_id: str, name: str) -> FileResponse:
 
 @router.get("/jobs/{job_id}/stems/{name}.mp3")
 async def get_stem_mp3(job_id: str, name: str) -> StreamingResponse:
+    """Stream a stem as MP3 (VBR ~190 kbps). Transcoded on-the-fly from WAV via ffmpeg."""
     if not JOB_ID_RE.match(job_id):
         raise HTTPException(status_code=404, detail="job not found")
     if name not in _ALLOWED_NAMES:

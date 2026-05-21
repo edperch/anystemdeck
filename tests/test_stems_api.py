@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import shutil
-
 import pytest
 from fastapi.testclient import TestClient
 

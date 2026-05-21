@@ -114,6 +114,8 @@ class JobRequest(BaseModel):
 
 @router.post("")
 async def create_job(request: Request) -> dict[str, str]:
+    """Submit a YouTube URL (JSON body) or upload an audio file (multipart/form-data)
+    to start a stem-separation job. Returns the new job ID."""
     ct = request.headers.get("content-type", "")
     if "multipart/form-data" in ct:
         return await _create_local_job(request)
@@ -241,6 +243,7 @@ async def _create_local_job(request: Request) -> dict[str, str]:
 
 @router.get("")
 def list_jobs() -> list[dict]:
+    """List all completed jobs in the library, sorted by creation time."""
     return [
         job.to_state()
         for job in sorted(registry_all_jobs().values(), key=lambda j: j.created_at)
@@ -250,6 +253,7 @@ def list_jobs() -> list[dict]:
 
 @router.get("/{job_id}")
 def get_job(job_id: str) -> dict:
+    """Get the current state of a job by ID."""
     job = registry_get(job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="job not found")
@@ -258,6 +262,7 @@ def get_job(job_id: str) -> dict:
 
 @router.post("/{job_id}/cancel")
 def cancel_job(job_id: str) -> dict:
+    """Request cancellation of a running job. Idempotent for terminal jobs."""
     job = registry_get(job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="job not found")
@@ -314,6 +319,7 @@ class SectionsBody(BaseModel):
 
 @router.patch("/{job_id}/sections")
 def update_sections(job_id: str, body: SectionsBody) -> dict:
+    """Save named timeline sections (intro, verse, chorus, etc.) for a done job."""
     if not JOB_ID_RE.match(job_id):
         raise HTTPException(status_code=404, detail="job not found")
     job = registry_get(job_id)
@@ -348,6 +354,7 @@ def update_sections(job_id: str, body: SectionsBody) -> dict:
 
 @router.delete("/{job_id}")
 def delete_job(job_id: str) -> dict[str, str]:
+    """Delete a completed or failed job and remove its stem files from disk."""
     if not JOB_ID_RE.match(job_id):
         raise HTTPException(status_code=404, detail="job not found")
     job = registry_get(job_id)

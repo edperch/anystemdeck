@@ -142,21 +142,23 @@ def _write_metadata(job: Job, job_dir: Path) -> None:
         logger.warning("could not write metadata.json for job %s", job.id, exc_info=True)
 
 
-async def run_pipeline(job: Job, url: str, jobs_dir: Path) -> None:
-    job_dir = jobs_dir / job.id
+async def _run_async(
+    job: Job,
+    job_dir: Path,
+    jobs_dir: Path,
+    blocking_fn,
+    *fn_args: object,
+    error_msg: str = "Audio processing failed. Please try again.",
+) -> None:
+    """Common async wrapper: acquires the pipeline lock, runs blocking_fn in a
+    thread, then handles success / cancel / error outcomes uniformly."""
     try:
-        job_dir.mkdir(parents=True, exist_ok=True)
         async with _pipeline_lock:
-            await asyncio.to_thread(_run_blocking, job, url, job_dir)
+            await asyncio.to_thread(blocking_fn, job, *fn_args, job_dir)
     except Exception as e:
         if not isinstance(e, JobCancelled) and not job.cancel_requested:
             logger.exception("pipeline failed for job %s: %s", job.id, e)
-            _set(
-                job,
-                status="error",
-                stage="Error: Processing failed",
-                error="Audio processing failed. Please try another video.",
-            )
+            _set(job, status="error", stage="Error: Processing failed", error=error_msg)
             persist_registry(jobs_dir)
             _rmtree(job_dir)
             return
@@ -172,6 +174,30 @@ async def run_pipeline(job: Job, url: str, jobs_dir: Path) -> None:
     _set(job, status="done", progress=1.0, stage="Done")
     _write_metadata(job, job_dir)
     persist_registry(jobs_dir)
+
+
+async def run_pipeline(job: Job, url: str, jobs_dir: Path) -> None:
+    job_dir = jobs_dir / job.id
+    try:
+        job_dir.mkdir(parents=True, exist_ok=True)
+    except Exception as e:
+        logger.exception("pipeline failed for job %s: %s", job.id, e)
+        _set(
+            job,
+            status="error",
+            stage="Error: Processing failed",
+            error="Audio processing failed. Please try another video.",
+        )
+        persist_registry(jobs_dir)
+        return
+    await _run_async(
+        job,
+        job_dir,
+        jobs_dir,
+        _run_blocking,
+        url,
+        error_msg="Audio processing failed. Please try another video.",
+    )
 
 
 async def run_local_pipeline(job: Job, source_path: Path, jobs_dir: Path) -> None:
@@ -179,30 +205,4 @@ async def run_local_pipeline(job: Job, source_path: Path, jobs_dir: Path) -> Non
     The job directory and source file are already present on disk (created
     by the API handler before this task is scheduled)."""
     job_dir = jobs_dir / job.id
-    try:
-        async with _pipeline_lock:
-            await asyncio.to_thread(_run_local_blocking, job, source_path, job_dir)
-    except Exception as e:
-        if not isinstance(e, JobCancelled) and not job.cancel_requested:
-            logger.exception("pipeline failed for job %s: %s", job.id, e)
-            _set(
-                job,
-                status="error",
-                stage="Error: Processing failed",
-                error="Audio processing failed. Please try again.",
-            )
-            persist_registry(jobs_dir)
-            _rmtree(job_dir)
-            return
-        logger.info(
-            "pipeline cancelled%s for job %s",
-            " (wrapped)" if not isinstance(e, JobCancelled) else "",
-            job.id,
-        )
-        _set(job, status="cancelled", stage="Cancelled")
-        persist_registry(jobs_dir)
-        _rmtree(job_dir)
-        return
-    _set(job, status="done", progress=1.0, stage="Done")
-    _write_metadata(job, job_dir)
-    persist_registry(jobs_dir)
+    await _run_async(job, job_dir, jobs_dir, _run_local_blocking, source_path)
