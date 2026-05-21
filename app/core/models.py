@@ -3,19 +3,31 @@ from __future__ import annotations
 import dataclasses
 import time
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal
 
 
 class JobCancelled(Exception):
     """Raised inside a pipeline stage when the job's cancel flag is set."""
 
 
+JobStatus = Literal[
+    "queued", "downloading", "analyzing", "separating", "processing", "done", "error", "cancelled"
+]
+
+
+def _set(job: Job, **fields: object) -> None:
+    """Mutate Job fields. SSE polling picks up the change automatically."""
+    for k, v in fields.items():
+        if k == "stage":
+            job.stage_message = v  # type: ignore[assignment]
+        else:
+            setattr(job, k, v)
+
+
 @dataclass
 class Job:
     id: str
-    status: str = (
-        "queued"  # queued | downloading | analyzing | separating | done | error | cancelled
-    )
+    status: JobStatus = "queued"
     progress: float = 0.0
     stage_message: str = "Queued"
     title: str | None = None

@@ -509,6 +509,10 @@ export function destroyPlayer() {
     multitrack.destroy();
     setMultitrack(null);
   }
+  if (visualAudioContext) {
+    visualAudioContext.close().catch(() => {});
+    visualAudioContext = null;
+  }
   renderPlaceholderTracks();
   clearOverviewWaveforms();
   for (const row of mixerEl.querySelectorAll(".lane-header")) {

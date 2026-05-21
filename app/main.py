@@ -101,7 +101,10 @@ async def _desktop_parent_watchdog(parent_pid: int) -> None:
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
-    asyncio.create_task(_sweep_loop())
+    _background_tasks = set()
+    t = asyncio.create_task(_sweep_loop())
+    _background_tasks.add(t)
+    t.add_done_callback(_background_tasks.discard)
     if os.environ.get("STEMDECK_DESKTOP") == "1":
         parent_pid = os.environ.get("STEMDECK_PARENT_PID")
         if parent_pid:
@@ -111,11 +114,18 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
                 _log.warning("invalid STEMDECK_PARENT_PID=%r", parent_pid)
             else:
                 if parent_pid_int > 0 and parent_pid_int != os.getpid():
-                    asyncio.create_task(_desktop_parent_watchdog(parent_pid_int))
+                    wt = asyncio.create_task(_desktop_parent_watchdog(parent_pid_int))
+                    _background_tasks.add(wt)
+                    wt.add_done_callback(_background_tasks.discard)
     yield
 
 
-app = FastAPI(title="StemDeck", lifespan=lifespan)
+app = FastAPI(
+    title="StemDeck",
+    description="Paste a YouTube URL or upload an audio file, get audio stems split into a DAW-style player.",
+    version=app_version(),
+    lifespan=lifespan,
+)
 
 
 @app.get("/health", include_in_schema=False)

@@ -8,11 +8,11 @@ import subprocess
 from pathlib import Path
 
 from app.core.config import TIMEOUT_FFMPEG
-from app.core.models import Job, JobCancelled
+from app.core.models import Job, JobCancelled, _set
 from app.core.registry import persist as persist_registry
 from app.pipeline.analyze import analyze, compute_stem_presence
 from app.pipeline.collect import cleanup_source, collect, make_original_track, make_selected_mix
-from app.pipeline.download import _set, download
+from app.pipeline.download import download
 from app.pipeline.separate import separate
 
 logger = logging.getLogger("stemdeck.pipeline")
@@ -158,6 +158,7 @@ async def run_pipeline(job: Job, url: str, jobs_dir: Path) -> None:
                 error="Audio processing failed. Please try another video.",
             )
             persist_registry(jobs_dir)
+            _rmtree(job_dir)
             return
         logger.info(
             "pipeline cancelled%s for job %s",
@@ -191,6 +192,7 @@ async def run_local_pipeline(job: Job, source_path: Path, jobs_dir: Path) -> Non
                 error="Audio processing failed. Please try again.",
             )
             persist_registry(jobs_dir)
+            _rmtree(job_dir)
             return
         logger.info(
             "pipeline cancelled%s for job %s",

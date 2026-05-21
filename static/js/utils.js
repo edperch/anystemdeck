@@ -14,7 +14,7 @@ export async function storeGet(key, fallback = null) {
   try {
     const raw = localStorage.getItem(key);
     return raw !== null ? JSON.parse(raw) : fallback;
-  } catch { return fallback; }
+  } catch (e) { console.warn("[store] localStorage get failed for", key, e); return fallback; }
 }
 
 export async function storeSet(key, value) {

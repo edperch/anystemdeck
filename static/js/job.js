@@ -261,6 +261,7 @@ function startJobPolling(jobId) {
 // Connect (or reconnect) to the SSE stream for a job. On unexpected
 // disconnect we probe /api/jobs/{id} to decide: if the job is already
 // terminal, accept its final state; otherwise reconnect with backoff.
+// Falls back to REST polling only after SSE exhausts its retry budget.
 function connectEvents(jobId) {
   let attempt = 0;
   let stopped = false;
@@ -310,8 +311,8 @@ function connectEvents(jobId) {
 
       attempt += 1;
       if (attempt > 6) {
-        showError("Lost connection to server");
-        setSubmitProcessing(false);
+        // SSE gave up — activate REST polling as the fallback.
+        startJobPolling(jobId);
         return;
       }
       // 0.5s, 1s, 2s, 4s, 8s, 16s
@@ -442,7 +443,6 @@ export function wireJobForm() {
       jobDetailEl.textContent = "";
     }
 
-    startJobPolling(jobId);
     connectEvents(jobId);
   });
 }

@@ -7,6 +7,7 @@ from collections.abc import AsyncIterator
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 
+from app.core.config import JOB_ID_RE
 from app.core.registry import get as registry_get
 
 router = APIRouter(tags=["events"])
@@ -18,6 +19,8 @@ _MAX_SSE_SECONDS = 4 * 3600  # 4 hours
 
 @router.get("/jobs/{job_id}/events")
 async def job_events(job_id: str) -> StreamingResponse:
+    if not JOB_ID_RE.match(job_id):
+        raise HTTPException(status_code=404, detail="job not found")
     job = registry_get(job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="job not found")

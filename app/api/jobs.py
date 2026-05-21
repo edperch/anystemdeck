@@ -25,7 +25,7 @@ from app.core.registry import all_jobs as registry_all_jobs
 from app.core.registry import get as registry_get
 from app.core.registry import get_proc as registry_get_proc
 from app.core.registry import persist as registry_persist
-from app.core.registry import register as registry_register
+from app.core.registry import register_if_capacity as registry_register_if_capacity
 from app.core.registry import remove as registry_remove
 from app.pipeline import run_local_pipeline, run_pipeline
 from app.pipeline.download import InvalidYouTubeURL, validate_youtube_url
@@ -135,24 +135,22 @@ async def _create_youtube_job(request: Request) -> dict[str, str]:
     except InvalidYouTubeURL as e:
         raise HTTPException(status_code=422, detail=str(e)) from e
 
-    pending = sum(1 for j in registry_all_jobs().values() if j.status == "queued")
-    if pending >= MAX_PENDING_JOBS:
-        raise HTTPException(status_code=503, detail="Server busy, please try again later")
-
     selected = [s for s in payload.stems if s in STEM_NAMES] if payload.stems else list(STEM_NAMES)
     if not selected:
         selected = list(STEM_NAMES)
 
-    job = registry_register(Job(id=uuid.uuid4().hex[:12], selected_stems=selected, source_url=url))
+    job = Job(id=uuid.uuid4().hex[:12], selected_stems=selected, source_url=url)
+    if not registry_register_if_capacity(job, MAX_PENDING_JOBS):
+        raise HTTPException(status_code=503, detail="Server busy, please try again later")
     task = asyncio.create_task(run_pipeline(job, url, JOBS_DIR))
     task.add_done_callback(_task_error_cb)
     return {"job_id": job.id}
 
 
 async def _create_local_job(request: Request) -> dict[str, str]:
-    # Reject busy server BEFORE touching disk so no orphan dir is created.
-    pending = sum(1 for j in registry_all_jobs().values() if j.status == "queued")
-    if pending >= MAX_PENDING_JOBS:
+    # Fast pre-check: if already at capacity, reject before touching disk.
+    # The real atomic check happens in register_if_capacity after the upload.
+    if sum(1 for j in registry_all_jobs().values() if j.status == "queued") >= MAX_PENDING_JOBS:
         raise HTTPException(status_code=503, detail="Server busy, please try again later")
 
     # Quick pre-check on Content-Length to fail fast for obviously oversized
@@ -226,15 +224,16 @@ async def _create_local_job(request: Request) -> dict[str, str]:
 
     title = _sanitize_title(filename)
     local_source_url = f"local:{title}"
-    job = registry_register(
-        Job(
-            id=job_id,
-            selected_stems=selected,
-            title=title,
-            duration_sec=duration,
-            source_url=local_source_url,
-        )
+    job = Job(
+        id=job_id,
+        selected_stems=selected,
+        title=title,
+        duration_sec=duration,
+        source_url=local_source_url,
     )
+    if not registry_register_if_capacity(job, MAX_PENDING_JOBS):
+        shutil.rmtree(job_dir, ignore_errors=True)
+        raise HTTPException(status_code=503, detail="Server busy, please try again later")
     task = asyncio.create_task(run_local_pipeline(job, source_path, JOBS_DIR))
     task.add_done_callback(_task_error_cb)
     return {"job_id": job.id}

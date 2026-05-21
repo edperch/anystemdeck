@@ -10,7 +10,7 @@ import time
 from pathlib import Path
 
 from app.core.config import DEMUCS_DEVICE, DEMUCS_MODEL, TIMEOUT_DEMUCS_STALL
-from app.core.models import Job, JobCancelled
+from app.core.models import Job, JobCancelled, _set
 from app.core.registry import set_proc
 
 logger = logging.getLogger("stemdeck.pipeline")
@@ -22,8 +22,6 @@ _PCT_RE = re.compile(r"(\d{1,3})%")
 
 
 def separate(job: Job, source: Path, job_dir: Path) -> Path:
-    from app.pipeline.download import _set
-
     _set(job, status="separating", progress=0.0, stage="Separating stems...")
 
     cmd = [
