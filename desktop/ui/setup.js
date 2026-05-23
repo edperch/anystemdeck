@@ -178,7 +178,15 @@ async function runSetup() {
       return;
     }
 
-    if (!runtime.pythonReady) {
+    const runtimeStatus = await invoke("runtime_pack_status");
+    const expectedVersion = runtimeStatus.manifest?.version;
+    const installedVersion = runtimeStatus.installedVersion;
+    const versionMismatch = expectedVersion && installedVersion && expectedVersion !== installedVersion;
+
+    if (!runtime.pythonReady || versionMismatch) {
+      if (versionMismatch) {
+        setStatus(`Updating runtime from ${installedVersion} to ${expectedVersion}...`);
+      }
       await invoke("ensure_workspace");
       await installRuntimePack(runtime.appRoot);
       runtime = await invoke("probe_runtime");
