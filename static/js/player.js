@@ -826,7 +826,7 @@ export function wireUpAudio(jobId, stems, duration, thumbnail, mixUrl = null, ti
         const buf = wsi.getDecodedData?.();
         if (isAudioBufferLike(buf)) { decoded.set(stem.name, buf); return Promise.resolve(); }
         return new Promise((resolve) => {
-          wsi.once?.("decode", (b) => { if (isAudioBufferLike(b)) decoded.set(stem.name, b); resolve(); });
+          wsi.once?.("decode", () => { const buf = wsi.getDecodedData?.(); if (isAudioBufferLike(buf)) decoded.set(stem.name, buf); resolve(); });
           window.setTimeout(resolve, 15000);
         });
       });

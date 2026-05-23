@@ -374,6 +374,8 @@ input, textarea { font-family: inherit; }
   background: var(--bg-2);
   border-right: 1px solid var(--border);
   display: flex;
+  overflow: hidden;
+  transition: width 0.28s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 /* Rail */
@@ -420,6 +422,8 @@ input, textarea { font-family: inherit; }
   gap: 10px;
   min-width: 0;
   overflow: hidden;
+  opacity: 1;
+  transition: opacity 0.15s ease;
 }
 
 /* Search */
@@ -663,7 +667,7 @@ input, textarea { font-family: inherit; }
 /* Collapsed sidebar strip */
 .cat-collapsed-strip { display: none; }
 .daw.cat-collapsed .sidebar { width: 56px; }
-.daw.cat-collapsed .sidebar-body { display: none; }
+.daw.cat-collapsed .sidebar-body { opacity: 0; pointer-events: none; visibility: hidden; }
 .daw.cat-collapsed .cat-collapsed-strip { display: flex; flex-direction: column; gap: 8px; align-items: center; padding: 8px 0; overflow-y: auto; }
 
 /* ═══════════════════════════════════
@@ -1628,6 +1632,11 @@ input, textarea { font-family: inherit; }
   display: flex; align-items: center; justify-content: flex-end; gap: 8px;
   min-width: 0;
 }
+.footer-export-stack {
+  display: flex; flex-direction: column; gap: 4px; align-items: stretch;
+}
+.footer-export-stack .footer-chip-wrap,
+.footer-export-stack .footer-chip { width: 100%; }
 
 /* Wave bar at the bottom of the footer */
 .footer-wave-bar {

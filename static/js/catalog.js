@@ -1260,23 +1260,37 @@ function render() {
 
 function wireCatalogToggle() {
   const toggle = document.getElementById("catalogToggle");
-  if (!toggle) return;
+  const collapseBtn = document.getElementById("sidebarCollapseBtn");
   const app = document.querySelector(".app");
   if (!app) return;
 
   const collapsed = localStorage.getItem("stemdeck.catalog.collapsed") === "1";
-  if (collapsed) app.classList.add("cat-collapsed");
+  if (collapsed) {
+    app.classList.add("cat-collapsed");
+    collapseBtn?.setAttribute("aria-expanded", "false");
+  }
 
-  toggle.addEventListener("click", (e) => {
-    // Only expand — never collapse from within the sidebar.
-    if (!app.classList.contains("cat-collapsed")) return;
-    app.classList.remove("cat-collapsed");
-    localStorage.setItem("stemdeck.catalog.collapsed", "0");
-    toggle.querySelector("input")?.focus();
+  function setSidebarCollapsed(isCollapsed) {
+    app.classList.toggle("cat-collapsed", isCollapsed);
+    collapseBtn?.setAttribute("aria-expanded", String(!isCollapsed));
+    localStorage.setItem("stemdeck.catalog.collapsed", isCollapsed ? "1" : "0");
+  }
+
+  collapseBtn?.addEventListener("click", () => {
+    setSidebarCollapsed(!app.classList.contains("cat-collapsed"));
   });
-  toggle.addEventListener("keydown", (e) => {
-    if (e.code === "Enter" || e.code === "Space") { e.preventDefault(); toggle.click(); }
-  });
+
+  if (toggle) {
+    toggle.addEventListener("click", (e) => {
+      // Only expand from within the sidebar body.
+      if (!app.classList.contains("cat-collapsed")) return;
+      setSidebarCollapsed(false);
+      toggle.querySelector("input")?.focus();
+    });
+    toggle.addEventListener("keydown", (e) => {
+      if (e.code === "Enter" || e.code === "Space") { e.preventDefault(); toggle.click(); }
+    });
+  }
 }
 
 function wireCatalogRailViews() {

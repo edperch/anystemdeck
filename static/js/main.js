@@ -119,46 +119,6 @@ wireAppShellControls();
 // ─── Footer: speed dropdown, export dropdown, scrub seek ───
 
 function wireFooterControls() {
-  // ── Speed dropdown ──
-  const speedBtn   = document.getElementById("t-speed-btn");
-  const speedPanel = document.getElementById("t-speed-panel");
-  const speedLabel = document.getElementById("t-speed-label");
-
-  function applyRate(rate) {
-    const audios = multitrack?.audios;
-    if (audios?.length) {
-      for (const a of audios) {
-        const el = (a instanceof HTMLMediaElement) ? a : (a?.media ?? a?.getMediaElement?.());
-        if (!(el instanceof HTMLMediaElement)) continue;
-        el.playbackRate = rate;
-        if ("preservesPitch" in el)        el.preservesPitch    = true;
-        else if ("mozPreservesPitch" in el) el.mozPreservesPitch = true;
-      }
-    }
-    if (speedLabel) speedLabel.textContent = `Speed ${rate === 1 ? "1.0" : rate}×`;
-    speedPanel?.querySelectorAll(".chip-panel-item").forEach((btn) => {
-      btn.classList.toggle("active", parseFloat(btn.dataset.rate) === rate);
-    });
-  }
-
-  speedBtn?.addEventListener("click", (e) => {
-    e.stopPropagation();
-    const open = !speedPanel?.classList.contains("hidden");
-    closeAllChipPanels();
-    if (!open) {
-      speedPanel?.classList.remove("hidden");
-      speedBtn.setAttribute("aria-expanded", "true");
-    }
-  });
-
-  speedPanel?.addEventListener("click", (e) => {
-    const item = e.target.closest(".chip-panel-item[data-rate]");
-    if (!item) return;
-    applyRate(parseFloat(item.dataset.rate));
-    speedPanel.classList.add("hidden");
-    speedBtn?.setAttribute("aria-expanded", "false");
-  });
-
   // ── Export Region dropdown ──
   const regionBtn   = document.getElementById("t-region-btn");
   const regionPanel = document.getElementById("t-region-panel");
