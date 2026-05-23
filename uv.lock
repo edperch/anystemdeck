@@ -1765,7 +1765,7 @@ wheels = [
 
 [[package]]
 name = "stemdeck"
-version = "0.5.0a3"
+version = "0.6.0a1"
 source = { editable = "." }
 dependencies = [
     { name = "demucs" },
