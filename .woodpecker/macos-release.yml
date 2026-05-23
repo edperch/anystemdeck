@@ -134,7 +134,7 @@ steps:
         fi
       - |
         scan_note="macOS arm64 and x64 DMGs and runtime packs were built and inspected on a macOS Woodpecker agent before upload."
-        body="$(gh release view "$CI_COMMIT_TAG" --repo "thcp/stemdeck" --json body --jq ".body")"
+        body="$(gh release view "$CI_COMMIT_TAG" --repo "stemdeckapp/stemdeck" --json body --jq ".body")"
         case "$body" in
           *"$scan_note"*) ;;
           *)
@@ -144,12 +144,12 @@ steps:
               printf '### Artifact build\n\n'
               printf -- '- %s\n' "$scan_note"
             } > "$notes_path"
-            gh release edit "$CI_COMMIT_TAG" --repo "thcp/stemdeck" --notes-file "$notes_path"
+            gh release edit "$CI_COMMIT_TAG" --repo "stemdeckapp/stemdeck" --notes-file "$notes_path"
             rm -f "$notes_path"
             ;;
         esac
       - |
-        existing=$(gh release view "$CI_COMMIT_TAG" --repo "thcp/stemdeck" --json assets --jq '[.assets[].name] | join(" ")')
+        existing=$(gh release view "$CI_COMMIT_TAG" --repo "stemdeckapp/stemdeck" --json assets --jq '[.assets[].name] | join(" ")')
         if echo "$existing" | grep -q "StemDeck-macOS-arm64.dmg"; then
           echo "macOS assets already present for $CI_COMMIT_TAG — skipping upload (pre-release promotion)."
           exit 0
@@ -161,4 +161,4 @@ steps:
           ".build/macos-dist/StemDeck-macOS-x64.dmg" \
           ".build/StemDeck-runtime-macOS-x64.tar.zst" \
           ".build/macos-dist/SHA256SUMS-macOS-x64.txt" \
-          --repo "thcp/stemdeck"
+          --repo "stemdeckapp/stemdeck"

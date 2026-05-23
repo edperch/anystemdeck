@@ -96,16 +96,16 @@ steps:
         }
       - |
         $scanNote = "Windows portable packages were scanned with ClamAV in CI before upload."
-        $bodyRaw = gh release view "$env:CI_COMMIT_TAG" --repo "thcp/stemdeck" --json body --jq ".body"
+        $bodyRaw = gh release view "$env:CI_COMMIT_TAG" --repo "stemdeckapp/stemdeck" --json body --jq ".body"
         $body = ($bodyRaw -join "`n")
         if ($body -notlike "*$scanNote*") {
           $notesPath = Join-Path $env:TEMP "stemdeck-release-notes.md"
           $updatedBody = ($body.TrimEnd(), "", "### Artifact scan", "", "- $scanNote") -join "`n"
           Set-Content -Path $notesPath -Value $updatedBody -Encoding UTF8
-          gh release edit "$env:CI_COMMIT_TAG" --repo "thcp/stemdeck" --notes-file $notesPath
+          gh release edit "$env:CI_COMMIT_TAG" --repo "stemdeckapp/stemdeck" --notes-file $notesPath
         }
       - |
-        $existing = gh release view "$env:CI_COMMIT_TAG" --repo "thcp/stemdeck" --json assets --jq '[.assets[].name] | join(" ")'
+        $existing = gh release view "$env:CI_COMMIT_TAG" --repo "stemdeckapp/stemdeck" --json assets --jq '[.assets[].name] | join(" ")'
         if ($existing -like "*StemDeck-Windows-x64.zip*") {
           Write-Host "Windows assets already present for $env:CI_COMMIT_TAG — skipping upload (pre-release promotion)."
           exit 0
@@ -115,4 +115,4 @@ steps:
           "dist/StemDeck-Windows-x64.NVIDIA.zip.sha256" `
           "dist/StemDeck-Windows-x64.zip" `
           "dist/StemDeck-Windows-x64.zip.sha256" `
-          --repo "thcp/stemdeck"
+          --repo "stemdeckapp/stemdeck"
