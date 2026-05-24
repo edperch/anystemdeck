@@ -1472,11 +1472,9 @@ function wireAboutDialog() {
   const dialog = document.getElementById("aboutDialog");
   const close = document.getElementById("aboutClose");
   const version = document.getElementById("aboutVersion");
-  const link = dialog?.querySelector(".about-link");
   if (!btn || !dialog) return;
 
   if (version) version.textContent = `v${currentVersion}`;
-  if (link) link.setAttribute("href", REPO_URL);
 
   const open = () => dialog.classList.remove("hidden");
   const hide = () => dialog.classList.add("hidden");
