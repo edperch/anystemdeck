@@ -722,7 +722,7 @@ input, textarea { font-family: inherit; }
 /* ── Job progress overlay ── */
 .job {
   position: absolute;
-  top: 64px; left: 260px; right: 0; bottom: 56px;
+  inset: 0;
   z-index: 20;
   background: rgb(7, 13, 19);
   display: flex;
@@ -1474,6 +1474,7 @@ input, textarea { font-family: inherit; }
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  position: relative;
 }
 
 /* waves.css gives .wave-editor padding + border-radius for the old rounded panel
@@ -1981,6 +1982,9 @@ input, textarea { font-family: inherit; }
 .daw.no-track .daw-section-ribbon,
 .daw.no-track .daw-wave-header,
 .daw.no-track .daw-content { opacity: 0.3; pointer-events: none; }
+/* Overlay and job progress live inside .daw-content but must stay fully visible while processing */
+.daw.no-track .daw-content .wave-loading-overlay,
+.daw.no-track .daw-content .job { opacity: 1; pointer-events: auto; }
 
 .app.no-track #t-export-btn,
 .app.is-import #t-export-btn {
