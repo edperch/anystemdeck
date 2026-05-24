@@ -104,6 +104,7 @@
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
               <path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9 M13.7 21a2 2 0 0 1-3.4 0"/>
             </svg>
+            <span class="daw-notif-badge hidden" id="notifBadge" aria-hidden="true"></span>
           </button>
           <div class="daw-notif-panel" role="menu" aria-label="Notifications">
             <div class="daw-notif-header">
@@ -113,15 +114,19 @@
               </button>
             </div>
             <div class="daw-notif-list" id="notifList">
-              <div class="daw-notif-card daw-notif-release">
+              <div class="daw-notif-card daw-notif-release hidden" id="notifReleaseCard">
                 <div class="daw-notif-card-icon">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 2l2.4 7.4H22l-6.2 4.5 2.4 7.4L12 17l-6.2 4.3 2.4-7.4L2 9.4h7.6z"/></svg>
                 </div>
                 <div class="daw-notif-card-body">
                   <div class="daw-notif-card-title">New release available</div>
-                  <div class="daw-notif-card-desc" id="brandVersionNotif"></div>
+                  <div class="daw-notif-card-desc" id="notifReleaseDesc"></div>
                 </div>
+                <button class="daw-notif-dismiss" id="notifReleaseDismiss" type="button" aria-label="Dismiss notification">
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 6 6 18M6 6l12 12"/></svg>
+                </button>
               </div>
+              <p class="daw-notif-empty" id="notifEmpty">No new notifications</p>
             </div>
           </div>
         </div>
@@ -163,13 +168,14 @@
               <span>Trash</span>
             </button>
             <div style="flex:1"></div>
-            <button class="rail-btn" type="button" title="Settings" aria-label="Settings">
+            <button class="rail-btn" id="settingsBtn" type="button" title="Settings" aria-label="Settings">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
                 <circle cx="12" cy="12" r="3"/>
                 <path d="M12 2v2 M12 20v2 M4 12H2 M22 12h-2 M5 5l1.5 1.5 M17.5 17.5 19 19 M5 19l1.5-1.5 M17.5 6.5 19 5"/>
               </svg>
               <span>Settings</span>
             </button>
+            <div class="settings-coming-soon hidden" id="settingsComingSoon" role="tooltip">More features coming soon</div>
             <button class="rail-btn" id="aboutBtn" type="button" title="Help" aria-label="Help">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
                 <circle cx="12" cy="12" r="9"/>
@@ -672,15 +678,6 @@
 
     <script type="module" src="/js/main.js"></script>
     <script>
-      /* Relay brandVersion text into the notification card description */
-      const _bv = document.getElementById('brandVersion');
-      const _bn = document.getElementById('brandVersionNotif');
-      if (_bv && _bn) {
-        const _obs = new MutationObserver(() => {
-          _bn.textContent = _bv.textContent || _bv.innerText || '';
-        });
-        _obs.observe(_bv, { childList: true, subtree: true, characterData: true });
-      }
       /* Close notification panel on outside click */
       document.addEventListener('click', (e) => {
         const wrap = document.querySelector('.daw-notif-wrap.open');
@@ -688,6 +685,16 @@
           wrap.classList.remove('open');
           document.getElementById('notifBtn')?.setAttribute('aria-expanded', 'false');
         }
+        /* Hide settings tooltip on outside click */
+        const tip = document.getElementById('settingsComingSoon');
+        if (tip && !tip.classList.contains('hidden') && !document.getElementById('settingsBtn')?.contains(e.target)) {
+          tip.classList.add('hidden');
+        }
+      });
+      /* Settings button: show coming soon tooltip */
+      document.getElementById('settingsBtn')?.addEventListener('click', () => {
+        const tip = document.getElementById('settingsComingSoon');
+        tip?.classList.toggle('hidden');
       });
     </script>
   </body>

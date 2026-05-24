@@ -352,6 +352,24 @@ input, textarea { font-family: inherit; }
 .daw-notif-card-body { flex: 1; min-width: 0; }
 .daw-notif-card-title { font-size: 12px; font-weight: 600; color: var(--fg); }
 .daw-notif-card-desc { font-size: 11px; color: var(--muted); margin-top: 2px; }
+.daw-notif-badge {
+  position: absolute; top: 4px; right: 4px;
+  width: 7px; height: 7px;
+  background: #f4b740; border-radius: 50%;
+  pointer-events: none;
+}
+.daw-notif-dismiss {
+  flex-shrink: 0; align-self: flex-start;
+  width: 18px; height: 18px;
+  background: none; border: none; cursor: pointer;
+  color: var(--muted); display: flex; align-items: center; justify-content: center;
+  border-radius: 4px; padding: 0;
+}
+.daw-notif-dismiss:hover { background: var(--panel-3); color: var(--fg); }
+.daw-notif-empty {
+  font-size: 12px; color: var(--muted);
+  text-align: center; padding: 16px 0; margin: 0;
+}
 
 /* Hidden collapsed strip (JS compat, not shown in new design) */
 .appbar-icon-strip.hidden { display: none !important; }
@@ -412,6 +430,14 @@ input, textarea { font-family: inherit; }
 .rail-btn.active { color: var(--accent); background: var(--panel); }
 .rail-btn svg { flex-shrink: 0; }
 .rail-btn span { white-space: nowrap; }
+.settings-coming-soon {
+  position: absolute; left: calc(100% + 8px); bottom: 48px;
+  background: var(--panel-2); border: 1px solid var(--border-strong);
+  border-radius: var(--radius); padding: 8px 12px;
+  font-size: 12px; color: var(--muted); white-space: nowrap;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.4); z-index: 300;
+  pointer-events: none;
+}
 
 /* Sidebar body */
 .sidebar-body {

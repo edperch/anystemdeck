@@ -668,8 +668,10 @@ export function wireUpAudio(jobId, stems, duration, thumbnail, mixUrl = null, ti
   }, 60000);
   setCurrentJobId(jobId);
   setTotalDuration(duration || 0);
-  loadMixIntoState(jobId);
   refreshMixerVisuals();
+  const mixReady = loadMixIntoState(jobId, stems.map((s) => s.name))
+    .then(() => { if (currentJobId === jobId) refreshMixerVisuals(); })
+    .catch((e) => { console.warn("[player] mix state load failed:", e); });
   setLaneControlsEnabled(true);
   setLoopEnabled(false);
   setLoopStart(0);
@@ -801,7 +803,7 @@ export function wireUpAudio(jobId, stems, duration, thumbnail, mixUrl = null, ti
     updateFooterTimes(0);
     updatePresencePlayhead(0);
     setMasterVolume(masterFader ? parseFloat(masterFader.value) : masterVolume);
-    applyMix();
+    mixReady.then(() => { if (currentJobId === jobId && multitrack === mt) applyMix(); });
     setLoopStart(totalDuration * LOOP_DEFAULT_START_FRAC);
     setLoopEnd(totalDuration * LOOP_DEFAULT_END_FRAC);
     renderAllMiniWaves(mt, stems);
