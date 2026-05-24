@@ -17,7 +17,7 @@ export function ensureMixerStateDefaults() {
   }
 }
 
-export async function loadMixIntoState(jobId) {
+export async function loadMixIntoState(jobId, loadedStemNames = STEM_NAMES) {
   let stored = {};
   try {
     const data = await storeGet(`stemdeck:mix:${jobId}`, {});
@@ -25,6 +25,11 @@ export async function loadMixIntoState(jobId) {
   } catch (e) { console.warn("[mixer] failed to load mix state:", e); }
   for (const name of TRACK_NAMES) {
     Object.assign(mixerState[name], defaultMixerEntry(), stored[name] || {});
+  }
+  // If all loaded stems are muted the session is unplayable -- unmute as recovery.
+  const loadedStems = loadedStemNames.filter((n) => mixerState[n]);
+  if (loadedStems.length > 0 && loadedStems.every((n) => mixerState[n].muted)) {
+    for (const name of loadedStems) mixerState[name].muted = false;
   }
 }
 

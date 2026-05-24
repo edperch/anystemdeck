@@ -19,8 +19,10 @@ steps:
         printf '{ "version": "%s" }\n' "$VERSION" > static/version.json
         sed -i '' "s/^version = \".*\"/version = \"$VERSION\"/" desktop/src-tauri/Cargo.toml
         sed -i '' "s/\"version\": \"[^\"]*\"/\"version\": \"$VERSION\"/" desktop/src-tauri/tauri.conf.json
+        sed -i '' "s/^version = \".*\"/version = \"$VERSION\"/" pyproject.toml
+        sed -i '' "s/\"version\": \"[^\"]*\"/\"version\": \"$VERSION\"/" desktop/package.json
         echo "VERSION=$VERSION" > .macos-release.env
-        echo "Wrote version $VERSION to static/version.json, Cargo.toml, tauri.conf.json"
+        echo "Wrote version $VERSION to all version files"
 
   build-macos-arm64:
     image: bash

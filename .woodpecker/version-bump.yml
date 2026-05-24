@@ -1,0 +1,47 @@
+# Triggered on every tag push. Updates all 5 version files to match the tag
+# and commits the result back to main so self-hosted users get the correct
+# version after a plain `git pull`.
+
+when:
+  - event: tag
+
+labels:
+  platform: linux/amd64
+  backend: kubernetes
+
+steps:
+  bump-and-commit:
+    image: alpine/git
+    environment:
+      GITHUB_TOKEN:
+        from_secret: github_token
+    commands:
+      - |
+        if [ -z "${CI_COMMIT_TAG:-}" ]; then
+          echo "CI_COMMIT_TAG is not set" >&2
+          exit 1
+        fi
+        VERSION="${CI_COMMIT_TAG#v}"
+
+        printf '{ "version": "%s" }\n' "$VERSION" > static/version.json
+        sed -i "s/^version = \".*\"/version = \"$VERSION\"/" pyproject.toml
+        sed -i "s/^version = \".*\"/version = \"$VERSION\"/" desktop/src-tauri/Cargo.toml
+        sed -i "s/\"version\": \"[^\"]*\"/\"version\": \"$VERSION\"/" desktop/src-tauri/tauri.conf.json
+        sed -i "s/\"version\": \"[^\"]*\"/\"version\": \"$VERSION\"/" desktop/package.json
+
+        git config user.email "ci@stemdeck.app"
+        git config user.name "StemDeck CI"
+        git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/stemdeckapp/stemdeck.git"
+
+        git add static/version.json pyproject.toml \
+          desktop/src-tauri/Cargo.toml desktop/src-tauri/tauri.conf.json \
+          desktop/package.json
+
+        if git diff --cached --quiet; then
+          echo "Version files already at $VERSION — nothing to commit."
+          exit 0
+        fi
+
+        git commit -m "chore: bump version to $VERSION [skip ci]"
+        git push origin HEAD:main
+        echo "Pushed version $VERSION to main."

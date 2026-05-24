@@ -20,7 +20,11 @@ steps:
           Set-Content "desktop/src-tauri/Cargo.toml"
         (Get-Content "desktop/src-tauri/tauri.conf.json") -replace '"version": "[^"]*"', "`"version`": `"$version`"" |
           Set-Content "desktop/src-tauri/tauri.conf.json"
-        Write-Host "Wrote version $version to static/version.json, Cargo.toml, tauri.conf.json"
+        (Get-Content "pyproject.toml") -replace '^version = ".*"', "version = `"$version`"" |
+          Set-Content "pyproject.toml"
+        (Get-Content "desktop/package.json") -replace '"version": "[^"]*"', "`"version`": `"$version`"" |
+          Set-Content "desktop/package.json"
+        Write-Host "Wrote version $version to all version files"
 
   build-windows-nvidia:
     depends_on:

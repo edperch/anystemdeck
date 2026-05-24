@@ -22,6 +22,7 @@ let folders = [];
 let tracks = {};
 let _deletedJobIds = new Set();
 let _currentTrackId = null;
+let _loadTrackToken = 0;
 let catalogView = "library";
 let catalogSearchQuery = "";
 
@@ -456,11 +457,13 @@ async function loadTrackIntoStudio(trackId) {
   let track = tracks[trackId];
   if (!track) return;
   const hadStoredAudio = Boolean(track.audioStems?.length);
+  const token = ++_loadTrackToken;
 
   // Always fetch fresh state so server-side changes (sections, analysis, stems)
   // are reflected — cached localStorage data can be stale.
   try {
     const res = await fetch(`/api/jobs/${trackId}`);
+    if (token !== _loadTrackToken) return;
     if (res.ok) {
       const state = await res.json();
       track = stateMetadataToTrack(state, track);
@@ -469,6 +472,7 @@ async function loadTrackIntoStudio(trackId) {
     }
   } catch (e) { console.warn("[catalog] server sync failed, using stored track:", e); }
 
+  if (token !== _loadTrackToken) return;
   if (!track.audioStems?.length) return;
   if (track.status !== "done" && !hadStoredAudio) return;
   applyStoredStemSelection(track);
@@ -1405,9 +1409,10 @@ function wireWidgets() {
 
 const FALLBACK_VERSION = "0.1.0";
 let currentVersion = FALLBACK_VERSION;
-const REPO_URL = "https://github.com/thcp/stemdeck";
-const RELEASES_URL = "https://github.com/thcp/stemdeck/releases";
-const RELEASES_API = "https://api.github.com/repos/thcp/stemdeck/releases/latest";
+const REPO_URL = "https://github.com/stemdeckapp/stemdeck";
+const RELEASES_URL = "https://github.com/stemdeckapp/stemdeck/releases";
+const RELEASES_API = "https://api.github.com/repos/stemdeckapp/stemdeck/releases/latest";
+const DISMISSED_UPDATE_KEY = "stemdeck.dismissed_update";
 
 function normalizeVersion(value) {
   return String(value || "").trim().replace(/^v/i, "") || FALLBACK_VERSION;
@@ -1431,17 +1436,34 @@ async function loadCurrentVersion() {
 }
 
 async function checkForUpdate() {
-  const el = document.getElementById("brandVersion");
-  if (!el) return;
-  el.classList.remove("has-update");
   try {
     const res = await fetch(RELEASES_API, { headers: { Accept: "application/vnd.github+json" } });
     if (!res.ok) return;
     const data = await res.json();
     const latest = normalizeVersion(data.tag_name);
     if (!latest || latest === currentVersion) return;
-    el.classList.add("has-update");
-    el.innerHTML = `<a href="${RELEASES_URL}/tag/${data.tag_name}" target="_blank" rel="noopener noreferrer">new release available</a>`;
+
+    let dismissed = null;
+    try { dismissed = localStorage.getItem(DISMISSED_UPDATE_KEY); } catch (e) { console.warn(e); }
+    if (dismissed === latest) return;
+
+    const card = document.getElementById("notifReleaseCard");
+    const desc = document.getElementById("notifReleaseDesc");
+    const badge = document.getElementById("notifBadge");
+    const empty = document.getElementById("notifEmpty");
+    const dismissBtn = document.getElementById("notifReleaseDismiss");
+
+    if (desc) desc.textContent = `v${latest}`;
+    card?.classList.remove("hidden");
+    badge?.classList.remove("hidden");
+    empty?.classList.add("hidden");
+
+    dismissBtn?.addEventListener("click", () => {
+      try { localStorage.setItem(DISMISSED_UPDATE_KEY, latest); } catch (e) { console.warn(e); }
+      card?.classList.add("hidden");
+      badge?.classList.add("hidden");
+      empty?.classList.remove("hidden");
+    }, { once: true });
   } catch (e) { console.warn("[catalog] update check failed:", e); }
 }
 
@@ -1450,11 +1472,9 @@ function wireAboutDialog() {
   const dialog = document.getElementById("aboutDialog");
   const close = document.getElementById("aboutClose");
   const version = document.getElementById("aboutVersion");
-  const link = dialog?.querySelector(".about-link");
   if (!btn || !dialog) return;
 
   if (version) version.textContent = `v${currentVersion}`;
-  if (link) link.setAttribute("href", REPO_URL);
 
   const open = () => dialog.classList.remove("hidden");
   const hide = () => dialog.classList.add("hidden");
