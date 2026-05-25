@@ -17,11 +17,11 @@
 <p align="center"><sub>JOIN THE COMMUNITY</sub></p>
 <div align="center">
   <a href="https://github.com/stemdeckapp/stemdeck"><img src="https://img.shields.io/badge/GitHub-stemdeckapp-181717?style=flat-square&logo=github&logoColor=white" alt="GitHub"></a>
-  <a href="https://discord.gg/JGk7FdZb9N"><img src="https://img.shields.io/badge/Discord-Join-5865F2?style=flat-square&logo=discord&logoColor=white" alt="Discord"></a>
+  <a href="https://discord.gg/2MVsWqaPRe"><img src="https://img.shields.io/badge/Discord-Join-5865F2?style=flat-square&logo=discord&logoColor=white" alt="Discord"></a>
   <a href="https://www.reddit.com/r/StemDeckApp/"><img src="https://img.shields.io/badge/Reddit-r%2FStemDeckApp-FF4500?style=flat-square&logo=reddit&logoColor=white" alt="Reddit"></a>
   <a href="https://www.instagram.com/stemdeck"><img src="https://img.shields.io/badge/Instagram-stemdeck-E4405F?style=flat-square&logo=instagram&logoColor=white" alt="Instagram"></a>
   <a href="https://x.com/StemDeckApp"><img src="https://img.shields.io/badge/X-StemDeckApp-000000?style=flat-square&logo=x&logoColor=white" alt="X"></a>
-  <a href="https://stemdeck.app"><img src="https://img.shields.io/badge/Website-stemdeck.app_(soon)-000000?style=flat-square&logo=safari&logoColor=white" alt="Website"></a>
+  <a href="https://stemdeck.app"><img src="https://img.shields.io/badge/Website-stemdeck.app-000000?style=flat-square&logo=safari&logoColor=white" alt="Website"></a>
 </div>
 
 </div>
@@ -161,10 +161,16 @@ The `.app` lands at `desktop/src-tauri/target/<target>/release/bundle/macos/Stem
 To run a fresh build directly without the DMG:
 
 ```sh
-# Wipe previous app data, then open
-rm -rf ~/Library/Application\ Support/StemDeck
 open desktop/src-tauri/target/aarch64-apple-darwin/release/bundle/macos/StemDeck.app
 ```
+
+If macOS blocks the app with a Gatekeeper prompt, run:
+
+```sh
+xattr -dr com.apple.quarantine desktop/src-tauri/target/aarch64-apple-darwin/release/bundle/macos/StemDeck.app
+```
+
+> **Note:** To test a clean first-launch during development, you can wipe previous app data first: `rm -rf ~/Library/Application\ Support/StemDeck`. Don't do this on a real install.
 
 ---
 
@@ -185,6 +191,32 @@ git clone https://github.com/thcp/stemdeck stemdeck && cd stemdeck
 Open <http://localhost:8000>.
 
 `setup` uses Homebrew on macOS and `apt-get` on Debian/Ubuntu. For other Linux distros, install `ffmpeg` and [uv](https://github.com/astral-sh/uv) manually, then run `uv sync` followed by `./run.sh start`.
+
+#### Windows (PowerShell)
+
+Install prerequisites:
+- [uv](https://docs.astral.sh/uv/getting-started/installation/) — `winget install astral-sh.uv`
+- [ffmpeg](https://ffmpeg.org/download.html) — `winget install Gyan.FFmpeg` (or Chocolatey: `choco install ffmpeg`)
+
+```powershell
+git clone https://github.com/stemdeckapp/stemdeck stemdeck; cd stemdeck
+uv sync
+uv run uvicorn app.main:app --host 127.0.0.1 --port 8000
+```
+
+Open <http://localhost:8000>.
+
+> `run.sh` is macOS/Linux only. On Windows use the PowerShell commands above, or run inside WSL.
+
+**NVIDIA GPU (CUDA):** install the CUDA-enabled torch build before starting:
+
+```powershell
+uv pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+$env:STEMDECK_DEMUCS_DEVICE = "cuda"
+uv run uvicorn app.main:app --host 127.0.0.1 --port 8000
+```
+
+---
 
 #### Manual (any platform)
 
