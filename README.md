@@ -94,7 +94,7 @@ If you need speed, quality, mobile access, or the extra musician tooling, the co
 
 ## Download
 
-Pre-built installers and zips are attached to each [GitHub Release](https://github.com/thcp/stemdeck/releases).
+Pre-built installers and zips are attached to each [GitHub Release](https://github.com/stemdeckapp/stemdeck/releases).
 
 **macOS**
 
@@ -183,7 +183,7 @@ Python 3.12 or newer, `ffmpeg` on your PATH, and [uv](https://github.com/astral-
 #### macOS / Linux (one-shot)
 
 ```sh
-git clone https://github.com/thcp/stemdeck stemdeck && cd stemdeck
+git clone https://github.com/stemdeckapp/stemdeck stemdeck && cd stemdeck
 ./run.sh setup     # installs ffmpeg + uv, runs uv sync
 ./run.sh start
 ```
@@ -211,7 +211,7 @@ Open <http://localhost:8000>.
 **NVIDIA GPU (CUDA):** install the CUDA-enabled torch build before starting:
 
 ```powershell
-uv pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+uv pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
 $env:STEMDECK_DEMUCS_DEVICE = "cuda"
 uv run uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
@@ -221,7 +221,7 @@ uv run uvicorn app.main:app --host 127.0.0.1 --port 8000
 #### Manual (any platform)
 
 ```sh
-git clone https://github.com/thcp/stemdeck stemdeck && cd stemdeck
+git clone https://github.com/stemdeckapp/stemdeck stemdeck && cd stemdeck
 uv sync
 uv run uvicorn app.main:app --reload
 ```
@@ -355,11 +355,25 @@ The author(s) of StemDeck provide this software "as is", without warranty of any
 | Platform | Link |
 |---|---|
 | GitHub | [stemdeckapp/stemdeck](https://github.com/stemdeckapp/stemdeck) |
-| Discord | [discord.gg/JGk7FdZb9N](https://discord.gg/JGk7FdZb9N) |
+| Discord | [discord.gg/2MVsWqaPRe](https://discord.gg/2MVsWqaPRe) |
 | Reddit | [r/StemDeckApp](https://www.reddit.com/r/StemDeckApp/) |
 | Instagram | [@stemdeck](https://www.instagram.com/stemdeck) |
 | X | [@StemDeckApp](https://x.com/StemDeckApp) |
 | Website | [stemdeck.app](https://stemdeck.app) *(coming soon)* |
+
+---
+
+## Environment Variables
+
+These are for development and testing. Release builds only recognize the variables marked "release".
+
+| Variable | Platform | Scope | Description |
+|---|---|---|---|
+| `STEMDECK_DATA_DIR` | all | release | Override the user data directory (default: platform-standard location) |
+| `STEMDECK_ROOT` | all | release | Override the app root directory (default: derived from executable path) |
+| `STEMDECK_PYTHON` | all | **debug builds only** | Override the Python executable path |
+| `STEMDECK_FFMPEG_URL` | Windows, macOS | release | Override the FFmpeg download URL |
+| `STEMDECK_FFPROBE_URL` | macOS | release | Override the ffprobe download URL |
 
 ---
 

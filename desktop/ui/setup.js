@@ -1,5 +1,7 @@
 const { invoke } = window.__TAURI__.core;
 
+let _runtimeUnlisten = null;
+
 const statusEl = document.getElementById("status");
 const detailsEl = document.getElementById("details");
 const retryBtn = document.getElementById("retry");
@@ -92,10 +94,24 @@ async function installRuntimePack(appRoot) {
   const progressWrap = document.getElementById("progress-wrap");
   const progressFill = document.getElementById("progress-fill");
 
+  // lastProgressAt is updated by the SSE handler below; only meaningful
+  // during a network download, so it is reset just before download starts.
+  let lastReceived = 0;
+  let lastProgressAt = Date.now();
+  const STALL_WARN_MS = 30_000;
+
+  // Guard against stacked listeners on rapid retry (#146): unlisten any
+  // previous registration before creating a new one.
+  if (_runtimeUnlisten) { _runtimeUnlisten(); _runtimeUnlisten = null; }
+
   const unlisten = await window.__TAURI__.event.listen(
     "runtime-download-progress",
     (event) => {
       const { received, total } = event.payload;
+      if (received !== lastReceived) {
+        lastReceived = received;
+        lastProgressAt = Date.now();
+      }
       const mb = (received / 1e6).toFixed(0);
       if (total && total > 0) {
         const pct = Math.min(100, Math.round((received / total) * 100));
@@ -108,6 +124,7 @@ async function installRuntimePack(appRoot) {
       }
     }
   );
+  _runtimeUnlisten = unlisten;
 
   progressWrap.classList.remove("hidden");
   progressFill.style.width = "0%";
@@ -128,7 +145,46 @@ async function installRuntimePack(appRoot) {
     if (!verified) {
       progressWrap.classList.remove("hidden");
       setStatus("Downloading StemDeck runtime...");
-      await invoke("download_runtime_pack");
+
+      // Reset stall baseline when network download is actually about to start (#150).
+      lastProgressAt = Date.now();
+
+      // stallTimer starts here, not at top of function, so it doesn't fire
+      // during the local verify_runtime_pack path (#150).
+      // When a stall is detected it stops startProgressStatus first to avoid
+      // both timers writing setStatus concurrently (#149).
+      let stopSlowMsg = null;
+      const stallTimer = window.setInterval(() => {
+        const stallMs = Date.now() - lastProgressAt;
+        if (stallMs >= STALL_WARN_MS) {
+          if (stopSlowMsg) { stopSlowMsg(); stopSlowMsg = null; }
+          setStatus(
+            stallMs >= 60_000
+              ? "Download appears unreachable — check your internet connection and click Retry."
+              : "Download seems slow or stalled — check your internet connection."
+          );
+        }
+      }, 5_000);
+
+      // startProgressStatus is assigned after stallTimer creation; the closure
+      // above captures stopSlowMsg by reference, so it sees the updated value.
+      stopSlowMsg = startProgressStatus([
+        { afterSeconds: 0,  text: "Downloading StemDeck runtime..." },
+        { afterSeconds: 30, text: "Still downloading runtime... slow connection detected." },
+        { afterSeconds: 90, text: "Still downloading... large file on a slow connection can take a few minutes." },
+      ]);
+
+      try {
+        await invoke("download_runtime_pack");
+      } catch (err) {
+        throw Object.assign(
+          new Error(String(err)),
+          { hint: "Check your internet connection and click Retry. If the problem persists, try a different network." }
+        );
+      } finally {
+        window.clearInterval(stallTimer);
+        if (stopSlowMsg) { stopSlowMsg(); }
+      }
       progressWrap.classList.add("hidden");
       setStatus("Verifying StemDeck runtime...");
       await invoke("verify_runtime_pack");
@@ -142,6 +198,7 @@ async function installRuntimePack(appRoot) {
       );
     }
   } finally {
+    _runtimeUnlisten = null;
     unlisten();
     progressWrap.classList.add("hidden");
   }

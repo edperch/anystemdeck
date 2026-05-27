@@ -24,10 +24,39 @@ const DEFAULT_MACOS_FFMPEG_URL: &str = "https://evermeet.cx/ffmpeg/getrelease/ff
 #[cfg(target_os = "macos")]
 const DEFAULT_MACOS_FFPROBE_URL: &str = "https://evermeet.cx/ffmpeg/getrelease/ffprobe/zip";
 
-#[derive(Default)]
+struct BackendHandles {
+    child: Child,
+    url: String,
+}
+
+struct BackendStateInner {
+    handles: Option<BackendHandles>,
+    /// True while start_backend is executing; prevents concurrent starts (#145).
+    starting: bool,
+    /// PID of an in-progress pip subprocess; killed by stop_backend on window close (#140).
+    pip_pid: Option<u32>,
+}
+
+impl Default for BackendStateInner {
+    fn default() -> Self {
+        BackendStateInner {
+            handles: None,
+            starting: false,
+            pip_pid: None,
+        }
+    }
+}
+
 struct BackendState {
-    child: Mutex<Option<Child>>,
-    url: Mutex<Option<String>>,
+    inner: Mutex<BackendStateInner>,
+}
+
+impl Default for BackendState {
+    fn default() -> Self {
+        BackendState {
+            inner: Mutex::new(BackendStateInner::default()),
+        }
+    }
 }
 
 #[derive(Serialize)]
@@ -161,10 +190,6 @@ fn main() {
         .build(tauri::generate_context!())
         .expect("failed to build StemDeck desktop app")
         .run(|app_handle, event| match event {
-            tauri::RunEvent::ExitRequested { .. } => {
-                let state = app_handle.state::<BackendState>();
-                stop_backend(&state);
-            }
             tauri::RunEvent::WindowEvent {
                 event: tauri::WindowEvent::CloseRequested { .. },
                 ..
@@ -261,6 +286,7 @@ fn clear_webkit_data() {
     }
 }
 
+/// Returns current runtime state: Python path, FFmpeg path, and persisted torch device.
 #[tauri::command]
 fn probe_runtime() -> Result<RuntimeProbe, String> {
     let root = app_root()?;
@@ -289,6 +315,7 @@ fn read_config_str(data_dir: &std::path::Path, key: &str) -> Option<String> {
     value.get(key)?.as_str().map(|s| s.to_string())
 }
 
+/// Returns the current state of the bundled Python runtime pack (manifest, archive, install).
 #[tauri::command]
 fn runtime_pack_status() -> Result<RuntimePackStatus, String> {
     let root = app_root()?;
@@ -320,6 +347,7 @@ fn runtime_pack_status() -> Result<RuntimePackStatus, String> {
     })
 }
 
+/// Downloads the Python runtime pack archive, emitting progress events to the frontend.
 #[tauri::command]
 async fn download_runtime_pack(app_handle: tauri::AppHandle) -> Result<RuntimeArchive, String> {
     ensure_workspace()?;
@@ -336,6 +364,7 @@ async fn download_runtime_pack(app_handle: tauri::AppHandle) -> Result<RuntimeAr
     verify_runtime_archive(&manifest, &archive)
 }
 
+/// Verifies the SHA256 of a previously downloaded runtime pack archive.
 #[tauri::command]
 fn verify_runtime_pack() -> Result<RuntimeArchive, String> {
     let root = app_root()?;
@@ -346,6 +375,7 @@ fn verify_runtime_pack() -> Result<RuntimeArchive, String> {
     verify_runtime_archive(&manifest, &archive)
 }
 
+/// Extracts the verified runtime pack archive and atomically swaps it into place.
 #[tauri::command]
 fn extract_runtime_pack() -> Result<RuntimePackStatus, String> {
     ensure_workspace()?;
@@ -401,18 +431,41 @@ fn extract_runtime_pack() -> Result<RuntimePackStatus, String> {
             .map_err(|e| format!("failed to move existing runtime aside: {e}"))?;
     }
     fs::rename(&extracted, &runtime).map_err(|e| format!("failed to install runtime: {e}"))?;
-    let _ = fs::remove_dir_all(&tmp);
-    let _ = fs::remove_dir_all(&old);
+
+    // Cleanup is non-fatal; log warnings rather than silently discarding errors.
+    if let Err(e) = fs::remove_dir_all(&tmp) {
+        if let Ok(d) = local_data_dir() {
+            append_to_setup_log(&d, &format!("cleanup warning: {}: {e}", tmp.display()));
+        }
+    }
+    if let Err(e) = fs::remove_dir_all(&old) {
+        if let Ok(d) = local_data_dir() {
+            append_to_setup_log(&d, &format!("cleanup warning: {}: {e}", old.display()));
+        }
+    }
 
     let python = runtime.join("python").join("bin").join("python");
     patch_pyvenv_cfg(&python);
     runtime_pack_status()
 }
 
+/// Creates required data directories and runs any pending data migrations.
 #[tauri::command]
 fn ensure_workspace() -> Result<(), String> {
     let root = app_root()?;
     let data = local_data_dir()?;
+
+    // Recover from an interrupted runtime swap: if runtime/ is absent but
+    // runtime.old/ exists, a previous extract_runtime_pack was killed between
+    // the two rename steps. Restore the previous install so setup can retry.
+    {
+        let runtime_path = runtime_dir(&data);
+        let old_path = data.join("runtime.old");
+        if !runtime_path.exists() && old_path.is_dir() {
+            let _ = fs::rename(&old_path, &runtime_path);
+        }
+    }
+
     migrate_legacy_data(&root, &data);
     fs::create_dir_all(&data).map_err(|e| format!("failed to create data dir: {e}"))?;
     for dir in ["cache", "downloads", "ffmpeg", "jobs", "logs", "models"] {
@@ -434,6 +487,7 @@ fn ensure_workspace() -> Result<(), String> {
     Ok(())
 }
 
+/// Downloads FFmpeg/ffprobe if absent and writes their paths to config.json.
 #[tauri::command]
 fn ensure_external_assets() -> Result<AssetStatus, String> {
     ensure_workspace()?;
@@ -447,105 +501,129 @@ fn ensure_external_assets() -> Result<AssetStatus, String> {
     })
 }
 
+/// Spawns the Python/uvicorn backend, waits for it to become healthy, and returns its URL.
 #[tauri::command]
 fn start_backend(
     app_handle: tauri::AppHandle,
     state: tauri::State<BackendState>,
 ) -> Result<BackendStarted, String> {
-    if let Some(url) = state.url.lock().map_err(|e| e.to_string())?.clone() {
-        return Ok(BackendStarted { url });
-    }
-    stop_backend(&state);
-
-    let root = app_root()?;
-    let backend_dir = backend_dir(&root)?;
-    let data_dir = local_data_dir()?;
-    let python = python_path(&root).filter(|p| p.is_file()).ok_or_else(|| {
-        "Python runtime not found. Expected python/ or .venv/ under StemDeck.".to_string()
-    })?;
-    patch_pyvenv_cfg(&python);
-    let (port, port_guard) = free_port()?;
-    let url = format!("http://127.0.0.1:{port}");
-    let log_path = data_dir.join("logs").join("backend.log");
-    let (stdout, stderr) = prepare_backend_stdio(&log_path).unwrap_or_else(|_| {
-        // Logging should help diagnose startup; it should not prevent startup.
-        (Stdio::null(), Stdio::null())
-    });
-
-    // On macOS, python-build-standalone detects its own prefix by walking up from
-    // bin/ — PYTHONHOME is not needed and actively breaks startup when mis-computed.
-    // On Windows the venv launcher needs PYTHONHOME to locate the bundled stdlib.
-    // Compute before moving python into Command::new.
-    #[cfg(not(target_os = "macos"))]
-    let pythonhome = python
-        .parent()
-        .and_then(|bin_dir| bin_dir.parent().map(|venv| (venv, bin_dir)))
-        .and_then(|(venv, bin_dir)| bundled_python_home(venv, bin_dir).map(|(home, _)| home));
-
-    let mut cmd = Command::new(python);
-    cmd.args([
-        "-m",
-        "uvicorn",
-        "app.main:app",
-        "--host",
-        "127.0.0.1",
-        "--port",
-        &port.to_string(),
-    ]);
-    #[cfg(not(target_os = "macos"))]
-    if let Some(ref pythonhome) = pythonhome {
-        cmd.env("PYTHONHOME", pythonhome);
-    }
-
-    // Jobs (stem audio files) live in ~/Documents/StemDeck/jobs/ so the user's
-    // library is visible in Finder, backed up by iCloud, and survives app reinstalls.
-    let jobs_dir = documents_dir_for_jobs(&app_handle);
-
-    cmd.current_dir(&backend_dir)
-        .env("STEMDECK_DATA_DIR", &data_dir)
-        .env("STEMDECK_JOBS_DIR", &jobs_dir)
-        .env("STEMDECK_DESKTOP", "1")
-        .env("STEMDECK_PARENT_PID", std::process::id().to_string())
-        .env("PYTHONUNBUFFERED", "1")
-        .env("XDG_CACHE_HOME", data_dir.join("cache"))
-        .env("TORCH_HOME", data_dir.join("models").join("torch"))
-        .stdout(stdout)
-        .stderr(stderr);
-
-    if let Some(ffmpeg_dir) = ffmpeg_dir_if_present(&data_dir) {
-        let existing = env::var_os("PATH").unwrap_or_default();
-        let mut paths = vec![ffmpeg_dir];
-        paths.extend(env::split_paths(&existing));
-        let joined = env::join_paths(paths).map_err(|e| e.to_string())?;
-        cmd.env("PATH", joined);
-    }
-
-    #[cfg(windows)]
+    // Gate concurrent calls: return immediately if already running or starting (#145).
     {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x08000000;
-        cmd.creation_flags(CREATE_NO_WINDOW);
+        let mut inner = state.inner.lock().map_err(|e| e.to_string())?;
+        if let Some(ref h) = inner.handles {
+            return Ok(BackendStarted { url: h.url.clone() });
+        }
+        if inner.starting {
+            return Err("Backend startup already in progress".to_string());
+        }
+        inner.starting = true;
     }
 
-    let mut child = cmd
-        .spawn()
-        .map_err(|e| format!("failed to start backend: {e}"))?;
-    // Release the reserved port immediately after spawn so uvicorn can bind it.
-    drop(port_guard);
+    // Spawn and wait for health outside the lock; update state atomically on completion.
+    let spawn_result = (|| {
+        let root = app_root()?;
+        let backend_dir = backend_dir(&root)?;
+        let data_dir = local_data_dir()?;
+        let python = python_path(&root).filter(|p| p.is_file()).ok_or_else(|| {
+            "Python runtime not found. Expected python/ or .venv/ under StemDeck.".to_string()
+        })?;
+        patch_pyvenv_cfg(&python);
+        let (port, port_guard) = free_port()?;
+        let url = format!("http://127.0.0.1:{port}");
+        let log_path = data_dir.join("logs").join("backend.log");
+        let (stdout, stderr) = prepare_backend_stdio(&log_path).unwrap_or_else(|_| {
+            // Logging should help diagnose startup; it should not prevent startup.
+            (Stdio::null(), Stdio::null())
+        });
 
-    if let Err(err) = wait_for_health(port, Duration::from_secs(90), &log_path) {
-        let _ = child.kill();
-        let _ = child.wait();
-        return Err(err);
+        // On macOS, python-build-standalone detects its own prefix by walking up from
+        // bin/ — PYTHONHOME is not needed and actively breaks startup when mis-computed.
+        // On Windows the venv launcher needs PYTHONHOME to locate the bundled stdlib.
+        // Compute before moving python into Command::new.
+        #[cfg(not(target_os = "macos"))]
+        let pythonhome = python
+            .parent()
+            .and_then(|bin_dir| bin_dir.parent().map(|venv| (venv, bin_dir)))
+            .and_then(|(venv, bin_dir)| bundled_python_home(venv, bin_dir).map(|(home, _)| home));
+
+        let mut cmd = Command::new(python);
+        cmd.args([
+            "-m",
+            "uvicorn",
+            "app.main:app",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            &port.to_string(),
+        ]);
+        #[cfg(not(target_os = "macos"))]
+        if let Some(ref pythonhome) = pythonhome {
+            cmd.env("PYTHONHOME", pythonhome);
+        }
+
+        // Jobs (stem audio files) live in ~/Documents/StemDeck/jobs/ so the user's
+        // library is visible in Finder, backed up by iCloud, and survives app reinstalls.
+        let jobs_dir = documents_dir_for_jobs(&app_handle);
+
+        cmd.current_dir(&backend_dir)
+            .env("STEMDECK_DATA_DIR", &data_dir)
+            .env("STEMDECK_JOBS_DIR", &jobs_dir)
+            .env("STEMDECK_DESKTOP", "1")
+            .env("STEMDECK_PARENT_PID", std::process::id().to_string())
+            .env("PYTHONUNBUFFERED", "1")
+            .env("XDG_CACHE_HOME", data_dir.join("cache"))
+            .env("TORCH_HOME", data_dir.join("models").join("torch"))
+            .stdout(stdout)
+            .stderr(stderr);
+
+        if let Some(ffmpeg_dir) = ffmpeg_dir_if_present(&data_dir) {
+            let existing = env::var_os("PATH").unwrap_or_default();
+            let mut paths = vec![ffmpeg_dir];
+            paths.extend(env::split_paths(&existing));
+            let joined = env::join_paths(paths).map_err(|e| e.to_string())?;
+            cmd.env("PATH", joined);
+        }
+
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            const CREATE_NO_WINDOW: u32 = 0x08000000;
+            cmd.creation_flags(CREATE_NO_WINDOW);
+        }
+
+        let mut child = cmd
+            .spawn()
+            .map_err(|e| format!("failed to start backend: {e}"))?;
+        // Release the reserved port immediately after spawn so uvicorn can bind it.
+        drop(port_guard);
+
+        if let Err(err) = wait_for_health(port, Duration::from_secs(90), &log_path) {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(err);
+        }
+
+        Ok((child, url))
+    })();
+
+    // Atomically update state: clear starting flag whether spawn succeeded or failed.
+    let mut inner = state.inner.lock().map_err(|e| e.to_string())?;
+    inner.starting = false;
+    match spawn_result {
+        Ok((child, url)) => {
+            inner.handles = Some(BackendHandles {
+                child,
+                url: url.clone(),
+            });
+            Ok(BackendStarted { url })
+        }
+        Err(e) => Err(e),
     }
-
-    *state.child.lock().map_err(|e| e.to_string())? = Some(child);
-    *state.url.lock().map_err(|e| e.to_string())? = Some(url.clone());
-    Ok(BackendStarted { url })
 }
 
+/// Detects GPU hardware, installs CUDA torch if needed, and persists the chosen device.
 #[tauri::command]
-fn ensure_torch_device() -> Result<GpuSetup, String> {
+fn ensure_torch_device(state: tauri::State<BackendState>) -> Result<GpuSetup, String> {
     let root = app_root()?;
     let data_dir = local_data_dir()?;
 
@@ -589,7 +667,7 @@ fn ensure_torch_device() -> Result<GpuSetup, String> {
         let setup = match detect_nvidia_gpu() {
             Some((gpu_name, cuda_version)) => {
                 let index_url = cuda_index_url(&cuda_version);
-                install_cuda_torch(&python, &index_url)?;
+                install_cuda_torch(&python, &index_url, &state)?;
                 let cuda_verified = verify_cuda_torch(&python);
                 GpuSetup {
                     gpu_detected: true,
@@ -872,8 +950,41 @@ fn python_stdlib_present(venv_root: &Path) -> bool {
         .any(|entry| entry.path().join("os.py").is_file())
 }
 
+/// Maps known pip/OS failure patterns to actionable user messages.
+/// Pure function — caller is responsible for logging the raw stderr before calling.
+fn classify_cuda_install_error(stderr: &str) -> String {
+    let lower = stderr.to_ascii_lowercase();
+
+    if lower.contains("missing dependencies for socks") || lower.contains("pysocks") {
+        return "CUDA install failed: a SOCKS proxy is active on your system. \
+                Disable it temporarily and click Retry."
+            .to_string();
+    }
+    if lower.contains("no space left on device")
+        || lower.contains("not enough space on the disk")
+        || lower.contains("disk quota exceeded")
+    {
+        return "CUDA install failed: not enough disk space. Free up space and click Retry."
+            .to_string();
+    }
+    if lower.contains("access is denied") || lower.contains("permissionerror") {
+        return "CUDA install failed: permission denied — antivirus software may be blocking \
+                the install. Try adding StemDeck to your AV exclusions and click Retry."
+            .to_string();
+    }
+    if lower.contains("could not connect") || lower.contains("connection timed out") {
+        return "CUDA install failed: could not reach download.pytorch.org. \
+                Check your internet connection and click Retry."
+            .to_string();
+    }
+
+    // Unknown error — full stderr is already in setup.log; surface a generic message
+    // rather than leaking raw pip output (file paths, stack traces) to the UI.
+    "CUDA install failed — see logs/setup.log for details.".to_string()
+}
+
 #[cfg(not(target_os = "macos"))]
-fn install_cuda_torch(python: &Path, index_url: &str) -> Result<(), String> {
+fn install_cuda_torch(python: &Path, index_url: &str, state: &BackendState) -> Result<(), String> {
     // Skip only when CUDA torch is already active — torch.version.cuda is
     // None for CPU-only wheels, so this correctly re-installs when needed.
     if verify_cuda_torch(python) {
@@ -908,14 +1019,48 @@ fn install_cuda_torch(python: &Path, index_url: &str) -> Result<(), String> {
         ])
         .stdout(Stdio::null())
         .stderr(Stdio::piped());
+
+    let child = command
+        .spawn()
+        .map_err(|e| format!("failed to start CUDA torch install: {e}"))?;
+
+    // Track the pip PID so stop_backend can kill it if the window is closed
+    // while CUDA torch is installing, preventing venv corruption (#140).
+    if let Ok(mut inner) = state.inner.lock() {
+        inner.pip_pid = Some(child.id());
+    }
     let output =
-        command_output_with_timeout(command, Duration::from_secs(20 * 60), "CUDA torch install")?;
+        child_output_with_timeout(child, Duration::from_secs(20 * 60), "CUDA torch install");
+    if let Ok(mut inner) = state.inner.lock() {
+        inner.pip_pid = None;
+    }
+    let output = output?;
 
     if output.status.success() {
         Ok(())
     } else {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        Err(format!("CUDA torch install failed: {}", stderr.trim()))
+        // Write full stderr to setup.log before mapping — eprintln! is silent in
+        // GUI mode on Windows (no console), so file logging is the only reliable
+        // diagnostic path in the deployed app.
+        if let Ok(data_dir) = local_data_dir() {
+            let log_path = data_dir.join("logs").join("setup.log");
+            if let Some(parent) = log_path.parent() {
+                let _ = fs::create_dir_all(parent);
+            }
+            if let Ok(mut f) = fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&log_path)
+            {
+                let _ = writeln!(
+                    f,
+                    "[stemdeck] CUDA torch install failed. stderr:\n{}",
+                    stderr.trim()
+                );
+            }
+        }
+        Err(classify_cuda_install_error(&stderr))
     }
 }
 
@@ -933,6 +1078,7 @@ fn verify_cuda_torch(python: &Path) -> bool {
         .unwrap_or(false)
 }
 
+/// Opens an http/https URL in the system browser. Rejects non-http schemes.
 #[tauri::command]
 fn open_url(url: String) -> Result<(), String> {
     if !url.starts_with("https://") && !url.starts_with("http://") {
@@ -963,11 +1109,23 @@ fn open_url(url: String) -> Result<(), String> {
     Ok(())
 }
 
+/// Prompts the user for a save path, then streams a localhost audio URL to disk.
 #[tauri::command]
-async fn save_audio_file(app: tauri::AppHandle, url: String, filename: String) -> Result<(), String> {
+async fn save_audio_file(
+    app: tauri::AppHandle,
+    url: String,
+    filename: String,
+) -> Result<(), String> {
     if !url.starts_with("http://") && !url.starts_with("https://") {
         return Err("only http/https URLs are permitted".to_string());
     }
+    // Restrict to localhost to prevent SSRF from a compromised WebView (#138).
+    let parsed_url = reqwest::Url::parse(&url).map_err(|_| "invalid URL".to_string())?;
+    let host = parsed_url.host_str().unwrap_or("");
+    if host != "127.0.0.1" && host != "localhost" {
+        return Err("only localhost URLs are permitted".to_string());
+    }
+
     use tauri_plugin_dialog::DialogExt;
     let dest = app
         .dialog()
@@ -978,8 +1136,14 @@ async fn save_audio_file(app: tauri::AppHandle, url: String, filename: String) -
         return Ok(()); // user cancelled
     };
     let dest = file_path.into_path().map_err(|e| e.to_string())?;
-    let client = reqwest::Client::new();
-    let resp = client
+
+    // Stream response to disk to avoid buffering a large audio file in memory (#139).
+    // 5-minute timeout covers large WAV exports over a slow loopback.
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(300))
+        .build()
+        .map_err(|e| format!("failed to build client: {e}"))?;
+    let mut resp = client
         .get(&url)
         .send()
         .await
@@ -987,33 +1151,60 @@ async fn save_audio_file(app: tauri::AppHandle, url: String, filename: String) -
     if !resp.status().is_success() {
         return Err(format!("backend returned HTTP {}", resp.status()));
     }
-    let bytes = resp.bytes().await.map_err(|e| format!("read failed: {e}"))?;
-    std::fs::write(&dest, &bytes).map_err(|e| format!("write failed: {e}"))?;
+    let tmp = dest.with_extension("audio.download");
+    let mut file =
+        std::fs::File::create(&tmp).map_err(|e| format!("failed to create temp file: {e}"))?;
+    while let Some(chunk) = resp
+        .chunk()
+        .await
+        .map_err(|e| format!("read failed: {e}"))?
+    {
+        file.write_all(&chunk)
+            .map_err(|e| format!("write failed: {e}"))?;
+    }
+    file.sync_all().map_err(|e| format!("flush failed: {e}"))?;
+    drop(file);
+    std::fs::rename(&tmp, &dest).map_err(|e| format!("rename failed: {e}"))?;
     Ok(())
 }
 
 fn stop_backend(state: &BackendState) {
-    if let Ok(mut guard) = state.child.lock() {
-        if let Some(child) = guard.as_mut() {
-            // Send SIGTERM first so uvicorn can drain in-progress requests
-            // before we escalate to SIGKILL.
-            #[cfg(unix)]
-            {
-                unsafe { libc::kill(child.id() as libc::pid_t, libc::SIGTERM) };
-                let deadline = Instant::now() + Duration::from_secs(3);
-                while Instant::now() < deadline {
-                    if child.try_wait().ok().flatten().is_some() {
-                        *guard = None;
-                        return;
-                    }
-                    thread::sleep(Duration::from_millis(100));
-                }
-            }
-            let _ = child.kill();
-            let _ = child.wait();
-        }
-        *guard = None;
+    let (handles, pip_pid) = match state.inner.lock() {
+        Ok(mut guard) => (guard.handles.take(), guard.pip_pid.take()),
+        Err(_) => return,
+    };
+
+    // Kill any in-progress pip subprocess so it doesn't corrupt the venv
+    // if the window is closed during CUDA torch installation (#140).
+    #[cfg(unix)]
+    if let Some(pid) = pip_pid {
+        // SAFETY: pid was stored immediately after spawn; we send SIGTERM best-effort.
+        unsafe { libc::kill(pid as libc::pid_t, libc::SIGTERM) };
     }
+
+    let Some(mut handles) = handles else { return };
+
+    // Drain the backend on a background thread so we don't block the Tauri
+    // RunEvent main thread for up to 3 seconds (#144).
+    thread::spawn(move || {
+        // Send SIGTERM first so uvicorn can drain in-progress requests
+        // before we escalate to SIGKILL.
+        #[cfg(unix)]
+        {
+            // SAFETY: child was spawned by us and has not yet been waited on;
+            // its PID is valid for the lifetime of the Child handle.
+            unsafe { libc::kill(handles.child.id() as libc::pid_t, libc::SIGTERM) };
+            let deadline = Instant::now() + Duration::from_secs(3);
+            while Instant::now() < deadline {
+                if handles.child.try_wait().ok().flatten().is_some() {
+                    return;
+                }
+                thread::sleep(Duration::from_millis(100));
+            }
+        }
+        let _ = handles.child.kill();
+        let _ = handles.child.wait();
+    });
 }
 
 /// Returns the persistent user data directory for StemDeck.
@@ -1049,6 +1240,17 @@ fn local_data_dir() -> Result<PathBuf, String> {
             .join(".local")
             .join("share")
             .join("stemdeck"))
+    }
+}
+
+/// Appends a timestamped line to data/logs/setup.log (best-effort; never fails the caller).
+fn append_to_setup_log(data_dir: &Path, msg: &str) {
+    let log = data_dir.join("logs").join("setup.log");
+    if let Some(p) = log.parent() {
+        let _ = fs::create_dir_all(p);
+    }
+    if let Ok(mut f) = fs::OpenOptions::new().create(true).append(true).open(&log) {
+        let _ = writeln!(f, "[stemdeck] {msg}");
     }
 }
 
@@ -1147,12 +1349,16 @@ async fn download_file_with_progress(
         fs::remove_file(&tmp).map_err(|e| format!("failed to remove {}: {e}", tmp.display()))?;
     }
 
+    // file:// and bare-path shortcuts are development-only; not available in
+    // release builds so a compromised manifest cannot bypass the download (#136).
+    #[cfg(debug_assertions)]
     if let Some(path) = url.strip_prefix("file://") {
         fs::copy(Path::new(path), &tmp)
             .map_err(|e| format!("failed to copy runtime pack from {url}: {e}"))?;
         return fs::rename(&tmp, target)
             .map_err(|e| format!("failed to move runtime pack to {}: {e}", target.display()));
     }
+    #[cfg(debug_assertions)]
     if Path::new(url).is_file() {
         fs::copy(Path::new(url), &tmp)
             .map_err(|e| format!("failed to copy runtime pack from {url}: {e}"))?;
@@ -1161,6 +1367,7 @@ async fn download_file_with_progress(
     }
 
     let client = reqwest::Client::builder()
+        .connect_timeout(Duration::from_secs(15))
         .timeout(Duration::from_secs(30 * 60))
         .build()
         .map_err(|e| format!("failed to build HTTP client: {e}"))?;
@@ -1168,7 +1375,13 @@ async fn download_file_with_progress(
         .get(url)
         .send()
         .await
-        .map_err(|e| format!("failed to start download from {url}: {e}"))?;
+        .map_err(|e| {
+            if e.is_connect() || e.is_timeout() {
+                format!("Could not reach the download server. Check your internet connection and try again. ({})", e)
+            } else {
+                format!("failed to start download from {url}: {e}")
+            }
+        })?;
     if !response.status().is_success() {
         return Err(format!(
             "failed to download runtime pack from {url}: HTTP {}",
@@ -1206,6 +1419,12 @@ async fn download_file_with_progress(
         },
     );
 
+    // Flush OS write cache before rename — guards against corrupt archive on
+    // Windows after power loss between close and rename.
+    file.sync_all()
+        .map_err(|e| format!("failed to flush {}: {e}", tmp.display()))?;
+    drop(file);
+
     fs::rename(&tmp, target)
         .map_err(|e| format!("failed to move runtime pack to {}: {e}", target.display()))
 }
@@ -1217,13 +1436,23 @@ fn download_file(url: &str, target: &Path, timeout: Duration) -> Result<(), Stri
         fs::remove_file(&tmp).map_err(|e| format!("failed to remove {}: {e}", tmp.display()))?;
     }
 
+    // file:// and bare-path shortcuts are development-only (#136).
+    #[cfg(debug_assertions)]
     if let Some(path) = url.strip_prefix("file://") {
         fs::copy(Path::new(path), &tmp)
             .map_err(|e| format!("failed to copy runtime pack from {url}: {e}"))?;
-    } else if Path::new(url).is_file() {
+        return fs::rename(&tmp, target)
+            .map_err(|e| format!("failed to move runtime pack to {}: {e}", target.display()));
+    }
+    #[cfg(debug_assertions)]
+    if Path::new(url).is_file() {
         fs::copy(Path::new(url), &tmp)
             .map_err(|e| format!("failed to copy runtime pack from {url}: {e}"))?;
-    } else {
+        return fs::rename(&tmp, target)
+            .map_err(|e| format!("failed to move runtime pack to {}: {e}", target.display()));
+    }
+
+    {
         let mut command = Command::new("curl");
         command
             .args([
@@ -1385,9 +1614,18 @@ fn backend_dir(root: &Path) -> Result<PathBuf, String> {
     ))
 }
 
+/// Returns Some(PathBuf) if the env var is set and non-empty, None otherwise.
+fn env_path_override(var: &str) -> Option<PathBuf> {
+    env::var(var)
+        .ok()
+        .filter(|s| !s.is_empty())
+        .map(PathBuf::from)
+}
+
 fn python_path(root: &Path) -> Option<PathBuf> {
-    if let Ok(path) = env::var("STEMDECK_PYTHON") {
-        return Some(PathBuf::from(path));
+    #[cfg(debug_assertions)]
+    if let Some(p) = env_path_override("STEMDECK_PYTHON") {
+        return Some(p);
     }
     if let Ok(data_dir) = local_data_dir() {
         let python = runtime_python_path(&data_dir);
@@ -1414,8 +1652,8 @@ fn python_path(root: &Path) -> Option<PathBuf> {
 }
 
 fn ffmpeg_path(data_dir: &Path) -> Option<PathBuf> {
-    if let Ok(path) = env::var("STEMDECK_FFMPEG") {
-        return Some(PathBuf::from(path));
+    if let Some(p) = env_path_override("STEMDECK_FFMPEG") {
+        return Some(p);
     }
     let file = if cfg!(windows) {
         "ffmpeg.exe"
@@ -1552,13 +1790,11 @@ fn ensure_ffmpeg(data_dir: &Path) -> Result<PathBuf, String> {
 
 #[cfg(target_os = "macos")]
 fn download_macos_ffmpeg(data_dir: &Path) -> Result<(), String> {
-    let ffmpeg_url = env::var("STEMDECK_FFMPEG_URL")
-        .ok()
-        .filter(|value| !value.trim().is_empty())
+    let ffmpeg_url = env_path_override("STEMDECK_FFMPEG_URL")
+        .map(|p| p.display().to_string())
         .unwrap_or_else(|| DEFAULT_MACOS_FFMPEG_URL.to_string());
-    let ffprobe_url = env::var("STEMDECK_FFPROBE_URL")
-        .ok()
-        .filter(|value| !value.trim().is_empty())
+    let ffprobe_url = env_path_override("STEMDECK_FFPROBE_URL")
+        .map(|p| p.display().to_string())
         .unwrap_or_else(|| DEFAULT_MACOS_FFPROBE_URL.to_string());
     let downloads = data_dir.join("downloads");
     let ffmpeg_zip = downloads.join("ffmpeg-macos.zip");
@@ -1640,53 +1876,102 @@ fn make_executable(path: &Path) -> Result<(), String> {
 
 #[cfg(windows)]
 fn download_windows_ffmpeg(data_dir: &Path) -> Result<(), String> {
-    let url = env::var("STEMDECK_FFMPEG_URL")
-        .ok()
-        .filter(|value| !value.trim().is_empty())
+    let url = env_path_override("STEMDECK_FFMPEG_URL")
+        .map(|p| p.display().to_string())
         .unwrap_or_else(|| DEFAULT_WINDOWS_FFMPEG_URL.to_string());
+    let is_default_url = url == DEFAULT_WINDOWS_FFMPEG_URL;
     let downloads = data_dir.join("downloads");
     let archive_path = downloads.join("ffmpeg-windows.zip");
     fs::create_dir_all(&downloads)
         .map_err(|e| format!("failed to create {}: {e}", downloads.display()))?;
 
-    download_file_with_powershell(&url, &archive_path)?;
+    // Fetch the SHA256 companion file from gyan.dev before downloading the archive (#135).
+    // Only verified for the default URL; custom overrides skip the check.
+    let expected_sha256 = if is_default_url {
+        let sha256_url = format!("{url}.sha256");
+        let sha256_tmp = downloads.join("ffmpeg-windows.zip.sha256");
+        download_file_blocking(&sha256_url, &sha256_tmp)?;
+        let raw = fs::read_to_string(&sha256_tmp)
+            .map_err(|e| format!("failed to read FFmpeg SHA256: {e}"))?;
+        let _ = fs::remove_file(&sha256_tmp);
+        Some(
+            raw.split_whitespace()
+                .next()
+                .ok_or_else(|| "FFmpeg SHA256 file was empty".to_string())?
+                .to_ascii_lowercase(),
+        )
+    } else {
+        None
+    };
+
+    download_file_blocking(&url, &archive_path)?;
+
+    if let Some(expected) = expected_sha256 {
+        let actual = sha256_file(&archive_path)?;
+        if !actual.eq_ignore_ascii_case(&expected) {
+            let _ = fs::remove_file(&archive_path);
+            return Err(format!(
+                "FFmpeg archive checksum mismatch (expected {expected}, got {actual}). \
+                 The download may be corrupt. Click Retry to try again."
+            ));
+        }
+    }
 
     extract_ffmpeg_binaries(&archive_path, data_dir)
 }
 
 #[cfg(windows)]
-fn download_file_with_powershell(url: &str, target: &Path) -> Result<(), String> {
-    let target_str = target.display().to_string();
-    // Pass URL and destination via environment variables to avoid quote injection
-    // in the PowerShell -Command string (a URL with a single quote would break
-    // the original string-interpolation approach).
-    let script = "$ProgressPreference = 'SilentlyContinue'; \
-         Invoke-WebRequest -Uri $env:STEMDECK_DL_URL -OutFile $env:STEMDECK_DL_DEST";
-    let mut command = Command::new("powershell.exe");
-    command
-        .args([
-            "-NoProfile",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-Command",
-            script,
-        ])
-        .env("STEMDECK_DL_URL", url)
-        .env("STEMDECK_DL_DEST", &target_str)
-        .stdout(Stdio::null())
-        .stderr(Stdio::piped());
-    hide_console_window(&mut command);
-    let output =
-        command_output_with_timeout(command, Duration::from_secs(30 * 60), "FFmpeg download")?;
-    if output.status.success() && target.is_file() {
-        Ok(())
-    } else {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        Err(format!(
-            "failed to download FFmpeg from {url}: {}",
-            stderr.trim()
-        ))
+fn download_file_blocking(url: &str, target: &Path) -> Result<(), String> {
+    let tmp = target.with_extension("download");
+    if tmp.exists() {
+        fs::remove_file(&tmp).map_err(|e| format!("failed to remove {}: {e}", tmp.display()))?;
     }
+
+    // NOTE: do not call this function from an async context — reqwest::blocking
+    // spawns its own tokio runtime and will panic with "Cannot start a runtime
+    // from within a runtime" if a tokio executor is already running on the thread.
+    let client = reqwest::blocking::Client::builder()
+        .connect_timeout(Duration::from_secs(15))
+        .timeout(Duration::from_secs(30 * 60))
+        .build()
+        .map_err(|e| format!("failed to build HTTP client: {e}"))?;
+
+    let mut response = client.get(url).send().map_err(|e| {
+        if e.is_connect() || e.is_timeout() {
+            format!(
+                "Could not reach the download server. \
+                 Check your internet connection and try again. ({e})"
+            )
+        } else {
+            format!("failed to start download from {url}: {e}")
+        }
+    })?;
+
+    if !response.status().is_success() {
+        return Err(format!(
+            "failed to download from {url}: HTTP {}",
+            response.status()
+        ));
+    }
+
+    let mut file =
+        fs::File::create(&tmp).map_err(|e| format!("failed to create {}: {e}", tmp.display()))?;
+
+    response
+        .copy_to(&mut file)
+        .map_err(|e| format!("failed to write to {}: {e}", tmp.display()))?;
+
+    // Flush OS write cache to disk before closing — guards against data loss if
+    // the process crashes or power is lost between close and rename.
+    file.sync_all()
+        .map_err(|e| format!("failed to flush {}: {e}", tmp.display()))?;
+
+    // Explicitly drop the file handle before rename — Windows will not rename
+    // a file with an open handle.
+    drop(file);
+
+    fs::rename(&tmp, target)
+        .map_err(|e| format!("failed to move download to {}: {e}", target.display()))
 }
 
 #[cfg(windows)]
@@ -1822,8 +2107,61 @@ fn update_setup_config<const N: usize>(
 
     let body = serde_json::to_string_pretty(&config)
         .map_err(|e| format!("failed to serialize setup config: {e}"))?;
-    fs::write(&config_path, body + "\n")
-        .map_err(|e| format!("failed to write {}: {e}", config_path.display()))
+
+    // Write atomically: temp file → sync → rename. A crash mid-write leaves the
+    // previous config intact rather than producing a truncated/empty file.
+    let tmp_path = config_path.with_extension("json.tmp");
+    let mut tmp_file = fs::File::create(&tmp_path)
+        .map_err(|e| format!("failed to create {}: {e}", tmp_path.display()))?;
+    tmp_file
+        .write_all((body + "\n").as_bytes())
+        .map_err(|e| format!("failed to write {}: {e}", tmp_path.display()))?;
+    tmp_file
+        .sync_all()
+        .map_err(|e| format!("failed to flush {}: {e}", tmp_path.display()))?;
+    drop(tmp_file);
+    fs::rename(&tmp_path, &config_path)
+        .map_err(|e| format!("failed to move config to {}: {e}", config_path.display()))
+}
+
+/// Polls an already-spawned child until it exits or the timeout elapses.
+/// Mirrors command_output_with_timeout but accepts a pre-spawned Child so the
+/// caller can record the PID before waiting (e.g. to kill on window close).
+fn child_output_with_timeout(
+    mut child: Child,
+    timeout: Duration,
+    label: &str,
+) -> Result<Output, String> {
+    let deadline = Instant::now() + timeout;
+    loop {
+        if let Some(status) = child
+            .try_wait()
+            .map_err(|e| format!("failed to wait for {label}: {e}"))?
+        {
+            let mut stdout = Vec::new();
+            if let Some(mut pipe) = child.stdout.take() {
+                let _ = pipe.read_to_end(&mut stdout);
+            }
+            let mut stderr = Vec::new();
+            if let Some(mut pipe) = child.stderr.take() {
+                let _ = pipe.read_to_end(&mut stderr);
+            }
+            return Ok(Output {
+                status,
+                stdout,
+                stderr,
+            });
+        }
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(format!(
+                "{label} timed out after {} seconds",
+                timeout.as_secs()
+            ));
+        }
+        thread::sleep(Duration::from_millis(100));
+    }
 }
 
 fn command_output_with_timeout(
