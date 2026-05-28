@@ -294,6 +294,25 @@ function renderOverviewWaveformPath(stemName, peaks, norm, color) {
   `;
 }
 
+function renderAllOverviewWaveformsFromPeaks(stems, peaksData) {
+  let globalMax = 0;
+  for (const stem of stems) {
+    const pts = peaksData[stem.name];
+    if (!pts?.length) continue;
+    for (const [mn, mx] of pts) {
+      if (mx > globalMax) globalMax = mx;
+      if (-mn > globalMax) globalMax = -mn;
+    }
+  }
+  if (globalMax <= 0) return;
+  const norm = 1 / globalMax;
+  for (const stem of stems) {
+    const pts = peaksData[stem.name];
+    if (!pts?.length) continue;
+    renderOverviewWaveformPath(stem.name, pts, norm, STEM_COLORS[stem.name] || "#a0a0a0");
+  }
+}
+
 // Normalize all stems to a single shared max so the overview waveforms
 // preserve real amplitude relationships (drums tall, piano short),
 // matching what a DAW shows. Per-stem normalization made every lane
@@ -647,7 +666,7 @@ function _applyLaneHeight(count) {
   return laneH;
 }
 
-export function wireUpAudio(jobId, stems, duration, thumbnail, mixUrl = null, title = "") {
+export function wireUpAudio(jobId, stems, duration, thumbnail, mixUrl = null, title = "", peaksPromise = null) {
   const app = document.querySelector(".app");
   app?.classList.remove("is-import");
   app?.classList.remove("no-track");
@@ -700,14 +719,30 @@ export function wireUpAudio(jobId, stems, duration, thumbnail, mixUrl = null, ti
   applyStemSelectionFilter(new Set(stems.map((s) => s.name)));
   updateFooterTrack({ thumbnail, stemCount: stems.filter((s) => s.name !== "original").length });
 
-  // Reset and re-init footer waveform — prefer the full selected-stems mix,
-  // fall back to the complement "original" track, then first available stem.
+  // Reset footer waveform state — will be re-populated below after peaks fetch.
   _footerWavePeaks = null;
   setFooterWaveDrawFn(null);
   const waveformUrl = _mixUrl
     || stems.find((s) => s.name === "original")?.url
     || stems[0]?.url;
-  if (waveformUrl) initFooterWaveform(waveformUrl);
+
+  // Use the pre-started peaks promise from catalog.js (started in parallel with
+  // the job-data fetch) so peaks.json is resolved before Multitrack.create fires
+  // its stem WAV fetches. This keeps peaks.json out of Safari's 6-connection-per-
+  // origin window, preventing stem WAV queuing that causes buffer underruns.
+  let precomputedPeaks = {};
+  let _canplayFired = false;
+  const _footerStemName = stems.find((s) => s.name === "original") ? "original" : stems[0]?.name;
+  const _peaksPromise = peaksPromise ?? (jobId
+    ? (() => {
+        const ac = new AbortController();
+        const timer = setTimeout(() => ac.abort(), 3000);
+        return fetch(`/api/jobs/${jobId}/stems/peaks.json`, { signal: ac.signal })
+          .then((r) => (r.ok ? r.json() : {}))
+          .catch(() => ({}))
+          .finally(() => clearTimeout(timer));
+      })()
+    : Promise.resolve({}));
 
   for (const stem of stems) {
     const row = mixerEl.querySelector(`.lane-header[data-stem="${stem.name}"]`);
@@ -774,6 +809,28 @@ export function wireUpAudio(jobId, stems, duration, thumbnail, mixUrl = null, ti
   );
   setMultitrack(mt);
 
+  // Apply peaks to visuals once the fetch resolves. Runs after Multitrack.create
+  // so AudioContext is already initialised before this callback fires.
+  _peaksPromise.then((peaks) => {
+    if (token !== visualRenderToken) return;
+    precomputedPeaks = peaks;
+    const footerPeaks = peaks[_footerStemName] || peaks[Object.keys(peaks)[0]];
+    if (footerPeaks?.length) {
+      const step = Math.ceil(footerPeaks.length / _FOOTER_BARS);
+      _footerWavePeaks = footerPeaks.filter((_, i) => i % step === 0).slice(0, _FOOTER_BARS);
+      setFooterWaveDrawFn(_drawFooterWave);
+      _drawFooterWave(0);
+    } else if (waveformUrl) {
+      initFooterWaveform(waveformUrl);
+    }
+    // Edge case: canplay fired before peaks arrived, so the canplay handler
+    // couldn't render from peaks. Render now that we have them.
+    if (_canplayFired && Object.keys(peaks).length) {
+      clearOverviewWaveforms();
+      renderAllOverviewWaveformsFromPeaks(stems, peaks);
+    }
+  });
+
   // Stop button glows iff transport is paused AND at the "start" (0,
   // or loopStart if loop is on). Centralised here so manual seeks via
   // the ruler also update the visual without extra plumbing.
@@ -787,6 +844,7 @@ export function wireUpAudio(jobId, stems, duration, thumbnail, mixUrl = null, ti
   };
 
   mt.once("canplay", () => {
+    _canplayFired = true;
     setWaveformLoading(false);
     const ctx = mt.audioContext;
     console.debug(
@@ -813,6 +871,10 @@ export function wireUpAudio(jobId, stems, duration, thumbnail, mixUrl = null, ti
     setLoopEnd(totalDuration * LOOP_DEFAULT_END_FRAC);
     renderAllMiniWaves(mt, stems);
     applyWaveZoom();
+    if (Object.keys(precomputedPeaks).length) {
+      clearOverviewWaveforms();
+      renderAllOverviewWaveformsFromPeaks(stems, precomputedPeaks);
+    }
 
     // CRITICAL: the Multitrack class itself does NOT emit play / pause /
     // timeupdate / seeking — those fire on the individual wavesurfer
@@ -839,8 +901,10 @@ export function wireUpAudio(jobId, stems, duration, thumbnail, mixUrl = null, ti
       });
       Promise.all(waits).then(() => {
         if (token !== visualRenderToken) return;
-        clearOverviewWaveforms();
-        renderAllOverviewWaveforms(stems, decoded);
+        if (!Object.keys(precomputedPeaks).length) {
+          clearOverviewWaveforms();
+          renderAllOverviewWaveforms(stems, decoded);
+        }
         renderStemEnergyBaseline(stems, decoded);
         startStemVuLoop(stems, decoded, token);
       });

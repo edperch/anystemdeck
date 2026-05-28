@@ -3,6 +3,7 @@ import { STEM_NAMES } from "./constants.js";
 import { wireUpAudio, updateFooterTrack } from "./player.js";
 import { initSections } from "./sections.js";
 import { bpmChip, keyChip, saveSelectedStems, selectedStems, titleEl } from "./state.js";
+import { showError } from "./job.js";
 import { fmtTime, storeGet, storeSet } from "./utils.js";
 
 // Escape user-supplied strings before inserting into innerHTML.
@@ -239,7 +240,11 @@ export function updateTrackStatus(trackId, status) {
     saveState();
     const statusDot = document.querySelector(`.cat-item[data-id="${trackId}"] .cat-status`);
     if (statusDot) {
-      statusDot.className = `cat-status ${PROCESSING_STATUSES.has(status) ? "processing" : ""}`;
+      const modifier = PROCESSING_STATUSES.has(status) ? " processing" : status === "unavailable" ? " unavailable" : "";
+      statusDot.className = `cat-status${modifier}`;
+    }
+    for (const el of document.querySelectorAll(`.cat-item[data-id="${trackId}"]`)) {
+      el.classList.toggle("unavailable", status === "unavailable");
     }
   }
 }
@@ -295,6 +300,7 @@ function deriveSource(sourceUrl) {
   if (!sourceUrl) return "—";
   if (sourceUrl.startsWith("local:")) return "Local file";
   if (sourceUrl.includes("youtube.com") || sourceUrl.includes("youtu.be")) return "YouTube";
+  if (sourceUrl.includes("soundcloud.com")) return "SoundCloud";
   return "Web";
 }
 
@@ -307,6 +313,7 @@ function deriveQuality(sourceUrl) {
     return "Local file";
   }
   if (sourceUrl.includes("youtube.com") || sourceUrl.includes("youtu.be")) return "High";
+  if (sourceUrl.includes("soundcloud.com")) return "Compressed (MP3)";
   return "—";
 }
 
@@ -456,8 +463,19 @@ function applyStoredStemSelection(track) {
 async function loadTrackIntoStudio(trackId) {
   let track = tracks[trackId];
   if (!track) return;
+  if (track.status === "unavailable") {
+    showError("This track's audio is no longer available. Re-upload to restore it.");
+    return;
+  }
   const hadStoredAudio = Boolean(track.audioStems?.length);
   const token = ++_loadTrackToken;
+
+  // Start peaks fetch immediately — runs in parallel with job-data fetch so it
+  // resolves before wireUpAudio calls Multitrack.create. This prevents peaks.json
+  // from competing with stem WAV fetches for Safari's 6-connection-per-origin limit.
+  const peaksPromise = fetch(`/api/jobs/${trackId}/stems/peaks.json`)
+    .then((r) => (r.ok ? r.json() : {}))
+    .catch(() => ({}));
 
   // Always fetch fresh state so server-side changes (sections, analysis, stems)
   // are reflected — cached localStorage data can be stale.
@@ -469,6 +487,13 @@ async function loadTrackIntoStudio(trackId) {
       track = stateMetadataToTrack(state, track);
       tracks[trackId] = track;
       saveState();
+    } else if (res.status === 404) {
+      track = { ...track, status: "unavailable" };
+      tracks[trackId] = track;
+      saveState();
+      updateTrackStatus(trackId, "unavailable");
+      showError("This track's audio is no longer available. Re-upload to restore it.");
+      return;
     }
   } catch (e) { console.warn("[catalog] server sync failed, using stored track:", e); }
 
@@ -486,7 +511,7 @@ async function loadTrackIntoStudio(trackId) {
   }
 
   applyTrackInfoToPanel(track);
-  wireUpAudio(trackId, track.audioStems, track.duration || 0, track.thumb, track.mixUrl ?? null, track.title || "");
+  wireUpAudio(trackId, track.audioStems, track.duration || 0, track.thumb, track.mixUrl ?? null, track.title || "", peaksPromise);
   initSections(trackId, track.sections, track.duration || 0);
 }
 
@@ -850,7 +875,8 @@ function renderRecentItem(trackId) {
   const track = tracks[trackId];
   if (!track) return null;
   const el = document.createElement("div");
-  el.className = `cat-item${trackId === _currentTrackId ? " active" : ""}`;
+  const isUnavailable = track.status === "unavailable";
+  el.className = `cat-item${trackId === _currentTrackId ? " active" : ""}${isUnavailable ? " unavailable" : ""}`;
   el.dataset.id = trackId;
   const duration = track.duration ? fmtTime(track.duration) : "";
   const stemCount = track.stems?.length ?? 0;
@@ -861,7 +887,7 @@ function renderRecentItem(trackId) {
       <div class="cat-title">${esc(track.title ?? "Unknown track")}</div>
       <div class="cat-sub"><span>${esc(sub)}</span></div>
     </div>
-    <div class="cat-status${PROCESSING_STATUSES.has(track.status) ? " processing" : ""}"></div>
+    <div class="cat-status${PROCESSING_STATUSES.has(track.status) ? " processing" : isUnavailable ? " unavailable" : ""}"></div>
   `;
   wireTrackDragAndLoad(el, trackId);
   return el;
@@ -897,7 +923,8 @@ function renderTrackItem(trackId, { inTrash = false } = {}) {
   if (!track) return null;
 
   const el = document.createElement("div");
-  el.className = `cat-item${trackId === _currentTrackId ? " active" : ""}`;
+  const isUnavailable = track.status === "unavailable";
+  el.className = `cat-item${trackId === _currentTrackId ? " active" : ""}${isUnavailable ? " unavailable" : ""}`;
   el.dataset.id = trackId;
 
   const stemCount = track.stems?.length ?? 0;
@@ -911,7 +938,7 @@ function renderTrackItem(trackId, { inTrash = false } = {}) {
         <span>${inTrash ? "Removed" : `${stemCount} stem${stemCount !== 1 ? "s" : ""}`}</span>
       </div>
     </div>
-    <div class="cat-status${PROCESSING_STATUSES.has(track.status) ? " processing" : ""}"></div>
+    <div class="cat-status${PROCESSING_STATUSES.has(track.status) ? " processing" : isUnavailable ? " unavailable" : ""}"></div>
     ${inTrash ? "" : `<button class="cat-del" type="button" title="Move to Trash">
       <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
         <polyline points="3 6 5 6 21 6"></polyline>
@@ -1204,6 +1231,14 @@ function render() {
 
   // Stem Collections section
   const collectionsSection = makeSectionEl("Stem Collections");
+  const newFolderBtn = document.createElement("button");
+  newFolderBtn.id = "newFolderBtn";
+  newFolderBtn.className = "new-folder-btn";
+  newFolderBtn.type = "button";
+  newFolderBtn.setAttribute("aria-label", "New folder");
+  newFolderBtn.innerHTML = `<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M12 11v6 M9 14h6"/></svg>New folder`;
+  newFolderBtn.addEventListener("click", createFolder);
+  collectionsSection.querySelector(".lib-section-head").appendChild(newFolderBtn);
   let hasCollections = false;
   for (const folder of nonTrash) {
     const el = renderFolder(folder);
@@ -1517,7 +1552,7 @@ export async function initCatalog() {
   setDisplayedVersion(currentVersion);
   render();
 
-  document.getElementById("newFolderBtn")?.addEventListener("click", createFolder);
+
   loadCurrentVersion().finally(checkForUpdate);
   syncWithServer();
 }
