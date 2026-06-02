@@ -601,6 +601,13 @@ function closeFolderEditor() {
   folderEditor = null;
 }
 
+// Folder names accept letters (any language), digits, spaces, and a small safe
+// punctuation set — markup/symbols are rejected so names like the XSS probe or
+// "±!@£$%^&*" can't be created (#170 follow-up).
+const FOLDER_NAME_RE = /^[\p{L}\p{M}\p{N} '’&().,_-]+$/u;
+const MAX_FOLDER_NAME_LEN = 100;
+const isValidFolderName = (s) => FOLDER_NAME_RE.test(s);
+
 function openFolderEditor(folderId) {
   const folder = folders.find((f) => f.id === folderId);
   if (!folder || folder.id === TRASH_ID) return;
@@ -621,7 +628,7 @@ function openFolderEditor(folderId) {
       </div>
       <label class="folder-editor-field">
         <span>Name</span>
-        <input class="folder-editor-name" type="text" maxlength="48" autocomplete="off" spellcheck="false" />
+        <input class="folder-editor-name" type="text" maxlength="100" autocomplete="off" spellcheck="false" />
       </label>
       <div class="folder-editor-field">
         <span>Color</span>
@@ -629,6 +636,7 @@ function openFolderEditor(folderId) {
           ${folderColorButtonsHtml(selectedColor)}
         </div>
       </div>
+      <div class="folder-editor-msg" role="alert" aria-live="polite"></div>
       <div class="folder-editor-actions">
         <button class="folder-editor-cancel" type="button">Cancel</button>
         <button class="folder-editor-save" type="submit">Save</button>
@@ -659,9 +667,27 @@ function openFolderEditor(folderId) {
       refreshDots();
     });
   }
+  const msgEl = overlay.querySelector(".folder-editor-msg");
+  input.addEventListener("input", () => { msgEl.textContent = ""; });
   form.addEventListener("submit", (e) => {
     e.preventDefault();
-    folder.name = input.value.trim() || folder.name;
+    const name = input.value.trim();
+    if (!name) {
+      msgEl.textContent = "Enter a folder name.";
+      input.focus();
+      return;
+    }
+    if (name.length > MAX_FOLDER_NAME_LEN) {
+      msgEl.textContent = `Folder name is too long (max ${MAX_FOLDER_NAME_LEN}).`;
+      input.focus();
+      return;
+    }
+    if (!isValidFolderName(name)) {
+      msgEl.textContent = "Use letters, numbers, spaces, or - _ ' & ( ) . ,";
+      input.focus();
+      return; // don't save or close until the name is valid
+    }
+    folder.name = name;
     folder.color = selectedColor;
     saveState();
     closeFolderEditor();
@@ -985,7 +1011,7 @@ function renderFolder(folder) {
     </span>`}
     <svg class="f-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"></polyline></svg>
     ${folderIcon}
-    <span class="f-name">${folder.name}</span>
+    <span class="f-name">${esc(folder.name)}</span>
     <span class="f-count">${folder.items.length}</span>
     ${isTrash ? "" : `
       <button class="f-subfolder" type="button" aria-label="New subfolder" title="New subfolder">
@@ -1473,6 +1499,9 @@ async function checkForUpdate() {
     const data = await res.json();
     const latest = normalizeVersion(data.tag_name);
     if (!latest || latest === currentVersion) return;
+    // Dev/source builds report a git-derived version (e.g. 0.7.0a5.dev3+g…) that
+    // is *ahead* of the last release — don't nag them with an "update" banner.
+    if (/\bdev\b|\+/.test(currentVersion)) return;
 
     let dismissed = null;
     try { dismissed = localStorage.getItem(DISMISSED_UPDATE_KEY); } catch (e) { console.warn(e); }
