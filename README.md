@@ -28,15 +28,25 @@
 
 <br>
 
-Drop an MP3 or WAV, or paste a YouTube URL. StemDeck splits the audio into up to six stems (vocals, drums, bass, guitar, piano, other) and plays them back in a DAW-style multitrack mixer. Mute, solo, mix, zoom the waveform, loop a region, and download individual stems or a custom mix. Everything runs on your own machine.
+Drop in an MP3, WAV, or FLAC file, or paste a YouTube URL, and StemDeck splits the audio into up to six stems (vocals, drums, bass, guitar, piano, other). Play them back in a DAW-style multitrack mixer: mute, solo, balance levels, zoom the waveform, loop a region, and export individual stems or a custom mix. Everything runs locally on your own machine.
 
-> **What is this?** StemDeck is a stem separation tool, not a downloader. Its primary use case is processing audio files you already own — drag an MP3 or WAV onto the import bar and go. YouTube URL support is provided as a convenience for content you have the right to process. StemDeck does not store, cache, or redistribute any downloaded content. All processing happens locally on your machine and nothing leaves it.
+> **What is this?** StemDeck is a stem separation tool, not a downloader. Its main job is processing audio you already own: drag an MP3, WAV, or FLAC onto the import bar and go. YouTube support is a convenience for content you have the right to process. StemDeck does not store, cache, or redistribute any downloaded content. Everything happens locally and nothing leaves your machine.
 
-> StemDeck is a free, open alternative to cloud stem-splitters like Moises and LALAL.AI. No account, no quota, no upload, no subscription. If you mainly want stems for personal study and prefer to keep things local and free, StemDeck should be enough. If you need the polish, the mobile app, or the extra musician tooling, the commercial products are a better fit.
+> StemDeck is a free, open alternative to cloud stem-splitters like Moises and LALAL.AI: no account, no quota, no uploads, no subscription. If you want stems for personal study and prefer to keep things local and free, StemDeck has you covered. If you need the polish, a mobile app, or deeper musician tooling, the commercial products are a better fit.
 
 ![StemDeck screenshot](imgs/screenshot/stemdeck.png)
 
-StemDeck is free and does not accept donations or funding. If you would like to give back, check out the makers and artists we love in [We Recommend](#we-recommend) and go support them directly.
+## We Recommend
+
+StemDeck is free and **does not accept any money, sponsorship, or funding** - not from users, not from anyone listed below. We share these makers and artists purely for the joy of pointing you toward wonderful people doing beautiful work. Go meet them ❤️
+
+| Supporter | What they do | Link |
+|---|---|---|
+| Dlima Guitars | Custom guitars and basses | [@dlimaguitars](https://www.instagram.com/dlimaguitars) |
+| Lisbon Guitar Works | Guitar building | [dlimaguitars.com](https://dlimaguitars.com) |
+| Joao Gaspar | Producer/Film Scorer, Touring/Session Musician | [@jay_glaspar](https://www.instagram.com/jay_glaspar) |
+| Kris Luthier | Luthier and Musical Instrument Repair, Lisboa | [@krisluthier](https://www.instagram.com/krisluthier) |
+
 
 ---
 
@@ -360,19 +370,6 @@ The author(s) of StemDeck provide this software "as is", without warranty of any
 | Instagram | [@stemdeck](https://www.instagram.com/stemdeck) |
 | X | [@StemDeckApp](https://x.com/StemDeckApp) |
 | Website | [stemdeck.app](https://stemdeck.app) *(coming soon)* |
-
----
-
-## We Recommend
-
-A few makers and artists we love. **StemDeck is not accepting any money, sponsorship, or funding from anyone listed here.** We share them purely for the joy of letting people know about these amazing people. These are wonderful people doing beautiful work, go meet them ❤️
-
-| Supporter | What they do | Link |
-|---|---|---|
-| Dlima Guitars | Custom guitars and basses | [@dlimaguitars](https://www.instagram.com/dlimaguitars) |
-| Lisbon Guitar Works | Guitar building | [dlimaguitars.com](https://dlimaguitars.com) |
-| Joao Gaspar | Producer/Film Scorer, Touring/Session Musician | [@jay_glaspar](https://www.instagram.com/jay_glaspar) |
-| Kris Luthier | Luthier and Musical Instrument Repair, Lisboa | [@krisluthier](https://www.instagram.com/krisluthier) |
 
 ---
 
