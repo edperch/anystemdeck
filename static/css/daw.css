@@ -2174,7 +2174,7 @@ input, textarea { font-family: inherit; }
   align-items: center;
   gap: 6px;
   min-width: 0;
-  padding: 9px 5px;
+  padding: 9px 5px 12px;
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -2199,6 +2199,28 @@ input, textarea { font-family: inherit; }
   height: auto;
   max-height: 30px;
   object-fit: contain;
+}
+/* Instagram profile photos render as round avatars */
+.lib-friend-avatar {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 1px solid var(--border);
+}
+/* Small Instagram glyph under the text on tiles that link to Instagram */
+.lib-friend-ig {
+  /* block + no-shrink avoids the WebKit baseline clip on small inline SVGs */
+  display: block;
+  flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
+  margin-top: 2px;
+  fill: currentColor;
+  opacity: 0.65;
+}
+.lib-friend:hover .lib-friend-ig {
+  opacity: 1;
 }
 .lib-friend-name {
   width: 100%;
