@@ -40,7 +40,7 @@ Drop in an MP3, WAV, or FLAC file, or paste a YouTube URL, and StemDeck splits t
 
 StemDeck is free and **does not accept any money, sponsorship, or funding** - not from users, not from anyone listed below. We share these makers and artists purely for the joy of pointing you toward wonderful people doing beautiful work. Go meet them ❤️
 
-| Supporter | What they do | Link |
+| Name | What they do | Link |
 |---|---|---|
 | Dlima Guitars | Custom guitars and basses | [@dlimaguitars](https://www.instagram.com/dlimaguitars) |
 | Lisbon Guitar Works | Guitar building | [dlimaguitars.com](https://dlimaguitars.com) |
