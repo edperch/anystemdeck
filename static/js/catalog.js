@@ -42,7 +42,7 @@ const FRIENDS = [
   },
   {
     name: "Thomann",
-    role: "Musical instruments & music gear",
+    role: "Online Music Store",
     url: "https://www.instagram.com/thomann.music",
     logo: "/img/friends/thomann.jpg",
     avatar: true,
@@ -53,6 +53,12 @@ const FRIENDS = [
     url: "https://www.instagram.com/analog4lyfe",
     logo: "/img/friends/analog4lyfe.jpg",
     avatar: true,
+  },
+  {
+    name: "Empress Effects",
+    role: "Effects pedals",
+    url: "https://empresseffects.com",
+    logo: "/img/friends/empress-effects.png",
   },
 ];
 
