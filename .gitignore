@@ -39,6 +39,7 @@ htmlcov/
 # Runtime job artifacts and local build scratch
 data/
 jobs/
+settings.json
 .run/
 .build
 
@@ -77,3 +78,6 @@ Thumbs.db
 
 # Tool versions
 .python-version
+
+# Imported design references (kept local, not shipped)
+design/
