@@ -2046,8 +2046,18 @@ function openLibraryEditor() {
   document.body.appendChild(overlay);
   libraryEditor = overlay;
   refreshLibrarySyncSummary();
+  const isDesktop = Boolean(window.__TAURI__?.core?.invoke);
   wireGeneralSettings(overlay);
   wireNetworkSetting(overlay);
+  if (!isDesktop) {
+    overlay.querySelector(".net-access-input")?.setAttribute("disabled", "");
+    overlay.querySelector(".set-port")?.setAttribute("readonly", "");
+    overlay.querySelector(".set-port")?.setAttribute("disabled", "");
+    const note = document.createElement("p");
+    note.className = "settings-server-note";
+    note.textContent = "These settings are read-only in server mode. To change them, update your server configuration (e.g. docker-compose.yml) and restart.";
+    overlay.querySelector("[data-pane='advanced']")?.prepend(note);
+  }
 }
 
 // Poll a job until it reaches a terminal state, so auto-restores run one at a
