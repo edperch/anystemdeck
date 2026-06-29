@@ -248,25 +248,22 @@ button {
   gap: 22px;
   margin-top: 8px;
 }
-.t-ghost {
+.t-step {
+  width: 48px;
+  height: 48px;
   background: none;
   border: none;
-  color: var(--muted);
+  border-radius: 50%;
+  color: #c8c8cc;
   cursor: pointer;
   display: flex;
   align-items: center;
-  gap: 4px;
-  font-family: var(--mono);
-  font-size: 12px;
-  font-weight: 600;
+  justify-content: center;
+  transition: color 0.12s, transform 0.1s, opacity 0.12s;
 }
-.t-step {
-  background: none;
-  border: none;
-  color: #d8d8dc;
-  cursor: pointer;
-  display: flex;
-}
+.t-step:hover { color: #fff; }
+.t-step:active { transform: scale(0.88); opacity: 0.7; }
+.t-step:disabled { opacity: 0.22; cursor: default; }
 .t-play {
   width: 66px;
   height: 66px;
@@ -278,6 +275,11 @@ button {
   align-items: center;
   justify-content: center;
   cursor: pointer;
+  transition: background 0.15s, box-shadow 0.15s;
+}
+.t-play[data-playing="true"] {
+  background: linear-gradient(135deg, #3fcf6e 0%, #1fa84e 100%);
+  box-shadow: 0 12px 30px -6px rgba(63, 207, 110, 0.65);
 }
 
 .mx-prep {

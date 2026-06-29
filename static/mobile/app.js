@@ -4,8 +4,7 @@
 // (GET /api/jobs, /api/jobs/{id}, the Web Audio engine, mixdown export).
 // Extract is still mock pending the SSE/upload wiring (next step).
 import { fetchJobs, jobToCard } from "../js/shared/jobs.js";
-import { createAudioEngine } from "../js/audioEngine.js";
-
+import { createAudioEngine, estimateDecodedBytes } from "../js/audioEngine.js";
 // Per-stem label + color, keyed by the backend stem name. Unknown names fall
 // back to a rotating palette so non-standard models still render sensibly.
 const STEM_META = {
@@ -46,13 +45,12 @@ function ensureAudioCtx() {
   return audioCtx;
 }
 
+
 const ICON = {
   chevron: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>',
   dots: '<svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg>',
-  clock: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>',
-  prev: '<svg width="26" height="26" viewBox="0 0 24 24" fill="currentColor"><path d="M7 6v12M19 6l-9 6 9 6z"/></svg>',
-  next: '<svg width="26" height="26" viewBox="0 0 24 24" fill="currentColor"><path d="M17 6v12M5 6l9 6-9 6z"/></svg>',
-  loop: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 2l4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="M7 22l-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/></svg>',
+  prev: '<svg width="32" height="32" viewBox="0 0 24 24" fill="currentColor"><path d="M7 6v12M19 6l-9 6 9 6z"/></svg>',
+  next: '<svg width="32" height="32" viewBox="0 0 24 24" fill="currentColor"><path d="M17 6v12M5 6l9 6-9 6z"/></svg>',
   play: (sz, fill) => `<svg width="${sz}" height="${sz}" viewBox="0 0 24 24" fill="${fill}"><path d="M8 5.5v13l11-6.5z"/></svg>`,
   pause: (sz, fill) => `<svg width="${sz}" height="${sz}" viewBox="0 0 24 24" fill="${fill}"><rect x="6" y="5" width="4" height="14" rx="1.3"/><rect x="14" y="5" width="4" height="14" rx="1.3"/></svg>`,
   download: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="M8 11l4 4 4-4"/><path d="M4 21h16"/></svg>',
@@ -259,11 +257,26 @@ async function openTrack(card, { autoplay = false } = {}) {
     return;
   }
 
-  engine = createAudioEngine(laneList.map((l) => ({ name: l.name, url: l.url })), {
+  // Streaming <audio> elements cause underruns on mobile Safari (HTTP/1.1
+  // connection cap + small buffers). The buffer engine decodes all stems into
+  // AudioBuffers first, giving glitch-free playback at the cost of RAM.
+  // 600 MB at Float32 / 44.1 kHz / stereo = ~425 s per stem-slot, so the
+  // practical cap is ~7 min for 4 stems or ~14 min for 2 stems. Tracks that
+  // exceed this will show an error rather than play with constant chopping.
+  const MOBILE_DECODE_LIMIT = 600e6;
+  const estimatedBytes = estimateDecodedBytes(detail.duration || 0, laneList.length);
+  if (estimatedBytes > MOBILE_DECODE_LIMIT) {
+    const maxMin = Math.round(MOBILE_DECODE_LIMIT / (laneList.length * 2 * 44100 * 4) / 60);
+    state.current.error = `Track too long to load on mobile (limit is ~${maxMin} min for ${laneList.length} stems). Try a shorter track.`;
+    render();
+    return;
+  }
+  const engineOpts = {
     onTime: onEngineTime,
     onEnded: () => { state.playing = false; render(); },
     context: ensureAudioCtx(),
-  });
+  };
+  engine = createAudioEngine(laneList.map((l) => ({ name: l.name, url: l.url })), engineOpts);
   engineTrackId = card.id;
   render();
 
@@ -280,6 +293,20 @@ async function openTrack(card, { autoplay = false } = {}) {
   applyMix();
   render();
   if (pendingPlay) { pendingPlay = false; engine.play(); state.playing = engine.isPlaying(); render(); }
+}
+
+function prevTrack() {
+  if (!state.tracks.length || !state.current) return;
+  const idx = state.tracks.findIndex((t) => t.id === state.current.id);
+  const target = state.tracks[idx - 1];
+  if (target) openTrack(target, { autoplay: state.playing });
+}
+
+function nextTrack() {
+  if (!state.tracks.length || !state.current) return;
+  const idx = state.tracks.findIndex((t) => t.id === state.current.id);
+  const target = state.tracks[idx + 1];
+  if (target) openTrack(target, { autoplay: state.playing });
 }
 
 function togglePlay() {
@@ -427,6 +454,9 @@ function mixerScreen() {
   const ready = engineReady && engineTrackId === state.current?.id;
   const preparing = !!state.current && !state.current.loading && !state.current.error && !ready;
   const canPlay = ready;
+  const curIdx = state.current ? state.tracks.findIndex((t) => t.id === state.current.id) : -1;
+  const hasPrev = curIdx > 0;
+  const hasNext = curIdx >= 0 && curIdx < state.tracks.length - 1;
 
   return `<div class="screen scrl">
     <div class="pad">
@@ -446,11 +476,9 @@ function mixerScreen() {
         <div class="wave-times"><span class="cur">${fmt(state.progress * dur)}</span><span class="dur">${fmt(dur)}</span></div>
       </div>
       <div class="transport">
-        <button class="t-ghost">${ICON.clock}.75x</button>
-        <button class="t-step">${ICON.prev}</button>
-        <button class="t-play" data-action="play" ${canPlay ? "" : "disabled style=opacity:.45"}>${state.playing ? ICON.pause(26, "#1a1206") : ICON.play(28, "#1a1206")}</button>
-        <button class="t-step">${ICON.next}</button>
-        <button class="t-ghost" style="color:#85858d">${ICON.loop}</button>
+        <button class="t-step" data-action="prev" ${hasPrev ? "" : "disabled"}>${ICON.prev}</button>
+        <button class="t-play" data-action="play" data-playing="${state.playing}" ${canPlay ? "" : "disabled style=opacity:.45"}>${state.playing ? ICON.pause(26, "#1a1206") : ICON.play(28, "#1a1206")}</button>
+        <button class="t-step" data-action="next" ${hasNext ? "" : "disabled"}>${ICON.next}</button>
       </div>
       ${preparing ? '<div class="mx-prep">Preparing audio…</div>' : ""}
       <div class="segmented">
@@ -824,6 +852,12 @@ app.addEventListener("click", (e) => {
     case "mixview":
       state.mixerView = t.dataset.view;
       break;
+    case "prev":
+      prevTrack();
+      return;
+    case "next":
+      nextTrack();
+      return;
     case "play":
     case "play-mini":
       e.stopPropagation();
@@ -890,7 +924,6 @@ async function loadLibrary() {
     const jobs = await fetchJobs();
     state.tracks = jobs.map(jobToCard).sort((a, b) => b.createdAt - a.createdAt);
     state.libState = state.tracks.length ? "ready" : "empty";
-    if (!state.current && state.tracks.length) state.current = state.tracks[0];
   } catch (e) {
     console.warn("[mobile] failed to load library:", e);
     state.libState = "error";
