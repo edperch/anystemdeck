@@ -145,8 +145,3 @@ jobs:
             dist/StemDeck-Linux-x64.tar.gz.sha256
             dist/StemDeck-Linux-x64.NVIDIA.tar.gz
             dist/StemDeck-Linux-x64.NVIDIA.tar.gz.sha256
-          append_body: true
-          body: |
-            ### Artifact scan
-
-            - The Linux portable packages (CPU and NVIDIA) were scanned with ClamAV in CI before upload.

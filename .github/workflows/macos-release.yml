@@ -126,8 +126,3 @@ jobs:
             .build/macos-dist/StemDeck-macOS-x64.dmg
             .build/StemDeck-runtime-macOS-x64.tar.zst
             .build/macos-dist/SHA256SUMS-macOS-x64.txt
-          append_body: true
-          body: |
-            ### Artifact build
-
-            - macOS arm64 and x64 DMGs and runtime packs were built and inspected on a macOS GitHub Actions runner before upload.

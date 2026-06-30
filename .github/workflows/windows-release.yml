@@ -101,8 +101,3 @@ jobs:
             dist/StemDeck-Windows-x64.NVIDIA.zip.sha256
             dist/StemDeck-Windows-x64.zip
             dist/StemDeck-Windows-x64.zip.sha256
-          append_body: true
-          body: |
-            ### Artifact scan
-
-            - Windows portable packages were scanned with ClamAV in CI before upload.
