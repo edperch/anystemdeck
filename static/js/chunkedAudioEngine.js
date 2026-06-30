@@ -244,6 +244,7 @@ export function createChunkedAudioEngine(stems, { onTime, onEnded, context } = {
       if (!buf) continue;
       const node = ctx.createBufferSource();
       node.buffer = buf;
+      if (!stNode) node.playbackRate.value = _playbackRate; // tape-effect fallback
       node.connect(stem.gain);
       const offset = Math.max(0, Math.min(startSecs, buf.duration - 0.001));
       node.start(when, offset);
@@ -265,12 +266,16 @@ export function createChunkedAudioEngine(stems, { onTime, onEnded, context } = {
     if (!playing || destroyed) return;
     if (!buffers || buffers.size === 0) return; // past end; tick() handles onEnded
 
-    const idealWhen = _startCtxTime + (_scheduledTo - _startOffset);
+    // With SoundTouch, sources play at 1.0x so scheduled wall-clock time equals
+    // audio time. With tape-effect (_playbackRate != 1, no stNode), sources play
+    // faster/slower so wall-clock time = audio seconds / _playbackRate.
+    const playFactor = stNode ? 1.0 : _playbackRate;
+    const idealWhen = _startCtxTime + (_scheduledTo - _startOffset) / playFactor;
     const when = Math.max(idealWhen, ctx.currentTime + 0.01);
-    // If we're late (slow network), skip the portion that already "passed".
+    // If we're late (slow network), skip the audio portion that already "passed".
     const firstBuf = buffers.values().next().value;
     const maxSkip = firstBuf ? Math.max(0, firstBuf.duration - 0.001) : 0;
-    const bufOffset = Math.min(Math.max(0, when - idealWhen), maxSkip);
+    const bufOffset = Math.min(Math.max(0, when - idealWhen) * playFactor, maxSkip);
 
     const dur = _scheduleChunk(buffers, when, bufOffset);
     _scheduledTo += bufOffset + dur; // always advances by ~CHUNK_SEC
@@ -412,9 +417,14 @@ export function createChunkedAudioEngine(stems, { onTime, onEnded, context } = {
       master.gain.setTargetAtTime(Math.max(0, v), ctx.currentTime, 0.01);
     },
     setPlaybackRate(rate) {
+      const t = _getCurrentTime(); // capture before updating rate
       _playbackRate = rate;
       if (stNode) {
         stNode.parameters.get('tempo').value = rate;
+      } else if (playing) {
+        // Tape-effect fallback: seek to current position so new source nodes
+        // are created with the updated playbackRate and scheduling math resets.
+        seek(t);
       }
     },
     getAnalyser: () => null,
