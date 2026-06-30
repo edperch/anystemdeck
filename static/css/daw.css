@@ -1958,6 +1958,45 @@ input, textarea { font-family: inherit; }
   color: #4a8cff;
 }
 
+/* Tempo bar */
+.tempo-bar {
+  display: flex; align-items: center; gap: 12px;
+  width: 100%; padding: 8px 4px 0;
+  border-top: 1px solid var(--border-strong);
+  margin-top: 6px; cursor: default; user-select: none;
+}
+.tempo-bar-label {
+  font-size: 10px; font-weight: 700; letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--fg-2); flex-shrink: 0;
+  white-space: nowrap;
+}
+.tempo-bar-divider {
+  width: 1px; height: 16px; background: var(--border-strong); flex-shrink: 0;
+}
+.tempo-bar-val {
+  font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums;
+  color: var(--fg-2); white-space: nowrap; flex-shrink: 0; min-width: 34px;
+  text-align: right;
+}
+#t-speed {
+  -webkit-appearance: none; appearance: none; flex: 1;
+  height: 4px; border-radius: 999px; outline: none; cursor: pointer;
+  background: linear-gradient(
+    90deg,
+    var(--gold) 0 var(--speed-pct, 50%),
+    rgba(148,163,184,0.18) var(--speed-pct, 50%) 100%
+  );
+}
+#t-speed::-webkit-slider-thumb {
+  -webkit-appearance: none; width: 16px; height: 16px; border-radius: 50%;
+  background: var(--gold-bright); cursor: pointer;
+  box-shadow: 0 2px 8px rgba(216,168,74,0.35);
+}
+#t-speed::-moz-range-thumb {
+  width: 16px; height: 16px; border-radius: 50%; border: none;
+  background: var(--gold-bright); cursor: pointer;
+}
+
 /* Speed + export chip buttons */
 .footer-chip-wrap {
   position: relative; flex-shrink: 0;
