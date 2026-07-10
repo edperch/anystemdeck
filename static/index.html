@@ -575,6 +575,11 @@
                   <path d="M17 2l4 4-4 4 M3 12V8a2 2 0 0 1 2-2h16 M7 22l-4-4 4-4 M21 12v4a2 2 0 0 1-2 2H3"/>
                 </svg>
               </button>
+              <div class="footer-loop-times" title="Exact loop start / end (mm:ss.mmm or seconds)">
+                <input type="text" id="t-loop-start" class="loop-time-input num" inputmode="decimal" spellcheck="false" autocomplete="off" aria-label="Loop start" value="00:00.000">
+                <span class="loop-times-sep" aria-hidden="true">-</span>
+                <input type="text" id="t-loop-end" class="loop-time-input num" inputmode="decimal" spellcheck="false" autocomplete="off" aria-label="Loop end" value="00:00.000">
+              </div>
             </div>
             <div class="footer-time-row">
               <span class="num footer-elapsed" id="footer-time-elapsed">0:00</span>
