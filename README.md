@@ -418,13 +418,3 @@ These are for development and testing. Release builds only recognize the variabl
 Issues, feature suggestions, and pull requests are welcome. See open issues for what's planned.
 
 ---
-
-## Star History
-
-<a href="https://www.star-history.com/?repos=stemdeckapp%2Fstemdeck&type=date&legend=top-left">
- <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=stemdeckapp/stemdeck&type=date&theme=dark&legend=top-left" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=stemdeckapp/stemdeck&type=date&legend=top-left" />
-   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=stemdeckapp/stemdeck&type=date&legend=top-left" />
- </picture>
-</a>
