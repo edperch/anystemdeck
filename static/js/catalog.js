@@ -1853,12 +1853,38 @@ async function wireGeneralSettings(overlay) {
   const durInput = overlay.querySelector(".set-max-duration");
   const heightSel = overlay.querySelector(".set-video-height");
   const portInput = overlay.querySelector(".set-port");
-  if (!durInput && !heightSel && !portInput) return;
+  const deviceSel = overlay.querySelector(".set-demucs-device");
+  const deviceResolved = overlay.querySelector(".set-demucs-resolved");
+  if (!durInput && !heightSel && !portInput && !deviceSel) return;
+
+  // Last server-confirmed device choice, to revert the select when the server
+  // rejects a forced device (e.g. CUDA not available on this machine).
+  let lastDevice = "auto";
 
   const apply = (d) => {
     if (durInput && d.max_duration_sec) durInput.value = String(Math.round(d.max_duration_sec / 60));
     if (heightSel && d.video_max_height) heightSel.value = String(d.video_max_height);
     if (portInput && d.port) portInput.value = String(d.port);
+    if (deviceSel) {
+      // Gray out devices this machine can't use (Auto and CPU are always
+      // available). Label disabled options so it's clear WHY they're greyed.
+      const avail = new Set(d.demucs_devices_available || []);
+      for (const opt of deviceSel.options) {
+        const base = opt.textContent.replace(/ — not available$/, "");
+        const ok = opt.value === "auto" || avail.has(opt.value);
+        opt.disabled = !ok;
+        opt.textContent = ok ? base : `${base} — not available`;
+      }
+      if (d.demucs_device) {
+        deviceSel.value = d.demucs_device;
+        lastDevice = d.demucs_device;
+      }
+    }
+    if (deviceResolved) {
+      deviceResolved.textContent = d.demucs_device_resolved
+        ? ` (currently: ${d.demucs_device_resolved})`
+        : "";
+    }
   };
 
   // Keep the text inputs digit-only as the user types (maxlength caps the rest).
@@ -1893,8 +1919,35 @@ async function wireGeneralSettings(overlay) {
     post({ video_max_height: parseInt(heightSel.value, 10) });
   });
   portInput?.addEventListener("change", () => {
-    const port = Math.max(1024, Math.min(65535, parseInt(portInput.value, 10) || 8080));
+    const port = Math.max(1024, Math.min(65535, parseInt(portInput.value, 10) || 8000));
     post({ port });
+  });
+  // Compute device needs its own POST path: unlike the clamped numeric
+  // settings, the server can REJECT a forced device (422 with a reason, e.g.
+  // "cuda is not available on this machine") -- surface that and revert.
+  deviceSel?.addEventListener("change", async () => {
+    try {
+      const r = await fetch("/api/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ demucs_device: deviceSel.value }),
+      });
+      if (r.ok) {
+        apply(await r.json());
+        return;
+      }
+      let detail = "Could not change the compute device.";
+      try {
+        detail = (await r.json()).detail || detail;
+      } catch (err) {
+        console.warn("settings error body parse failed:", err);
+      }
+      showError(detail);
+      deviceSel.value = lastDevice;
+    } catch (err) {
+      console.warn("compute device update failed:", err);
+      deviceSel.value = lastDevice;
+    }
   });
 }
 
@@ -2031,6 +2084,20 @@ function openLibraryEditor() {
               <div class="settings-row-desc">Port StemDeck runs on. Restart to apply.</div>
             </div>
             <input type="text" class="settings-num-input set-port" inputmode="numeric" maxlength="5" aria-label="Port" />
+          </div>
+        </div>
+        <div class="settings-section">
+          <div class="settings-row">
+            <div class="settings-row-text">
+              <div class="settings-row-title">Compute device</div>
+              <div class="settings-row-desc">Device used for stem separation. Applies to the next track<span class="set-demucs-resolved"></span>.</div>
+            </div>
+            <select class="settings-select set-demucs-device" aria-label="Compute device">
+              <option value="auto">Auto</option>
+              <option value="cuda">CUDA (NVIDIA)</option>
+              <option value="mps">MPS (Apple Silicon)</option>
+              <option value="cpu">CPU</option>
+            </select>
           </div>
         </div>
         <div class="settings-subhead">Out of sync tracks</div>
