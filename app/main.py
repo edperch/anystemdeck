@@ -44,7 +44,7 @@ from app.core.settings import (
     set_port,
     set_video_max_height,
 )
-from app.pipeline.collect import sweep_old_jobs
+from app.pipeline.collect import sweep_failed_jobs, sweep_old_jobs
 
 # Set the stemdeck logger level (Python's default root level of WARNING would
 # silently drop every logger.info(...) call) and attach the rotating file log
@@ -124,12 +124,17 @@ def _sweep_disabled() -> bool:
 
 
 async def _sweep_loop() -> None:
-    if _sweep_disabled():
+    # The job TTL sweep is disabled for persistent libraries, but the
+    # failed-job quarantine (jobs/failed/) expires unconditionally -- failure
+    # evidence is diagnostics, not library content, on every deployment.
+    persistent = _sweep_disabled()
+    if persistent:
         _log.info("job TTL sweep disabled (persistent library; user-managed)")
-        return
     while True:
         try:
-            await asyncio.to_thread(sweep_old_jobs, JOBS_DIR)
+            if not persistent:
+                await asyncio.to_thread(sweep_old_jobs, JOBS_DIR)
+            await asyncio.to_thread(sweep_failed_jobs, JOBS_DIR)
         except Exception:
             _log.warning("sweep failed", exc_info=True)
         await asyncio.sleep(3600)
