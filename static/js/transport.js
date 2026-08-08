@@ -1,4 +1,4 @@
-import { fmtTime, fmtTickLabel, fmtTimeMs, parseTimecode } from "./utils.js";
+import { fmtTime, fmtTickLabel, fmtTimeMs, parseTimecode, storeGet, storeSet } from "./utils.js";
 import {
   playBtn, playMiniBtn, stopBtn, loopBtn, timeEl, masterFader,
   speedEl, speedLabelEl,
@@ -8,9 +8,15 @@ import {
   presenceRulerEl, presencePlayheadEl,
   footerTimeElapsed, footerTimeTotal, npScrubFill, footerWaveDrawFn,
   loopStartInput, loopEndInput,
+  metroBtn, metroPanel, metroWrap, metroVolEl, metroVolLabel, metroBarEl, metroNoteEl,
+  metroHalfBtn, metroOneBtn, metroDoubleBtn,
+  metronome, metronomeEnabled, metronomeVolume, metronomeBeatsPerBar, metronomeHasBars,
+  setMetronomeHasBars,
+  setMetronomeEnabled, setMetronomeVolume, setMetronomeBeatsPerBar,
   setLoopEnabled, setLoopStart, setLoopEnd, setMasterVolume, setPlaybackSpeed,
 } from "./state.js";
 import { applyMix } from "./mixer.js";
+import { isDownbeatIndex } from "./beatgrid.js";
 
 const MIN_LOOP_SEC = 0.2;
 // Below this visible width the waveform stops compressing to fit and instead
@@ -500,6 +506,7 @@ export function wireTransportButtons() {
     applyMix();
   });
   wireSpeedControl();
+  wireMetronomeControl();
 }
 
 function applySpeed(rate) {
@@ -533,4 +540,188 @@ function wireSpeedControl() {
     const delta = e.deltaY < 0 ? 0.25 : -0.25;
     applySpeed(parseFloat(speedEl.value) + delta);
   }, { passive: false });
+}
+
+// ─── Click track ────────────────────────────────────────────
+
+const _METRO_PREFS_KEY = "stemdeck:metronome";
+
+function _saveMetroPrefs() {
+  storeSet(_METRO_PREFS_KEY, {
+    enabled: metronomeEnabled,
+    volume: metronomeVolume,
+    beatsPerBar: metronomeBeatsPerBar,
+  }).catch((e) => console.warn("[transport] failed to save metronome prefs:", e));
+}
+
+/**
+ * Push the current accent choice into the metronome.
+ *
+ * "Auto" defers to the bar marks the detector found, which is the only mode
+ * that can be right on a track whose meter changes -- a fixed count from the
+ * top of the track cannot. The explicit choices override it, and exist because
+ * detection can be wrong and because some players want no accent at all.
+ */
+export function applyMetronomeAccent() {
+  if (!metronome) return;
+  if (metronomeBeatsPerBar < 0 && metronomeHasBars) {
+    metronome.setDownbeatFn?.(isDownbeatIndex);
+  } else {
+    metronome.setDownbeatFn?.(null);
+    metronome.setBeatsPerBar?.(Math.max(0, metronomeBeatsPerBar));
+  }
+}
+
+function _renderMetroVolume() {
+  if (metroVolEl) metroVolEl.value = String(metronomeVolume);
+  if (metroVolLabel) metroVolLabel.textContent = `${Math.round(metronomeVolume * 100)}%`;
+}
+
+export function toggleMetronome(force) {
+  if (!metroBtn || metroBtn.disabled) return;
+  const on = force === undefined ? !metronomeEnabled : !!force;
+  setMetronomeEnabled(on);
+  metroBtn.classList.toggle("active", on);
+  metroBtn.setAttribute("aria-pressed", on ? "true" : "false");
+  metronome?.setEnabled(on);
+  _saveMetroPrefs();
+}
+
+/**
+ * Reflect the current track's beat grid in the UI. `grid` is the parsed
+ * beats.json, or null when the job has none (pre-existing jobs) or the
+ * streaming path is active.
+ * @param {object|null} grid
+ * @param {string} reason  Shown to the user when there is no grid.
+ */
+let _lastGrid = null;
+
+function _renderMetroMultiplier() {
+  const mult = metronome?.getMultiplier?.() ?? 1;
+  for (const [btn, v] of [[metroHalfBtn, 0.5], [metroOneBtn, 1], [metroDoubleBtn, 2]]) {
+    if (!btn) continue;
+    const on = mult === v;
+    btn.classList.toggle("active", on);
+    btn.setAttribute("aria-checked", on ? "true" : "false");
+  }
+}
+
+function _renderMetroNote(grid) {
+  if (!metroNoteEl) return;
+  if (!grid) { metroNoteEl.textContent = ""; metroNoteEl.className = "metro-note"; return; }
+
+  // Report the tempo actually being clicked, which is the detected tempo times
+  // whatever level the user picked -- not the raw detected value.
+  const eff = metronome?.getEffectiveBpm?.();
+  const bpm = Number.isFinite(eff) ? eff : Number(grid.bpm);
+  const conf = Number(grid.confidence);
+
+  const parts = [];
+  if (Number.isFinite(bpm)) parts.push(`Clicking ${bpm.toFixed(1)} BPM`);
+  if (Number.isFinite(conf)) parts.push(`${conf}% of beats sit on a drum hit`);
+
+  // Deliberately worded as "on a drum hit", not "confidence the tempo is
+  // right". A half-time grid scores ~100% here and is still musically wrong,
+  // so the note must not imply the metrical level was verified -- that is
+  // what the halve/double control is for.
+  const nBars = Array.isArray(grid.bars) ? grid.bars.length : 0;
+  if (metronomeBeatsPerBar < 0 && nBars) {
+    parts.push(nBars === 1
+      ? `accenting ${grid.bars[0].beats_per_bar}/4 from the detected downbeat`
+      : `accenting ${nBars} detected meter regions`);
+  } else if (metronomeBeatsPerBar > 0) {
+    parts.push(`accenting every ${metronomeBeatsPerBar} beats`);
+  }
+  metroNoteEl.textContent = parts.length
+    ? `${parts.join(" -- ")}. Use /2 or x2 if the click feels half or double speed.`
+    : "";
+  metroNoteEl.className = Number.isFinite(conf) && conf < 60 ? "metro-note warn" : "metro-note";
+}
+
+export function updateMetronomeAvailability(grid, reason = "") {
+  if (!metroBtn) return;
+  _lastGrid = grid || null;
+  const available = !!(grid && Array.isArray(grid.beats) && grid.beats.length);
+  metroBtn.disabled = !available;
+  metroBtn.title = available
+    ? "Click track (K) -- right-click for volume, accent and rate"
+    : (reason || "Click track unavailable");
+
+  if (!available) {
+    // Keep the stored preference so the click returns on the next track that
+    // does have a grid; only the live toggle goes off.
+    metroBtn.classList.remove("active");
+    metroBtn.setAttribute("aria-pressed", "false");
+    metroPanel?.classList.add("hidden");
+    if (metroNoteEl) { metroNoteEl.textContent = reason || ""; metroNoteEl.className = "metro-note"; }
+    return;
+  }
+
+  metroBtn.classList.toggle("active", metronomeEnabled);
+  metroBtn.setAttribute("aria-pressed", metronomeEnabled ? "true" : "false");
+  setMetronomeHasBars(Array.isArray(grid.bars) && grid.bars.length > 0);
+  const autoOpt = metroBarEl?.querySelector('option[value="-1"]');
+  if (autoOpt) {
+    autoOpt.disabled = !metronomeHasBars;
+    autoOpt.textContent = metronomeHasBars ? "Auto (detected)" : "Auto (none found)";
+  }
+  if (metroBarEl) metroBarEl.value = String(metronomeBeatsPerBar);
+  _renderMetroMultiplier();
+  _renderMetroNote(grid);
+}
+
+function wireMetronomeControl() {
+  if (!metroBtn) return;
+
+  // Restore preferences before the first track loads so the click comes back
+  // on exactly as the user left it.
+  storeGet(_METRO_PREFS_KEY, null).then((prefs) => {
+    if (prefs && typeof prefs === "object") {
+      if (typeof prefs.volume === "number") setMetronomeVolume(Math.max(0, Math.min(1, prefs.volume)));
+      if (typeof prefs.beatsPerBar === "number") setMetronomeBeatsPerBar(prefs.beatsPerBar);
+      if (typeof prefs.enabled === "boolean") setMetronomeEnabled(prefs.enabled);
+    }
+    _renderMetroVolume();
+    if (metroBarEl) metroBarEl.value = String(metronomeBeatsPerBar);
+    if (metronomeEnabled && !metroBtn.disabled) {
+      metroBtn.classList.add("active");
+      metroBtn.setAttribute("aria-pressed", "true");
+    }
+  }).catch((e) => console.warn("[transport] failed to load metronome prefs:", e));
+
+  // Click toggles; right-click / long-press opens the options panel.
+  metroBtn.addEventListener("click", () => toggleMetronome());
+  metroBtn.addEventListener("contextmenu", (e) => {
+    e.preventDefault();
+    if (!metroBtn.disabled) metroPanel?.classList.toggle("hidden");
+  });
+
+  document.addEventListener("click", (e) => {
+    if (!metroPanel || metroPanel.classList.contains("hidden")) return;
+    if (!metroWrap?.contains(e.target)) metroPanel.classList.add("hidden");
+  });
+
+  metroVolEl?.addEventListener("input", () => {
+    const v = Math.max(0, Math.min(1, parseFloat(metroVolEl.value)));
+    setMetronomeVolume(v);
+    _renderMetroVolume();
+    metronome?.setVolume(v);
+    _saveMetroPrefs();
+  });
+
+  for (const [btn, mult] of [[metroHalfBtn, 0.5], [metroOneBtn, 1], [metroDoubleBtn, 2]]) {
+    btn?.addEventListener("click", () => {
+      metronome?.setMultiplier(mult);
+      _renderMetroMultiplier();
+      _renderMetroNote(_lastGrid);
+    });
+  }
+
+  metroBarEl?.addEventListener("change", () => {
+    const raw = parseInt(metroBarEl.value, 10);
+    setMetronomeBeatsPerBar(Number.isFinite(raw) ? raw : -1);
+    applyMetronomeAccent();
+    _renderMetroNote(_lastGrid);
+    _saveMetroPrefs();
+  });
 }

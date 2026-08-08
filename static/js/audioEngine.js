@@ -51,6 +51,10 @@ export function createAudioEngine(stems, { onTime, onEnded, context } = {}) {
   let destroyed = false;
   let loop = { enabled: false, start: 0, end: 0 };
   let _playbackRate = 1.0;
+  // Bumped whenever the media-time -> ctx-time mapping below changes (start,
+  // seek, loop jump, rate change, pause). The metronome watches this to know
+  // when its already-scheduled clicks are stale and must be torn down.
+  let _epoch = 0;
 
   // Decode all stems up front AND load the SoundTouch worklet in parallel.
   // Resolves true once at least one stem is ready (worklet load is best-effort).
@@ -105,7 +109,27 @@ export function createAudioEngine(stems, { onTime, onEnded, context } = {}) {
     }
     startCtxTime = when;
     startOffset = offset;
+    _epoch++;
   }
+
+  // Rate at which the source nodes consume their buffers. With SoundTouch
+  // mounted they always run at 1.0 and the worklet does the stretching; the
+  // tape-effect fallback resamples the sources themselves.
+  const srcRate = () => (stNode ? 1 : _playbackRate);
+
+  // Inverse of the scheduling in startSources: the AudioContext time at which
+  // media time `t` is fed into the graph. Scheduling a click here puts it in
+  // the same sample frame as the stems, which is what keeps the two locked
+  // together -- and because it describes the *input* to SoundTouch, it holds
+  // whatever the worklet does downstream, since the click goes through it too.
+  const sourceTimeToCtxTime = (t) => startCtxTime + (t - startOffset) / srcRate();
+
+  // True inverse of the above. The metronome re-anchors with this rather than
+  // getCurrentTime(): that reports the *output* playhead for the UI, which with
+  // SoundTouch mounted is a different quantity from where the sources have
+  // actually been read to. Anchoring the click cursor in the source domain
+  // keeps it consistent with the times it schedules against.
+  const ctxTimeToSourceTime = (c) => startOffset + (c - startCtxTime) * srcRate();
 
   function tick() {
     if (!playing) return;
@@ -141,6 +165,7 @@ export function createAudioEngine(stems, { onTime, onEnded, context } = {}) {
     stopSources();
     playing = false;
     startOffset = Math.max(0, Math.min(t, duration));
+    _epoch++;
     if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
   }
 
@@ -148,9 +173,10 @@ export function createAudioEngine(stems, { onTime, onEnded, context } = {}) {
     const clamped = Math.max(0, Math.min(t, duration || 0));
     if (playing) {
       stopSources();
-      startSources(clamped);
+      startSources(clamped); // bumps _epoch
     } else {
       startOffset = clamped;
+      _epoch++;
     }
     onTime?.(clamped);
   }
@@ -183,16 +209,40 @@ export function createAudioEngine(stems, { onTime, onEnded, context } = {}) {
     getCurrentTime: now,
     getDuration: () => duration,
     setLoop: (enabled, start, end) => { loop = { enabled, start, end }; },
+    // Metronome support. sourceTimeToCtxTime is the contract that keeps the
+    // click locked to the stems; the epoch tells the scheduler when to discard
+    // clicks it already queued, and isClockReady guards the window where
+    // `playing` is set but the mapping is not yet valid.
+    sourceTimeToCtxTime,
+    ctxTimeToSourceTime,
+    getScheduleEpoch: () => _epoch,
+    isClockReady: () => playing,
+    // The click connects here, not to ctx.destination: same bus as the stems,
+    // so it inherits master gain and the identical SoundTouch path.
+    getMasterNode: () => master,
     setPlaybackRate(rate) {
-      _playbackRate = rate;
       if (stNode) {
-        // Pitch-preserving: update SoundTouch tempo parameter
+        // Pitch-preserving: update SoundTouch tempo parameter. The sources keep
+        // running at 1.0x, so the source-domain clock anchor is untouched.
+        _playbackRate = rate;
+        _epoch++;
         stNode.parameters.get('tempo').value = rate;
+        return;
+      }
+      // Tape-effect fallback: the sources themselves resample, so the new rate
+      // only applies from this instant -- but startCtxTime/startOffset still
+      // describe the old one. Re-anchoring at the current position keeps
+      // sourceTimeToCtxTime a true inverse of the running sources; without it
+      // every click scheduled after a speed change drifts. chunkedAudioEngine
+      // re-seeks here for exactly the same reason.
+      const t = now();
+      _playbackRate = rate;
+      if (playing) {
+        stopSources();
+        startSources(Math.max(0, Math.min(t, duration))); // bumps _epoch
       } else {
-        // Tape-effect fallback
-        for (const t of tracks.values()) {
-          if (t.source) t.source.playbackRate.value = rate;
-        }
+        startOffset = t;
+        _epoch++;
       }
     },
     setGain,

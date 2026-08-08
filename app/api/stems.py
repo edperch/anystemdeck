@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import logging
 import os
 import re
@@ -26,6 +27,8 @@ from app.core.config import (
 )
 from app.core.registry import get as registry_get
 from app.core.settings import get_export_sample_rate
+from app.pipeline.click_render import cache_key as click_cache_key
+from app.pipeline.click_render import render_click_wav
 
 logger = logging.getLogger("stemdeck.api")
 
@@ -68,6 +71,7 @@ MIXDOWN_MEDIA_TYPES = {
 # the inputs. Bounded so a churny cache (many one-off region trims) can't
 # grow unboundedly on a long-running server.
 _MIXDOWN_CACHE_DIR = CACHE_DIR / "mixdown"
+_CLICK_CACHE_DIR = CACHE_DIR / "click"
 _MIXDOWN_CACHE_MAX_FILES = 20
 _MIXDOWN_CACHE_MAX_BYTES = 500 * 1024 * 1024  # 500 MB
 
@@ -79,6 +83,7 @@ def _mixdown_cache_key(
     gains: list[float],
     start: float | None,
     end: float | None,
+    click_lane: tuple[Path, float] | None = None,
 ) -> str:
     """Every render input is in the key, so a different mixer state, region,
     or a Settings change (export sample rate) misses cleanly -- never a stale
@@ -95,6 +100,9 @@ def _mixdown_cache_key(
             "" if start is None else f"{start:.6f}",
             "" if end is None else f"{end:.6f}",
             str(get_export_sample_rate()),
+            # The click's own cache key already encodes the grid, rate and
+            # accent mode, so its filename plus gain fully identifies it.
+            "" if click_lane is None else f"{click_lane[0].name}:{click_lane[1]:.6f}",
         ]
     )
     # Cache key, not a security context -- usedforsecurity=False documents
@@ -136,6 +144,89 @@ def _validate_stem_path(job_id: str, name: str):
     if not path.is_file() or not path.is_relative_to(JOBS_DIR.resolve()):
         raise HTTPException(status_code=404, detail="stem not found")
     return path
+
+
+def _click_lane(
+    job_id: str,
+    enabled: bool,
+    multiplier: float,
+    accent_mode: int,
+    gain: float,
+) -> tuple[Path, float] | None:
+    """Render (or reuse) the click track for this job and return it as an extra
+    ffmpeg input, or None when it is off or the job has no beat grid.
+
+    The click is synthesised in the browser during playback and never reaches
+    the server, so an export can only include it by rendering an equivalent
+    WAV here. It spans the whole track, which means the region trim (`-ss`
+    before every input) lines it up with the stems with no special-casing.
+    """
+    if not enabled:
+        return None
+    grid = _read_beat_grid(job_id)
+    if grid is None:
+        return None
+    beats = grid.get("beats") or []
+    if not beats:
+        return None
+
+    sample_rate = get_export_sample_rate()
+    key = click_cache_key(
+        job_id,
+        beats,
+        grid.get("bars") or [],
+        float(grid.get("duration") or 0.0),
+        sample_rate,
+        multiplier,
+        accent_mode,
+    )
+    path = _CLICK_CACHE_DIR / f"{key}.wav"
+    if not path.is_file():
+        try:
+            rendered = render_click_wav(
+                path,
+                beats,
+                grid.get("bars") or [],
+                float(grid.get("duration") or 0.0),
+                sample_rate=sample_rate,
+                multiplier=multiplier,
+                accent_mode=accent_mode,
+            )
+        except Exception:
+            logger.exception("click render failed for %s", job_id)
+            return None
+        if rendered is None:
+            return None
+    _prune_mixdown_cache(_CLICK_CACHE_DIR)
+    return path, max(0.0, min(4.0, gain))
+
+
+def _read_beat_grid(job_id: str) -> dict | None:
+    """The grid an export should click to: the user's edits when present, the
+    detected grid otherwise. Mirrors GET /api/jobs/{id}/beats."""
+    stems = (JOBS_DIR / job_id / "stems").resolve()
+    if not stems.is_relative_to(JOBS_DIR.resolve()):
+        return None
+    computed = stems / "beats.json"
+    if not computed.is_file():
+        return None
+    try:
+        grid = json.loads(computed.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    user = stems / "beats.user.json"
+    if user.is_file():
+        try:
+            edits = json.loads(user.read_text(encoding="utf-8"))
+            if isinstance(edits.get("beats"), list) and edits["beats"]:
+                grid["beats"] = edits["beats"]
+                grid["bars"] = edits.get("bars") or []
+        except (OSError, json.JSONDecodeError):
+            # Fall back to the detected grid rather than failing the export,
+            # but say so: silently ignoring this is how a user ends up asking
+            # why their grid edits disappeared.
+            logger.warning("ignoring unreadable beat edits for %s", job_id)
+    return grid
 
 
 def _parse_lane_gains(stems: str, gains: str) -> tuple[list[str], list[float]]:
@@ -299,12 +390,38 @@ async def get_stem_peaks(job_id: str) -> Response:
     )
 
 
+@router.get("/jobs/{job_id}/stems/beats.json")
+async def get_beat_grid(job_id: str) -> Response:
+    """Return the pre-computed beat grid driving the click track.
+
+    404s for jobs separated before this stage existed; the UI treats that as
+    "no click track available" rather than an error.
+    """
+    if not JOB_ID_RE.match(job_id):
+        raise HTTPException(status_code=404, detail="job not found")
+    job = registry_get(job_id)
+    if job is None or job.status != "done":
+        raise HTTPException(status_code=404, detail="job not ready")
+    path = (JOBS_DIR / job_id / "stems" / "beats.json").resolve()
+    if not path.is_file() or not path.is_relative_to(JOBS_DIR.resolve()):
+        raise HTTPException(status_code=404, detail="beat grid not found")
+    return FileResponse(
+        path,
+        media_type="application/json",
+        headers={"Cache-Control": "public, max-age=31536000, immutable"},
+    )
+
+
 @router.api_route("/jobs/{job_id}/stems/{name}.wav", methods=["GET", "HEAD"], response_model=None)
 async def get_stem(
     job_id: str,
     name: str,
     start: float | None = Query(default=None, ge=0, description="Trim start in seconds"),
     end: float | None = Query(default=None, gt=0, description="Trim end in seconds"),
+    click: bool = Query(default=False, description="Mix the click track into the export"),
+    click_mult: float = Query(default=1.0, description="Click rate: 0.5, 1 or 2"),
+    click_accent: int = Query(default=-1, ge=-1, le=32, description="-1 auto, 0 off, N per bar"),
+    click_gain: float = Query(default=0.6, ge=0, le=4, description="Click level"),
 ) -> FileResponse | StreamingResponse:
     """Download a WAV stem. Optional ?start=&end= trims to a time region."""
     path = _validate_stem_path(job_id, name)
@@ -408,6 +525,10 @@ async def get_mixdown(
     gains: str = Query(..., description="Comma-separated linear gains, parallel to stems"),
     start: float | None = Query(default=None, ge=0, description="Trim start in seconds"),
     end: float | None = Query(default=None, gt=0, description="Trim end in seconds"),
+    click: bool = Query(default=False, description="Mix the click track into the export"),
+    click_mult: float = Query(default=1.0, description="Click rate: 0.5, 1 or 2"),
+    click_accent: int = Query(default=-1, ge=-1, le=32, description="-1 auto, 0 off, N per bar"),
+    click_gain: float = Query(default=0.6, ge=0, le=4, description="Click level"),
 ) -> FileResponse | StreamingResponse:
     """Render a mixdown of the given lanes at the given gains, streamed as WAV,
     MP3, FLAC, or OGG. Mirrors the studio mixer (per-stem volume, mute, solo) so the
@@ -435,7 +556,8 @@ async def get_mixdown(
     paths = [_validate_stem_path(job_id, name) for name in names]
 
     media_type = MIXDOWN_MEDIA_TYPES[ext]
-    cache_key = _mixdown_cache_key(job_id, ext, names, parsed_gains, start, end)
+    click_lane = _click_lane(job_id, click, click_mult, click_accent, click_gain)
+    cache_key = _mixdown_cache_key(job_id, ext, names, parsed_gains, start, end, click_lane)
     cache_path = _MIXDOWN_CACHE_DIR / f"{cache_key}.{ext}"
     if cache_path.is_file():
         return FileResponse(
@@ -446,6 +568,12 @@ async def get_mixdown(
 
     pre_seek = ["-ss", str(start)] if start is not None else []
     post_seek = ["-t", str(end - start)] if start is not None else []
+
+    # The click is one more input; the filter graph below is generic over the
+    # list, so it needs no special case beyond its own gain.
+    if click_lane is not None:
+        paths = [*paths, click_lane[0]]
+        parsed_gains = [*parsed_gains, click_lane[1]]
 
     cmd: list[str] = [ffmpeg_executable(), "-nostdin", "-loglevel", "error"]
     for p in paths:
@@ -497,6 +625,10 @@ async def get_video_mixdown(
     job_id: str,
     stems: str = Query(..., description="Comma-separated lane names to sum"),
     gains: str = Query(..., description="Comma-separated linear gains, parallel to stems"),
+    click: bool = Query(default=False, description="Mix the click track into the export"),
+    click_mult: float = Query(default=1.0, description="Click rate: 0.5, 1 or 2"),
+    click_accent: int = Query(default=-1, ge=-1, le=32, description="-1 auto, 0 off, N per bar"),
+    click_gain: float = Query(default=0.6, ge=0, le=4, description="Click level"),
 ) -> StreamingResponse:
     """Mux a fresh audio mixdown of the current mixer state with the job's preserved
     video into an MP4 (issue #219). Mirrors get_mixdown's audio graph (encoded
@@ -520,6 +652,13 @@ async def get_video_mixdown(
     names, parsed_gains = _parse_lane_gains(stems, gains)
     # Validates job_id (404), job done (404), and path traversal (404) per stem.
     paths = [_validate_stem_path(job_id, name) for name in names]
+
+    # Click is one more audio input. It must be appended before the video input
+    # so the audio indices the filter graph references stay contiguous from 0.
+    click_lane = _click_lane(job_id, click, click_mult, click_accent, click_gain)
+    if click_lane is not None:
+        paths = [*paths, click_lane[0]]
+        parsed_gains = [*parsed_gains, click_lane[1]]
 
     cmd: list[str] = [ffmpeg_executable(), "-nostdin", "-loglevel", "error"]
     for p in paths:

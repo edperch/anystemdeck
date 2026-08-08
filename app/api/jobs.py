@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import math
 import re
 import shutil
 import subprocess
@@ -10,7 +11,8 @@ import uuid
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel, field_validator
+from fastapi.responses import JSONResponse, Response
+from pydantic import BaseModel, Field, field_validator
 
 from app.core.config import JOB_ID_RE, JOBS_DIR, MAX_PENDING_JOBS, STEM_NAMES, ffprobe_executable
 from app.core.models import Job
@@ -343,6 +345,170 @@ def update_sections(job_id: str, body: SectionsBody) -> dict:
     registry_persist(JOBS_DIR)
 
     return {"job_id": job_id, "sections": validated}
+
+
+# Upper bound on an edited grid. A 20-minute track at 300 BPM is ~6000 beats;
+# 20000 leaves generous headroom while refusing a payload crafted to exhaust
+# memory or disk.
+_MAX_EDITED_BEATS = 20000
+_MAX_BARS = 2000
+
+
+class BarMark(BaseModel):
+    """A downbeat and the bar length that runs from it until the next mark."""
+
+    beat: int = Field(ge=0, lt=_MAX_EDITED_BEATS)
+    beats_per_bar: int = Field(ge=1, le=32)
+
+
+class BeatsBody(BaseModel):
+    beats: list[float] = Field(max_length=_MAX_EDITED_BEATS)
+    bars: list[BarMark] = Field(default_factory=list, max_length=_MAX_BARS)
+
+    @field_validator("beats")
+    @classmethod
+    def _check_beats(cls, v: list[float]) -> list[float]:
+        # The client scheduler binary-searches this array and assumes it is
+        # sorted and strictly increasing; enforce that at the boundary rather
+        # than trusting the editor to have maintained it.
+        out: list[float] = []
+        for t in v:
+            if not math.isfinite(t) or not (0 <= t < 86400):
+                raise ValueError("beat time out of range")
+            r = round(float(t), 6)
+            if out and r <= out[-1]:
+                raise ValueError("beat times must be strictly increasing")
+            out.append(r)
+        return out
+
+
+def _beats_paths(job_id: str) -> tuple[Path, Path]:
+    """(computed, user-edited) grid paths, both verified inside JOBS_DIR."""
+    stems = (JOBS_DIR / job_id / "stems").resolve()
+    if not stems.is_relative_to(JOBS_DIR.resolve()):
+        raise HTTPException(status_code=404, detail="job not found")
+    return stems / "beats.json", stems / "beats.user.json"
+
+
+@router.get("/{job_id}/beats")
+def get_beats(job_id: str) -> Response:
+    """Return the beat grid, preferring the user's edits over the detected one.
+
+    Deliberately separate from the immutable `stems/beats.json`: that file is
+    a computed artifact and is cached forever, while this response changes
+    whenever the user edits and must never be cached.
+    """
+    if not JOB_ID_RE.match(job_id):
+        raise HTTPException(status_code=404, detail="job not found")
+    job = registry_get(job_id)
+    if job is None or job.status != "done":
+        raise HTTPException(status_code=404, detail="job not ready")
+
+    computed_path, user_path = _beats_paths(job_id)
+    if not computed_path.is_file():
+        raise HTTPException(status_code=404, detail="beat grid not found")
+    try:
+        grid = json.loads(computed_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        logger.exception("unreadable beat grid for %s", job_id)
+        raise HTTPException(status_code=404, detail="beat grid not found") from exc
+
+    # User edits override the detected beats but keep the computed onsets,
+    # which the editor still needs for snapping and which editing never changes.
+    if user_path.is_file():
+        try:
+            edits = json.loads(user_path.read_text(encoding="utf-8"))
+            if isinstance(edits.get("beats"), list) and edits["beats"]:
+                grid["beats"] = edits["beats"]
+                grid["bars"] = edits.get("bars") or []
+                grid["edited"] = True
+        except (OSError, json.JSONDecodeError):
+            logger.warning("ignoring unreadable beat edits for %s", job_id)
+
+    grid.setdefault("bars", [])
+    grid.setdefault("edited", False)
+    return JSONResponse(grid, headers={"Cache-Control": "no-store"})
+
+
+def _reject_non_finite(_token: str) -> float:
+    """`json.loads` parse_constant hook.
+
+    Python's JSON parser accepts the non-standard `NaN`, `Infinity` and
+    `-Infinity` literals. Letting them reach Pydantic produces a validation
+    error whose `input` field holds the non-finite float, and FastAPI then
+    cannot serialise its own 422 -- the request fails with a 500 and a
+    traceback instead of a clean rejection. Refusing them at parse time keeps
+    the error a plain string.
+    """
+    raise ValueError("non-finite numbers are not accepted")
+
+
+async def _parse_beats_body(request: Request) -> BeatsBody:
+    """Parse and validate a beats payload, rejecting non-finite floats first."""
+    try:
+        raw = await request.body()
+        data = json.loads(raw, parse_constant=_reject_non_finite)
+    except (ValueError, UnicodeDecodeError) as exc:
+        raise HTTPException(status_code=422, detail="invalid JSON body") from exc
+    if not isinstance(data, dict):
+        raise HTTPException(status_code=422, detail="expected a JSON object")
+    try:
+        return BeatsBody(**data)
+    except Exception as exc:
+        # Message only -- never echo the submitted values back.
+        raise HTTPException(status_code=422, detail="invalid beat grid") from exc
+
+
+@router.patch("/{job_id}/beats")
+async def update_beats(job_id: str, request: Request) -> dict:
+    """Persist an edited beat grid.
+
+    Written to a separate file from the detected grid so re-running analysis
+    can never silently discard a user's corrections.
+    """
+    if not JOB_ID_RE.match(job_id):
+        raise HTTPException(status_code=404, detail="job not found")
+    body = await _parse_beats_body(request)
+    job = registry_get(job_id)
+    if job is None or job.status != "done":
+        raise HTTPException(status_code=404, detail="job not ready")
+
+    computed_path, user_path = _beats_paths(job_id)
+    if not computed_path.is_file():
+        raise HTTPException(status_code=404, detail="beat grid not found")
+
+    payload = {
+        "version": 1,
+        "beats": body.beats,
+        "bars": [b.model_dump() for b in body.bars],
+    }
+    try:
+        tmp = user_path.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(payload), encoding="utf-8")
+        tmp.replace(user_path)
+    except OSError as exc:
+        logger.exception("failed to write beat edits for %s", job_id)
+        raise HTTPException(status_code=500, detail="failed to save beat grid") from exc
+
+    return {"job_id": job_id, "beats": len(payload["beats"]), "edited": True}
+
+
+@router.delete("/{job_id}/beats")
+def reset_beats(job_id: str) -> dict:
+    """Discard user edits and fall back to the detected grid."""
+    if not JOB_ID_RE.match(job_id):
+        raise HTTPException(status_code=404, detail="job not found")
+    job = registry_get(job_id)
+    if job is None or job.status != "done":
+        raise HTTPException(status_code=404, detail="job not ready")
+
+    _, user_path = _beats_paths(job_id)
+    try:
+        user_path.unlink(missing_ok=True)
+    except OSError as exc:
+        logger.exception("failed to reset beat edits for %s", job_id)
+        raise HTTPException(status_code=500, detail="failed to reset beat grid") from exc
+    return {"job_id": job_id, "edited": False}
 
 
 @router.delete("/{job_id}")

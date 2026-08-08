@@ -161,6 +161,10 @@ export function createChunkedAudioEngine(stems, { onTime, onEnded, context } = {
   // getCurrentTime() from advancing during an async chunk fetch.
   let _audioStarted = false;
   let _filling = false; // prevents concurrent _scheduleNext() calls
+  // Bumped whenever the media-time -> ctx-time mapping changes (start, seek,
+  // loop jump, rate change, pause), so the metronome knows its queued clicks
+  // are stale. See sourceTimeToCtxTime below.
+  let _epoch = 0;
   let loop = { enabled: false, start: 0, end: 0 };
   // Chunk index that must survive cache eviction while looping (the loop-start
   // chunk), so every pass around the loop replays from cache with no refetch.
@@ -176,6 +180,22 @@ export function createChunkedAudioEngine(stems, { onTime, onEnded, context } = {
     if (!playing || !_audioStarted) return _startOffset;
     return Math.min((ctx.currentTime - _startCtxTime) * _playbackRate + _startOffset, _duration);
   }
+
+  // Rate at which source nodes consume their buffers -- 1.0 whenever SoundTouch
+  // is doing the stretching, _playbackRate only in the tape-effect fallback.
+  // Mirrors `playFactor` in _scheduleNext, which must stay in step with this.
+  const _srcRate = () => (stNode ? 1 : _playbackRate);
+
+  // Inverse of the chunk scheduling: the AudioContext time at which media time
+  // `t` enters the graph. A click scheduled here shares a sample frame with the
+  // stems, and because this describes SoundTouch's *input* the alignment holds
+  // regardless of what the worklet does downstream (the click goes through it).
+  const sourceTimeToCtxTime = (t) => _startCtxTime + (t - _startOffset) / _srcRate();
+
+  // True inverse of the above -- see the matching note in audioEngine.js. The
+  // metronome anchors its cursor here rather than on _getCurrentTime, which
+  // reports the output playhead for the UI.
+  const ctxTimeToSourceTime = (c) => _startOffset + (c - _startCtxTime) * _srcRate();
 
   // --- fetch helpers ---
 
@@ -357,6 +377,7 @@ export function createChunkedAudioEngine(stems, { onTime, onEnded, context } = {
       const dur = _scheduleChunk(buffers, when, offsetWithin);
       _scheduledTo = _startOffset + dur;
       _audioStarted = true;
+      _epoch++; // mapping is valid from here; see isClockReady
       _fetchChunk(chunkIdx + 1); // pre-fetch next chunk
       rafId = requestAnimationFrame(_tick);
     };
@@ -382,6 +403,7 @@ export function createChunkedAudioEngine(stems, { onTime, onEnded, context } = {
     _stopNodes();
     playing = false;
     _audioStarted = false;
+    _epoch++;
     _scheduledTo = _startOffset;
     if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
   }
@@ -397,6 +419,7 @@ export function createChunkedAudioEngine(stems, { onTime, onEnded, context } = {
     }
     _startOffset = clamped;
     _scheduledTo = clamped;
+    _epoch++;
     // Evict cache for chunks before the new position (except the pinned
     // loop-start chunk — a loop jump seeks backward *to* that chunk).
     const newIdx = Math.floor(clamped / CHUNK_SEC);
@@ -451,9 +474,19 @@ export function createChunkedAudioEngine(stems, { onTime, onEnded, context } = {
     setMasterGain(v) {
       master.gain.setTargetAtTime(Math.max(0, v), ctx.currentTime, 0.01);
     },
+    // Metronome support -- see the matching block in audioEngine.js. The click
+    // connects to the master bus so it rides the same path as the stems.
+    sourceTimeToCtxTime,
+    ctxTimeToSourceTime,
+    getScheduleEpoch: () => _epoch,
+    // `playing` flips before the async chunk fetch resolves, so the clock is
+    // only trustworthy once _audioStarted is set.
+    isClockReady: () => playing && _audioStarted,
+    getMasterNode: () => master,
     setPlaybackRate(rate) {
       const t = _getCurrentTime(); // capture before updating rate
       _playbackRate = rate;
+      _epoch++;
       if (stNode) {
         stNode.parameters.get('tempo').value = rate;
       } else if (playing) {

@@ -3,18 +3,22 @@ from __future__ import annotations
 import asyncio
 import ctypes
 import functools
+import io
 import logging
 import os
 import re
 import signal
 import socket
+import time
+import zipfile
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as package_version
+from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, PlainTextResponse
+from fastapi.responses import FileResponse, PlainTextResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.api.router import router
@@ -22,6 +26,7 @@ from app.core.config import (
     DEMUCS_MODEL,
     FFMPEG_BIN,
     JOBS_DIR,
+    LOGS_DIR,
     STATIC_DIR,
     available_torch_devices,
     configure_portable_environment,
@@ -363,6 +368,197 @@ def get_registry_raw() -> PlainTextResponse:
             '{\n  "version": 1,\n  "jobs": []\n}\n', media_type="application/json"
         )
     return PlainTextResponse(path.read_text(encoding="utf-8"), media_type="application/json")
+
+
+# Every log this deployment can produce, with what writes each one. The desktop
+# entries only exist under the Tauri shell -- the Docker/server deployments have
+# just the Python log -- so the endpoint reports which are actually present
+# rather than promising files that will never appear.
+_LOG_FILES: tuple[tuple[str, str], ...] = (
+    (
+        "stemdeck.log",
+        "Application log: the pipeline, API and job activity. Rotates at 5 MB, 3 kept.",
+    ),
+    ("stemdeck.log.1", "Older application log."),
+    ("stemdeck.log.2", "Older application log."),
+    ("stemdeck.log.3", "Oldest kept application log."),
+    ("backend.log", "Desktop only: raw output of the bundled Python backend process."),
+    ("backend.log.1", "Desktop only: older backend output."),
+    ("backend.log.2", "Desktop only: oldest kept backend output."),
+    ("setup.log", "Desktop only: first-run setup and GPU runtime installation."),
+)
+
+
+@app.get("/api/logs", tags=["settings"])
+def get_logs_info() -> dict[str, object]:
+    """Where the log files live and which currently exist (Settings -> Logs).
+
+    Read-only and metadata only: it reports paths and sizes, never contents.
+    Serving log text over HTTP would expose whatever a traceback happened to
+    capture, and the files are on the machine the user is already sitting at.
+    """
+    logs_dir = LOGS_DIR.resolve()
+    files: list[dict[str, object]] = []
+    for name, description in _LOG_FILES:
+        path = logs_dir / name
+        try:
+            stat = path.stat()
+            exists, size, modified = True, stat.st_size, stat.st_mtime
+        except OSError:
+            exists, size, modified = False, 0, None
+        files.append(
+            {
+                "name": name,
+                "description": description,
+                "path": str(path),
+                "exists": exists,
+                "size": size,
+                "modified": modified,
+            }
+        )
+    return {
+        "dir": str(logs_dir),
+        "dir_exists": logs_dir.is_dir(),
+        "files": files,
+    }
+
+
+# Views the Logs tab offers, each mapping to the newest file of a family plus
+# the backup immediately before it -- a rotation inside the window would
+# otherwise make a busy log look empty.
+_LOG_VIEWS: dict[str, tuple[str, ...]] = {
+    "application": ("stemdeck.log", "stemdeck.log.1"),
+    "setup": ("setup.log",),
+}
+# Bounds on what a single view returns. The application log rotates at 5 MB, so
+# an unbounded "last hour" on a busy server could still be enormous.
+_LOG_TAIL_BYTES = 1_500_000
+_LOG_TAIL_LINES = 4000
+
+# "2026-07-18 12:43:42 I stemdeck ..." -- the file handler's datefmt.
+_PY_LOG_TS = re.compile(r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) ")
+# "[1786205373] [stemdeck] ..." -- setup.log, epoch seconds (see the Rust
+# writer; the crate has no date library).
+_SETUP_LOG_TS = re.compile(r"^\[(\d{9,})\] ")
+
+
+def _line_time(line: str) -> float | None:
+    """Epoch seconds for a log line, or None when it carries no timestamp."""
+    m = _PY_LOG_TS.match(line)
+    if m:
+        try:
+            return time.mktime(time.strptime(m.group(1), "%Y-%m-%d %H:%M:%S"))
+        except ValueError:
+            return None
+    m = _SETUP_LOG_TS.match(line)
+    if m:
+        return float(m.group(1))
+    return None
+
+
+def _tail_lines(path: Path) -> list[str]:
+    """Last _LOG_TAIL_BYTES of a file as lines, without reading all of it."""
+    try:
+        size = path.stat().st_size
+        with path.open("rb") as f:
+            if size > _LOG_TAIL_BYTES:
+                f.seek(size - _LOG_TAIL_BYTES)
+                f.readline()  # discard the partial first line
+            raw = f.read()
+    except OSError:
+        return []
+    return raw.decode("utf-8", errors="replace").splitlines()
+
+
+@app.get("/api/logs/{view}", tags=["settings"])
+def get_log_tail(view: str, minutes: int = 60) -> PlainTextResponse:
+    """Recent lines from a log, for the Settings -> Logs viewer.
+
+    Lines older than `minutes` are dropped. Lines with no timestamp of their own
+    (tracebacks, subprocess output) belong to the line above them, so they
+    inherit its time rather than being shredded out of a multi-line error.
+    """
+    files = _LOG_VIEWS.get(view)
+    if files is None:
+        raise HTTPException(status_code=404, detail="unknown log")
+    window = max(1, min(minutes, 24 * 60))
+    cutoff = time.time() - window * 60
+
+    logs_dir = LOGS_DIR.resolve()
+    lines: list[str] = []
+    # Oldest backup first so the result reads forwards in time.
+    for name in reversed(files):
+        path = logs_dir / name
+        if path.is_file():
+            lines.extend(_tail_lines(path))
+
+    kept: list[str] = []
+    including = False
+    for line in lines:
+        ts = _line_time(line)
+        if ts is None:
+            # Continuation of whatever came before it.
+            if including:
+                kept.append(line)
+            continue
+        including = ts >= cutoff
+        if including:
+            kept.append(line)
+
+    if not kept:
+        body = (
+            f"No entries in the last {window} minutes.\n"
+            if lines
+            else f"No log file yet at {logs_dir / files[0]}.\n"
+        )
+        return PlainTextResponse(body, media_type="text/plain; charset=utf-8")
+
+    truncated = ""
+    if len(kept) > _LOG_TAIL_LINES:
+        truncated = f"[... {len(kept) - _LOG_TAIL_LINES} earlier lines not shown ...]\n"
+        kept = kept[-_LOG_TAIL_LINES:]
+    return PlainTextResponse(
+        truncated + "\n".join(kept) + "\n", media_type="text/plain; charset=utf-8"
+    )
+
+
+@app.get("/api/logs.zip", tags=["settings"])
+def download_logs_zip() -> StreamingResponse:
+    """Bundle the log files into a zip for support and bug reports.
+
+    Only the known log names are read, never whatever else happens to be in the
+    directory: the set is fixed above, so a stray file dropped in LOGS_DIR can
+    never be swept into a download. Built in memory -- these are capped at 5 MB
+    x 3 backups plus two small desktop logs, so the whole set is bounded.
+    """
+    logs_dir = LOGS_DIR.resolve()
+    buf = io.BytesIO()
+    written = 0
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for name, _description in _LOG_FILES:
+            path = logs_dir / name
+            try:
+                if not path.is_file():
+                    continue
+                zf.writestr(name, path.read_bytes())
+                written += 1
+            except OSError:
+                _log.warning("could not add %s to the log bundle", name, exc_info=True)
+        if written == 0:
+            # An empty zip is a confusing download; say so inside it instead.
+            zf.writestr(
+                "README.txt",
+                f"No log files were found in {logs_dir}.\n"
+                "Logging starts on the first message after the app launches.\n",
+            )
+
+    buf.seek(0)
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    return StreamingResponse(
+        buf,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="stemdeck-logs-{stamp}.zip"'},
+    )
 
 
 # Content-Security-Policy. Defense-in-depth so an injected string in the webview

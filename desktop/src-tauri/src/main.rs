@@ -1698,13 +1698,23 @@ fn local_data_dir() -> Result<PathBuf, String> {
 }
 
 /// Appends a timestamped line to data/logs/setup.log (best-effort; never fails the caller).
+///
+/// The leading value is Unix epoch seconds. It is there so the Settings -> Logs
+/// viewer can show "the last hour" of this file: without a timestamp per line
+/// there is nothing to filter on. Epoch rather than a formatted date keeps this
+/// dependency-free -- the crate has no date library, and the viewer renders it
+/// readably.
 fn append_to_setup_log(data_dir: &Path, msg: &str) {
     let log = data_dir.join("logs").join("setup.log");
     if let Some(p) = log.parent() {
         let _ = fs::create_dir_all(p);
     }
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
     if let Ok(mut f) = fs::OpenOptions::new().create(true).append(true).open(&log) {
-        let _ = writeln!(f, "[stemdeck] {msg}");
+        let _ = writeln!(f, "[{ts}] [stemdeck] {msg}");
     }
 }
 

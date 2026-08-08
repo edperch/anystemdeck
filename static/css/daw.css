@@ -1912,6 +1912,12 @@ input, textarea { font-family: inherit; }
   flex: 0 0 auto;
   display: flex; flex-direction: column; align-items: center; gap: 6px;
   padding: 0 24px;
+  /* Wide enough that the transport grid below can give its two side tracks
+     equal width. Without a definite width the column shrink-wraps its content,
+     the empty spacer track collapses to zero, and the buttons end up offset by
+     the width of the loop-time fields (measured 109 px left of the tempo bar's
+     centre). */
+  min-width: min(30rem, 100%);
 }
 .footer-chips {
   flex: 1;
@@ -2016,9 +2022,23 @@ input, textarea { font-family: inherit; }
 .loop-time-input:disabled { opacity: 0.45; cursor: not-allowed; }
 
 /* Transport buttons */
+/* Three tracks: an empty spacer, the buttons, and the loop-time fields. The
+   two 1fr tracks take equal shares of the free space, so the middle track --
+   and therefore the play button -- lands exactly on the column's centre line,
+   in line with the tempo slider below it. */
 .footer-transport {
-  display: flex; align-items: center; gap: 8px; flex-shrink: 0;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
 }
+.footer-transport-spacer { min-width: 0; }
+.footer-transport-main {
+  display: flex; align-items: center; gap: 8px;
+  justify-self: center;
+}
+.footer-transport .footer-loop-times { justify-self: end; min-width: 0; }
 .footer-transport .daw-iconbtn.btn-transport {
   background: var(--panel-2);
   border-color: var(--border-strong);
@@ -2042,6 +2062,143 @@ input, textarea { font-family: inherit; }
   border-color: rgba(74,140,255,0.55);
   color: #4a8cff;
 }
+
+/* Experimental features pill, centred above the transport. Deliberately set
+   apart from the transport buttons so it does not read as core playback. */
+.footer-experimental {
+  position: relative;
+  display: flex; justify-content: center;
+  margin-bottom: 2px;
+}
+.exp-pill {
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 5px 12px 5px 10px;
+  background: var(--panel-2);
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  color: var(--fg-2); cursor: pointer;
+  font-family: inherit; font-size: 10.5px; font-weight: 700;
+  letter-spacing: 0.09em; text-transform: uppercase;
+  white-space: nowrap; user-select: none;
+  transition: background var(--t-fast), border-color var(--t-fast), color var(--t-fast);
+}
+.exp-pill:hover:not(:disabled) { background: var(--panel-3); color: var(--fg); }
+.exp-pill:disabled { opacity: 0.4; cursor: not-allowed; }
+.exp-flask { flex-shrink: 0; color: #4a8cff; }
+.exp-pill:disabled .exp-flask { color: currentColor; }
+/* Lit while the click is running, so its state is visible without opening
+   the panel. */
+.exp-pill.active,
+.exp-pill.active:hover {
+  background: rgba(74,140,255,0.16);
+  border-color: rgba(74,140,255,0.55);
+  color: #4a8cff;
+}
+
+/* Beat grid editor: canvas overlay + toolbar */
+.beatgrid-canvas {
+  position: absolute; inset: 0; z-index: 12;
+  pointer-events: none; /* enabled only while editing */
+}
+.beatgrid-canvas.hidden { display: none; }
+
+.beatgrid-toolbar {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 7px 10px; margin: 0 0 6px;
+  background: var(--panel-2); border: 1px solid var(--border-strong);
+  border-radius: 7px;
+}
+.beatgrid-toolbar.hidden { display: none; }
+.bg-tool-label {
+  font-size: 10px; font-weight: 700; letter-spacing: 0.08em; color: var(--muted);
+}
+.bg-tools { display: flex; gap: 3px; }
+.bg-btn {
+  padding: 3px 9px;
+  background: var(--panel); border: 1px solid var(--border-strong);
+  border-radius: 5px; color: var(--fg-2); cursor: pointer;
+  font-family: inherit; font-size: 11px; font-weight: 600;
+  transition: background var(--t-fast), border-color var(--t-fast), color var(--t-fast);
+}
+.bg-btn:hover:not(:disabled) { background: var(--panel-3); color: var(--fg); }
+.bg-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.bg-btn.active {
+  background: rgba(74,140,255,0.16); border-color: rgba(74,140,255,0.55); color: #4a8cff;
+}
+.bg-btn.bg-primary {
+  background: rgba(232,200,64,0.16); border-color: rgba(232,200,64,0.5); color: var(--accent);
+}
+.bg-btn.bg-danger:hover { border-color: rgba(214,90,74,0.55); color: var(--danger); }
+.bg-check {
+  display: flex; align-items: center; gap: 4px;
+  font-size: 11px; font-weight: 600; color: var(--fg-2); cursor: pointer; user-select: none;
+}
+.bg-check input[type="checkbox"] { accent-color: var(--accent); cursor: pointer; }
+.bg-meter input[type="number"] {
+  width: 4ch; padding: 2px 4px;
+  background: var(--panel); border: 1px solid var(--border-strong);
+  border-radius: 4px; color: var(--fg);
+  font-family: inherit; font-size: 11px; font-weight: 600; text-align: center;
+}
+.bg-spacer { flex: 1; min-width: 8px; }
+.bg-hint { font-size: 10.5px; color: var(--muted); flex-basis: 100%; }
+
+/* Click track: toggle button + its options popover */
+.footer-metro-wrap { position: relative; display: flex; align-items: center; }
+.footer-metro-panel {
+  position: absolute; bottom: calc(100% + 8px); left: 50%; transform: translateX(-50%);
+  z-index: 60; min-width: 210px;
+  display: flex; flex-direction: column; gap: 9px;
+  padding: 11px 12px;
+  background: var(--panel-2); border: 1px solid var(--border-strong);
+  border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,0.38);
+}
+.footer-metro-panel.hidden { display: none; }
+.metro-row { display: flex; align-items: center; gap: 9px; }
+.metro-label {
+  font-size: 10px; font-weight: 700; letter-spacing: 0.08em;
+  color: var(--muted); flex-shrink: 0; width: 52px;
+}
+.metro-row input[type="range"] { flex: 1; min-width: 0; accent-color: var(--accent); }
+.metro-val {
+  font-size: 11px; color: var(--fg-2); width: 4ch; text-align: right;
+  font-variant-numeric: tabular-nums; flex-shrink: 0;
+}
+.metro-select {
+  flex: 1; padding: 3px 6px;
+  background: var(--panel); border: 1px solid var(--border-strong);
+  border-radius: 5px; color: var(--fg);
+  font-family: inherit; font-size: 12px; font-weight: 600; outline: none;
+}
+.metro-select:focus { border-color: var(--accent); }
+.metro-mult { display: flex; flex: 1; gap: 4px; }
+.metro-mult-btn {
+  flex: 1; padding: 3px 0;
+  background: var(--panel); border: 1px solid var(--border-strong);
+  border-radius: 5px; color: var(--fg-2); cursor: pointer;
+  font-family: inherit; font-size: 11px; font-weight: 700;
+  transition: background var(--t-fast), border-color var(--t-fast), color var(--t-fast);
+}
+.metro-mult-btn:hover { background: var(--panel-3); color: var(--fg); }
+.metro-mult-btn.active {
+  background: rgba(74,140,255,0.16); border-color: rgba(74,140,255,0.55); color: #4a8cff;
+}
+
+.metro-edit-btn {
+  padding: 4px 8px;
+  background: var(--panel); border: 1px solid var(--border-strong);
+  border-radius: 5px; color: var(--fg-2); cursor: pointer;
+  font-family: inherit; font-size: 11px; font-weight: 600;
+  transition: background var(--t-fast), border-color var(--t-fast), color var(--t-fast);
+}
+.metro-edit-btn:hover { background: var(--panel-3); color: var(--fg); }
+.metro-edit-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* Detection confidence / unavailability note. Hidden until it has text so the
+   panel does not carry an empty row in the normal case. */
+.metro-note { font-size: 10.5px; line-height: 1.35; color: var(--muted); }
+.metro-note:empty { display: none; }
+.metro-note.warn { color: var(--danger); }
 
 /* Tempo bar */
 .tempo-bar {
@@ -2174,6 +2331,20 @@ input, textarea { font-family: inherit; }
 
 /* MP4 is offered as an export format only when the job has a preserved video
    track (mp4 upload or YouTube). player.js toggles .has-video on the wrap. */
+/* Opt-in rather than automatic: baking a permanent click into a bounce you
+   meant to be clean is not obvious until you play it back. Applies to every
+   format, audio and video alike. */
+.export-click-opt {
+  display: flex; align-items: center; gap: 7px;
+  margin: 2px 4px 4px; padding: 5px 6px;
+  border-radius: 6px; cursor: pointer; user-select: none;
+  font-size: 11.5px; font-weight: 600; color: var(--fg-2);
+}
+.export-click-opt:hover { background: var(--panel-3); color: var(--fg); }
+.export-click-opt input[type="checkbox"] { accent-color: var(--accent); cursor: pointer; }
+.export-click-opt.disabled { opacity: 0.4; cursor: not-allowed; }
+.export-click-opt.disabled:hover { background: none; color: var(--fg-2); }
+
 .export-fmt-video { display: none; }
 #footer-export-wrap.has-video .export-fmt-video { display: block; flex: 1; }
 
@@ -2598,4 +2769,69 @@ input, textarea { font-family: inherit; }
   .daw-info-row { flex-wrap: wrap; }
   .daw-track-card { width: 100%; border-right: none; border-bottom: 1px solid var(--border); }
   .stem-presence-panel { grid-template-columns: repeat(3, 1fr); }
+}
+
+/* Settings -> Logs. Read-only: paths, sizes and what writes each file. Log
+   *contents* are deliberately not served -- a traceback can capture anything,
+   and the files are on the machine the user is already sitting at. */
+.settings-logs-dir {
+  margin: 2px 2px 10px;
+  padding: 8px 10px;
+  background: var(--panel); border: 1px solid var(--border-strong);
+  border-radius: 6px;
+}
+.settings-logs-path {
+  font-size: 11.5px; color: var(--fg-2); word-break: break-all; user-select: all;
+}
+.settings-logs-list { display: flex; flex-direction: column; gap: 6px; }
+.settings-log-row {
+  padding: 8px 10px;
+  background: var(--panel); border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.settings-log-main {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 10px;
+}
+.settings-log-name { font-size: 12px; font-weight: 600; color: var(--fg); }
+.settings-log-meta {
+  font-size: 10.5px; color: var(--muted); white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.settings-log-desc { margin-top: 3px; font-size: 11px; color: var(--muted); line-height: 1.4; }
+.settings-logs-empty { font-size: 11.5px; color: var(--muted); padding: 6px 2px; }
+
+.settings-export-logs {
+  padding: 6px 12px;
+  background: var(--panel-2); border: 1px solid var(--border-strong);
+  border-radius: 7px; color: var(--fg-2); cursor: pointer;
+  font-family: inherit; font-size: 12px; font-weight: 600; white-space: nowrap;
+  transition: background var(--t-fast), color var(--t-fast);
+}
+.settings-export-logs:hover:not(:disabled) { background: var(--panel-3); color: var(--fg); }
+.settings-export-logs:disabled { opacity: 0.5; cursor: default; }
+
+/* Logs sub-navigation: Location / Application / Setup. */
+.settings-subtabs {
+  display: flex; gap: 2px; margin: 0 0 10px;
+  border-bottom: 1px solid var(--border-strong);
+}
+.settings-subtab {
+  padding: 5px 10px; background: none; border: none;
+  border-bottom: 2px solid transparent; margin-bottom: -1px;
+  color: var(--muted); cursor: pointer;
+  font-family: inherit; font-size: 11.5px; font-weight: 600;
+  transition: color var(--t-fast), border-color var(--t-fast);
+}
+.settings-subtab:hover { color: var(--fg-2); }
+.settings-subtab.active { color: var(--accent); border-bottom-color: var(--accent); }
+/* The pane is a flex column and the registry/log textareas rely on flex:1 to
+   fill it, so the subpane has to be one too -- otherwise the textarea collapses
+   to its default character width and the lines get cut off. */
+.settings-subpane { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.settings-subpane.hidden { display: none; }
+/* The tail views are monospace and taller than the registry dump: log lines
+   are long and wrap badly. */
+.settings-logtail-view {
+  width: 100%; box-sizing: border-box;
+  min-height: 260px; white-space: pre; overflow-wrap: normal; overflow-x: auto;
 }

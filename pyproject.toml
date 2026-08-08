@@ -34,6 +34,13 @@ dependencies = [
     "soundfile>=0.12",
     # BPM + key analysis on the downloaded source. Pulls numpy/scipy/numba.
     "librosa>=0.10",
+    # Beat/downbeat tracker for the click track. MIT for both code and the
+    # published weights. librosa's tracker resolves fast music to half tempo
+    # (180 BPM punk -> 90) because of its 120 BPM lognormal prior, which is not
+    # tunable away and which no confidence metric detects. Weights (81 MB) are
+    # fetched on first use through torch.hub, so they land under TORCH_HOME
+    # alongside the demucs models; librosa remains the offline fallback.
+    "beat-this>=1.1",
     # Current llvmlite releases no longer publish macOS x86_64 wheels, which
     # makes Intel runtime builds require a full LLVM/CMake toolchain. Keep Intel
     # macOS on a wheel-backed Numba line.

@@ -13,6 +13,7 @@ from app.core.config import DEMUCS_MODEL, TIMEOUT_FFMPEG
 from app.core.models import Job, JobCancelled, _set
 from app.core.registry import persist as persist_registry
 from app.pipeline.analyze import analyze
+from app.pipeline.beatgrid import compute_beat_grid
 from app.pipeline.collect import (
     cleanup_source,
     collect,
@@ -190,7 +191,17 @@ def _run_common(job: Job, source: Path, job_dir: Path) -> None:
     job.stem_presence = _presence_from_rms(
         {name: rms for name, rms in rms_values.items() if name in found}
     )
-    _lap(job, "post", mark)
+    mark = _lap(job, "post", mark)
+
+    # Beat grid for the click track. Runs last and swallows its own failures:
+    # by this point the job is fully usable, and a missing grid only costs the
+    # metronome. compute_beat_grid never raises, but the guard stays so a
+    # future change there can't take the whole pipeline down with it.
+    try:
+        compute_beat_grid(stems_dir)
+    except Exception:
+        logger.exception("beat grid stage failed for job %s", job.id)
+    _lap(job, "beatgrid", mark)
 
 
 def _run_blocking(job: Job, url: str, job_dir: Path) -> None:

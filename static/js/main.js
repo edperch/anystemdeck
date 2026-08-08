@@ -6,7 +6,8 @@ import { STEM_NAMES, syncStemNamesFromAPI } from "./constants.js";
 import { renderEmptyShell, buildStripStems, downloadCurrentMix, downloadCurrentVideo, downloadAllStemsZip, downloadRegionMix, drawFooterPlaceholder } from "./player.js";
 import { wireJobForm, showError } from "./job.js";
 import { wireTransportButtons } from "./transport.js";
-import { togglePlayPause, updateLoopRegionVisual } from "./transport.js";
+import { wireBeatGridUi, toggleBeatGridEditor } from "./beatgridUi.js";
+import { togglePlayPause, updateLoopRegionVisual, toggleMetronome } from "./transport.js";
 import { wireStemListControls, wireMixerToolbar } from "./mixer.js";
 import { initCatalog } from "./catalog.js";
 import { runStoreMigrationIfNeeded } from "./utils.js";
@@ -100,6 +101,7 @@ function wireAllButton() {
 syncStemNamesFromAPI().then(() => buildStripStems());
 wireJobForm();
 wireTransportButtons();
+wireBeatGridUi();
 wireFooterControls();
 requestAnimationFrame(drawFooterPlaceholder);
 wireStemListControls();
@@ -398,6 +400,12 @@ document.addEventListener("keydown", (e) => {
   } else if (e.code === "KeyL") {
     e.preventDefault();
     loopBtn.click();
+  } else if (e.code === "KeyK") {
+    e.preventDefault();
+    toggleMetronome();
+  } else if (e.code === "KeyG") {
+    e.preventDefault();
+    toggleBeatGridEditor();
   } else if (e.code === "KeyI" && loopEnabled && multitrack) {
     e.preventDefault();
     setLoopStart(Math.min(multitrack.getCurrentTime(), loopEnd - 0.5));

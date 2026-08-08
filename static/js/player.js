@@ -17,9 +17,15 @@ import {
   waveScroll, selectedStems,
   footerTitle, footerMeta, footerThumb,
   setFooterWaveDrawFn,
+  metronome, setMetronome, metronomeEnabled, metronomeVolume, metronomeBeatsPerBar,
+  exportClickEl, exportClickWrap,
+  setMetronomeHasBars,
 } from "./state.js";
 import { createAudioEngine, estimateDecodedBytes } from "./audioEngine.js";
 import { createChunkedAudioEngine } from "./chunkedAudioEngine.js";
+import { createMetronome } from "./metronome.js";
+import { initBeatGrid, destroyBeatGrid } from "./beatgrid.js";
+import { setBeatGridAvailable, syncBeatGridButtons } from "./beatgridUi.js";
 import {
   loadMixIntoState, resetMixerState, refreshMixerVisuals,
   setLaneControlsEnabled, ensureMixerStateDefaults, applyMix,
@@ -28,7 +34,7 @@ import {
 import {
   buildRuler, updatePlayheadMarker, updateLoopRegionVisual,
   applyWaveZoom, buildPresenceRuler, updateFooterTimes,
-  updatePresencePlayhead, resetSpeed,
+  updatePresencePlayhead, resetSpeed, updateMetronomeAvailability, applyMetronomeAccent,
 } from "./transport.js";
 import { stopVuLoop } from "./audio.js";
 import { destroySections } from "./sections.js";
@@ -696,6 +702,19 @@ function startAnalyserVuLoop(stems, engine, token) {
   stemVuRafId = requestAnimationFrame(tick);
 }
 
+// The metronome holds nodes on the engine's master bus, so it must never
+// outlive the engine that owns them. Called at every engine teardown site.
+function teardownMetronome() {
+  if (metronome) {
+    metronome.destroy();
+    setMetronome(null);
+  }
+  // Flushes any debounced save before dropping the grid, so switching tracks
+  // mid-edit never loses the last correction.
+  destroyBeatGrid();
+  setBeatGridAvailable(false);
+}
+
 export function destroyPlayer() {
   document.querySelector(".app")?.classList.remove("is-import");
   document.querySelector(".app")?.classList.remove("engine-waveforms");
@@ -704,6 +723,9 @@ export function destroyPlayer() {
   stopVuLoop();
   stopStemVuLoop();
   resetSpeed();
+  teardownMetronome();
+  updateMetronomeAvailability(null, "Load a track to use the click");
+  setExportClickAvailable(false);
   if (audioEngine) {
     audioEngine.destroy();
     setAudioEngine(null);
@@ -966,6 +988,20 @@ export function wireUpAudio(jobId, stems, duration, thumbnail, mixUrl = null, ti
       })()
     : Promise.resolve({}));
 
+  // Beat grid for the click track. Fetched alongside peaks; a 404 is the
+  // normal answer for jobs separated before the beat-grid stage existed, and
+  // simply leaves the click control disabled.
+  const _beatsPromise = jobId
+    ? (() => {
+        const ac = new AbortController();
+        const timer = setTimeout(() => ac.abort(), 5000);
+        return fetch(`/api/jobs/${jobId}/beats`, { signal: ac.signal })
+          .then((r) => (r.ok ? r.json() : null))
+          .catch(() => null)
+          .finally(() => clearTimeout(timer));
+      })()
+    : Promise.resolve(null);
+
   for (const stem of stems) {
     const row = mixerEl.querySelector(`.lane-header[data-stem="${stem.name}"]`);
     if (!row) continue;
@@ -1206,6 +1242,7 @@ export function wireUpAudio(jobId, stems, duration, thumbnail, mixUrl = null, ti
         updatePresencePlayhead(t);
         updateStopVisual();
       };
+      teardownMetronome();
       if (audioEngine) { audioEngine.destroy(); setAudioEngine(null); }
       const onEnded = () => { playBtn.classList.remove("playing"); updateStopVisual(); };
       // Engine bring-up, callable twice: the chunked path falls back to
@@ -1220,6 +1257,7 @@ export function wireUpAudio(jobId, stems, duration, thumbnail, mixUrl = null, ti
         eng.ready.then((ok) => {
           // Bail if the user switched tracks while we were initialising.
           if (token !== visualRenderToken || multitrack !== mt) {
+            teardownMetronome();
             eng.destroy();
             if (audioEngine === eng) setAudioEngine(null);
             return;
@@ -1227,12 +1265,56 @@ export function wireUpAudio(jobId, stems, duration, thumbnail, mixUrl = null, ti
           if (!ok) {
             // No usable stems — drop the engine (null-URL multitrack stays mounted).
             console.warn("[player] audio engine had no usable stems; playback disabled");
+            teardownMetronome();
+            updateMetronomeAvailability(null, "Playback unavailable for this track");
             eng.destroy();
             setAudioEngine(null);
             return;
           }
           eng.setLoop(loopEnabled, loopStart, loopEnd);
           applyMix(); // push per-stem gains (incl. >1.0 boost) into the engine
+
+          // Click track. Bound to this engine instance, so it is rebuilt on
+          // every engine bring-up (including the chunked -> fulldecode swap
+          // below) and torn down with it.
+          _beatsPromise.then((grid) => {
+            if (token !== visualRenderToken || multitrack !== mt || audioEngine !== eng) return;
+            teardownMetronome();
+            const beats = Array.isArray(grid?.beats) ? grid.beats : null;
+            if (!beats?.length) {
+              updateMetronomeAvailability(null, "No beat grid for this track");
+              setExportClickAvailable(false);
+              return;
+            }
+            const m = createMetronome(eng, beats, {
+              volume: metronomeVolume,
+              beatsPerBar: metronomeBeatsPerBar,
+            });
+            setMetronome(m);
+            updateMetronomeAvailability(m ? grid : null,
+              m ? "" : "Click track unavailable on this playback path");
+            if (m && metronomeEnabled) m.setEnabled(true);
+
+            // Grid editor over the same data. Every edit pushes straight into
+            // the running click, so a dragged beat is audible on the next beat
+            // rather than after a reload.
+            const editable = initBeatGrid({
+              jobId,
+              grid,
+              duration: totalDuration,
+              onChange: (nextBeats, nextBars) => {
+                m?.setBeats?.(nextBeats);
+                setMetronomeHasBars(Array.isArray(nextBars) && nextBars.length > 0);
+                applyMetronomeAccent();
+                syncBeatGridButtons();
+              },
+            });
+            setBeatGridAvailable(!!editable && !!m);
+            setExportClickAvailable(!!beats?.length);
+            // One place decides how accents are driven; the panel's Accent
+            // setting can override the detected bar marks.
+            applyMetronomeAccent();
+          });
           if (kind === "chunked") {
             // Streaming path: the engine holds no full buffers. Overview waveforms
             // come from peaks.json (rendered by the _peaksPromise handler above);
@@ -1248,6 +1330,7 @@ export function wireUpAudio(jobId, stems, duration, thumbnail, mixUrl = null, ti
                 // audio and accept placeholder waveforms).
                 if (estimateDecodedBytes(totalDuration, engineStemCount) <= MAX_ENGINE_DECODED_BYTES) {
                   console.warn("[player] no peaks.json; using full-decode engine for visuals");
+                  teardownMetronome();
                   eng.destroy();
                   if (audioEngine === eng) setAudioEngine(null);
                   startEngine("fulldecode");
@@ -1284,6 +1367,8 @@ export function wireUpAudio(jobId, stems, duration, thumbnail, mixUrl = null, ti
           }
         }).catch((e) => {
           console.warn("[player] audio engine init failed; playback disabled:", e);
+          teardownMetronome();
+          updateMetronomeAvailability(null, "Playback unavailable for this track");
           eng.destroy();
           if (audioEngine === eng) setAudioEngine(null);
         });
@@ -1291,6 +1376,13 @@ export function wireUpAudio(jobId, stems, duration, thumbnail, mixUrl = null, ti
       // Default: chunked streaming engine (fast start, low RAM). "fulldecode"
       // opts into the legacy decode-everything engine.
       startEngine(mode === "chunked" ? "chunked" : "fulldecode");
+    } else {
+      // Legacy streaming path: playback runs on <audio> elements with no
+      // shared AudioContext, so there is no clock a click could lock to.
+      // Offering an approximate one would drift against the music, which is
+      // worse than not offering it.
+      teardownMetronome();
+      updateMetronomeAvailability(null, "Click track needs the Web Audio engine");
     }
   });
 }
@@ -1469,6 +1561,26 @@ function _effectiveMixGains() {
   return { names, gains };
 }
 
+// Click-track export params. The click is synthesised in the browser during
+// playback, so the server can only reproduce it if it is told the rate and
+// accent mode the user was monitoring with. Opt-in: baking a permanent click
+// into an export meant to be clean is not obvious until playback.
+function _clickParams(q) {
+  if (!exportClickEl?.checked || exportClickEl.disabled) return;
+  q.set("click", "1");
+  q.set("click_mult", String(metronome?.getMultiplier?.() ?? 1));
+  q.set("click_accent", String(metronomeBeatsPerBar));
+  q.set("click_gain", metronomeVolume.toFixed(3));
+}
+
+/** Whether this track can export a click at all (needs a beat grid). */
+export function setExportClickAvailable(on) {
+  if (!exportClickEl) return;
+  exportClickEl.disabled = !on;
+  if (!on) exportClickEl.checked = false;
+  exportClickWrap?.classList.toggle("disabled", !on);
+}
+
 // Dynamic mixdown URL for the current mixer state. Returns null (no download)
 // when every lane is silenced; `region` appends the loop bounds.
 function _mixdownUrl(ext, region) {
@@ -1483,6 +1595,7 @@ function _mixdownUrl(ext, region) {
     q.set("start", loopStart.toFixed(3));
     q.set("end", loopEnd.toFixed(3));
   }
+  _clickParams(q);
   return `/api/jobs/${currentJobId}/mixdown.${ext}?${q}`;
 }
 
@@ -1516,6 +1629,7 @@ export function downloadCurrentVideo() {
     stems: names.join(","),
     gains: gains.map((g) => g.toFixed(3)).join(","),
   });
+  _clickParams(q);
   const safe = _currentTitle
     .replace(/[^a-zA-Z0-9]+/g, "_")
     .replace(/_{2,}/g, "_")

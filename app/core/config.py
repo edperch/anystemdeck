@@ -87,6 +87,130 @@ MAX_PENDING_JOBS = max(1, min(50, _env_int("STEMDECK_MAX_PENDING_JOBS", 3)))
 TIMEOUT_FFMPEG = _env_int("STEMDECK_TIMEOUT_FFMPEG", 300)
 TIMEOUT_ANALYZE = _env_int("STEMDECK_TIMEOUT_ANALYZE", 120)
 TIMEOUT_DEMUCS_STALL = _env_int("STEMDECK_TIMEOUT_DEMUCS_STALL", 1800)
+# Beat-grid stage decodes the whole drums stem (not the 180 s analyze window),
+# so it gets its own, larger budget.
+TIMEOUT_BEATGRID = _env_int("STEMDECK_TIMEOUT_BEATGRID", 300)
+
+# Beat-grid analysis parameters. 22050 Hz is plenty for onset detection (the
+# percussive energy that matters lives well under 11 kHz) and keeps the decode
+# cheap; hop 512 gives ~23 ms grid resolution, the librosa default pairing.
+# Which beat detector the grid stage uses.
+#   "auto"    -- the neural model when it is importable and its weights are
+#                available, otherwise librosa. The shipping default.
+#   "model"   -- require the model; fail the stage rather than silently
+#                degrading. For diagnosing packaging problems.
+#   "librosa" -- force the classic tracker. Kept because it needs no model
+#                download and no network.
+#
+# The model is not a nicety. librosa's `beat_track` carries a lognormal tempo
+# prior centred on 120 BPM, so a 180 BPM punk track resolves to 90 and the
+# click plays half-time -- measured on Green Day "Welcome To Paradise"
+# (detected 90.0, true ~180) and reproduced on synthetic punk at 176 (detected
+# 117.5). No confidence metric catches it: a half-time grid puts a real drum
+# hit under every beat and scores 94%.
+BEAT_DETECTOR = os.environ.get("STEMDECK_BEAT_DETECTOR", "").strip().lower() or "auto"
+if BEAT_DETECTOR not in ("auto", "model", "librosa"):
+    BEAT_DETECTOR = "auto"
+# beat_this checkpoint name; resolved through torch.hub, so it lands under
+# TORCH_HOME (which configure_portable_environment points at MODELS_DIR).
+BEAT_MODEL_CHECKPOINT = os.environ.get("STEMDECK_BEAT_MODEL", "").strip() or "final0"
+
+BEATGRID_SR = 22050
+BEATGRID_HOP = 512
+# Interior gaps: the model only emits beats where it hears them, so a section
+# with no drums leaves a hole -- 5.26 s on the Welcome To Paradise breakdown,
+# where the drums stem RMS drops to 0.008 against 0.098 for the whole stem. A
+# click that stops for five seconds reads as a bug, so gaps that are a clean
+# multiple of the local period are subdivided at that period. Both endpoints
+# are real detected beats, so the filled beats cannot drift out of the section.
+# How far the implied period (gap / inserted-beat count) may sit from the local
+# period. Judged per inserted beat, not across the whole gap. 0.15 fills the
+# 5.26 s Welcome To Paradise hole (residual 3.1%) while refusing a 1.54x
+# interval, which at 0.35 was being split into two beats 23% too fast -- audible
+# as a stumble rather than a repair.
+BEATGRID_GAP_FILL_MAX_RESIDUAL = 0.15
+BEATGRID_GAP_LOCAL_WINDOW = 8  # intervals either side used for the local period
+# Gap filling, the grid-consistency pass and edge extension all assume a locally
+# regular pulse. On genuinely irregular material they do harm: on Dance of
+# Eternity they inserted 85 beats and "corrected" 269 of 1059, wrecking a grid
+# the detector had tracked adequately.
+#
+# The gate is interquartile range over median interval, NOT the coefficient of
+# variation. A single drum-free section inflates cv enormously while the pulse
+# either side is perfectly steady -- Welcome To Paradise measures cv 0.535 and
+# IQR/median 0.054. Measured: 0.054 (regular punk with one 5 s hole), 0.025
+# (steady rock), 0.531 (108 time-signature changes). A 10x separation, so the
+# threshold sits comfortably in the middle.
+BEATGRID_MAX_IRREGULARITY = 0.20
+# Phase check. A tracker can land the right tempo on the wrong half of the beat,
+# putting every click in a gap between hits -- measured on a bare repeated-kick
+# pattern where the whole grid sat in silence and refinement rejected all 45
+# beats for having no transient to snap to. Shifting the grid by half a beat is
+# accepted only when it improves onset support by this factor, so a grid that is
+# already correct (where off-beat hi-hats give the wrong phase *some* support)
+# is never flipped.
+BEATGRID_PHASE_FLIP_RATIO = 2.0
+# Beat times out of librosa land on the 512-hop grid, i.e. quantised to ~23 ms.
+# A click carrying that error flams audibly against the drums, so beats are
+# refined against a much finer onset envelope (~2.9 ms) and then parabolically
+# interpolated to sub-frame precision. The search window is deliberately under
+# half a coarse hop: wide enough to correct quantisation, far too narrow to
+# drag a beat onto a neighbouring sixteenth.
+BEATGRID_REFINE_HOP = 32
+# Temporal precision is set by the analysis *window*, not the hop: onset_strength
+# defaults to a 2048-sample (93 ms) FFT, which smears a transient far too much to
+# localise it. 512 samples (23 ms) with 64 mel bands measured a 0.19 ms standard
+# deviation against synthetic transients, versus 4.8 ms at the default. Dropping
+# n_mels alongside n_fft avoids empty mel filters at this resolution.
+BEATGRID_REFINE_NFFT = 512
+BEATGRID_REFINE_MELS = 64
+# Must comfortably exceed half the coarse hop (~11.6 ms) or the true peak falls
+# outside the search window and refinement makes things *worse* than it found
+# them -- measured 10.9 ms worst-case error at a 20 ms window versus 2.0 ms at
+# 30 ms, because the coarse quantisation phase beats against the beat interval
+# and periodically pushes the true peak past the edge. 30 ms stays under a
+# sixteenth note (50 ms) even at the 300 BPM ceiling, so it can never snap to a
+# neighbouring subdivision. Widening beyond 30 ms measured identically, so this
+# is the knee, not a guess.
+BEATGRID_REFINE_WINDOW = 0.030  # seconds, floor for the search window
+# Both the search window and the move limit scale with the beat interval, because
+# what they have to correct is detector error, and that is a fraction of a beat
+# rather than a fixed number of milliseconds. Fixed 30 ms/29 ms values were sized
+# for librosa's 23 ms hop and left a 46 ms model error uncorrectable at 90 BPM.
+# Ceilings keep the window under a sixteenth note at any plausible tempo.
+BEATGRID_REFINE_WINDOW_OF_BEAT = 0.15
+BEATGRID_REFINE_WINDOW_MAX = 0.100
+BEATGRID_REFINE_MOVE_OF_BEAT = 0.10
+BEATGRID_REFINE_MOVE_MIN = 0.029
+BEATGRID_REFINE_MOVE_MAX = 0.070
+# Peak-picking threshold for the onset list the grid editor snaps to, as a
+# multiple of this percentile of the onset envelope. Tuned against an
+# independent spectral-flux detector on two real tracks: this pair lands within
+# 1.01-1.13x of its onset count, while a lower bar detects 3-5x too many and
+# would let a dragged beat snap to noise. The percentile must stay high --
+# the envelope is mostly zeros, so the 65th percentile is literally 0.
+BEATGRID_ONSET_PERCENTILE = 90
+BEATGRID_ONSET_DELTA_MULT = 1.5
+# Hard cap on onsets shipped to the client, dropped weakest-first.
+BEATGRID_MAX_ONSETS = 6000
+# The same bound has to apply to *interpolated* beats, not just snapped ones,
+# and as a fraction of a beat rather than of the hop. Beats in a drum-free
+# section have no peak to snap to, so they are positioned by interpolation over
+# beat index -- and without a clamp that interpolation happily redistributes a
+# 5 s silent gap, which measured a 4001 ms displacement on one beat of Welcome
+# To Paradise (138x the 29 ms snap limit). Refinement sharpens where a beat
+# sits; it must never decide which pulse a beat belongs to.
+BEATGRID_REFINE_MAX_INTERP_FRAC = 0.25
+# An onset peak must clear this percentile of the whole envelope to count as a
+# real hit. Below it, the beat is treated as unplayed and its position is
+# interpolated from its neighbours instead of snapped to noise.
+BEATGRID_REFINE_PERCENTILE = 70
+# A beat counts as "confirmed" when a detected onset lands within this fraction
+# of the median beat interval. 0.15 of a 500 ms beat is 75 ms -- wide enough to
+# absorb human feel and hop quantisation, tight enough that a half-time or
+# double-time grid error fails the check.
+BEATGRID_ONSET_TOL_FRAC = 0.15
+BEATGRID_ONSET_TOL_MAX = 0.07  # absolute ceiling on the above, seconds
 # Max height for the MP4 video stream pulled from YouTube (issue #219).
 # Capped to keep downloads reasonable; 1080p of a full song is large.
 VIDEO_MAX_HEIGHT = max(144, _env_int("STEMDECK_VIDEO_MAX_HEIGHT", 720))

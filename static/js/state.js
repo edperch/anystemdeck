@@ -45,6 +45,29 @@ export const footerTimeElapsed = $("footer-time-elapsed");
 export const footerTimeTotal = $("footer-time-total");
 export const loopStartInput = $("t-loop-start");
 export const loopEndInput = $("t-loop-end");
+export const metroBtn = $("t-metro");
+export const metroPanel = $("t-metro-panel");
+export const metroWrap = $("t-metro-wrap");
+export const metroVolEl = $("t-metro-vol");
+export const metroVolLabel = $("t-metro-vol-label");
+export const metroBarEl = $("t-metro-bar");
+export const metroNoteEl = $("t-metro-note");
+export const metroHalfBtn = $("t-metro-half");
+export const metroOneBtn = $("t-metro-one");
+export const metroDoubleBtn = $("t-metro-double");
+export const metroEditBtn = $("t-metro-edit");
+export const exportClickEl = $("t-export-click");
+export const exportClickWrap = $("t-export-click-wrap");
+export const bgToolbar = $("beatgrid-toolbar");
+export const bgCanvas = $("beatgrid-canvas");
+export const bgUndoBtn = $("bg-undo");
+export const bgRedoBtn = $("bg-redo");
+export const bgResetBtn = $("bg-reset");
+export const bgDoneBtn = $("bg-done");
+export const bgRippleEl = $("bg-ripple");
+export const bgSnapEl = $("bg-snap");
+export const bgBarLenEl = $("bg-barlen");
+export const bgHintEl = $("bg-hint");
 export const stemListEl = document.querySelector(".stem-list");
 export const npScrubEl = document.querySelector(".np-scrub");
 export const npScrubFill     = $("footer-scrub-fill");
@@ -147,3 +170,21 @@ export function setMasterLimiter(v) { masterLimiter = v; }
 // Footer waveform draw callback — set by player.js, called by transport.js
 export let footerWaveDrawFn = null;
 export function setFooterWaveDrawFn(fn) { footerWaveDrawFn = fn; }
+
+// Click track. `metronome` is the scheduler bound to the current engine (null
+// when the job has no beat grid or the streaming path is in use); the enabled
+// flag and volume survive track switches so the user's choice sticks.
+export let metronome = null;
+export function setMetronome(v) { metronome = v; }
+export let metronomeEnabled = false;
+export function setMetronomeEnabled(v) { metronomeEnabled = v; }
+export let metronomeVolume = 0.6;
+export function setMetronomeVolume(v) { metronomeVolume = v; }
+// -1 = follow the bar marks the detector found; 0 = no accent; N = accent
+// every N beats from the top of the track.
+export let metronomeBeatsPerBar = -1;
+export function setMetronomeBeatsPerBar(v) { metronomeBeatsPerBar = v; }
+// Whether the current track's grid carries detected bar marks at all. Without
+// them "Auto" has nothing to follow and behaves as no accent.
+export let metronomeHasBars = false;
+export function setMetronomeHasBars(v) { metronomeHasBars = !!v; }
