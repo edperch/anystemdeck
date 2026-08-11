@@ -83,6 +83,15 @@ class Job:
     # tear-detection state for the SSE stream -- not surfaced via to_state()
     # or persisted, same as cancel_requested.
     version: int = 0
+    # Place in the waiting queue, rewritten whenever the queue changes. Only
+    # exists so a reordered queue comes back in the user's order rather than
+    # submission order after a restart; the position the UI shows is derived
+    # from the live deque. Old records default to 0, where created_at decides.
+    queue_position: int = 0
+    # How many times a restart has put this job back in the queue. Persisted,
+    # so a job that reliably kills the process is failed rather than retried on
+    # every start. Old records without the field default to 0 via from_record.
+    resume_attempts: int = 0
     # Wall-clock timestamps for metadata-based sweep -- more predictable
     # than directory mtime, which can be touched by unrelated FS events.
     created_at: float = field(default_factory=time.time)
@@ -118,6 +127,21 @@ class Job:
             "gpu_fallback": self.gpu_fallback,
             "stage_timings": self.stage_timings,
             "created_at": self.created_at,
+        }
+
+    def to_queue_state(self) -> dict[str, Any]:
+        """The compact record the queue view needs. Deliberately not to_state():
+        the queue stream carries every waiting job several times a second, and
+        stems/sections/analysis are only meaningful once a job is done."""
+        return {
+            "job_id": self.id,
+            "status": self.status,
+            "progress": self.progress,
+            "stage": self.stage_message,
+            "title": self.title,
+            "thumbnail": self.thumbnail,
+            "source_url": self.source_url,
+            "error": self.error,
         }
 
     def to_record(self) -> dict[str, Any]:

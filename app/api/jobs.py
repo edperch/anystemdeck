@@ -14,16 +14,24 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field, field_validator
 
-from app.core.config import JOB_ID_RE, JOBS_DIR, MAX_PENDING_JOBS, STEM_NAMES, ffprobe_executable
-from app.core.models import Job
+from app.core.config import (
+    JOB_ID_RE,
+    JOBS_DIR,
+    MAX_PENDING_UPLOAD_JOBS,
+    MAX_PENDING_URL_JOBS,
+    STEM_NAMES,
+    ffprobe_executable,
+)
+from app.core.models import Job, _set
 from app.core.registry import all_jobs as registry_all_jobs
 from app.core.registry import get as registry_get
 from app.core.registry import get_proc as registry_get_proc
+from app.core.registry import pending_count as registry_pending_count
 from app.core.registry import persist as registry_persist
 from app.core.registry import register_if_capacity as registry_register_if_capacity
 from app.core.registry import remove as registry_remove
 from app.core.settings import get_max_duration_sec
-from app.pipeline import run_local_pipeline, run_pipeline
+from app.pipeline import jobqueue
 from app.pipeline.download import InvalidYouTubeURL, validate_youtube_url
 
 router = APIRouter(tags=["jobs"])
@@ -32,6 +40,15 @@ logger = logging.getLogger("stemdeck.api")
 _ALLOWED_EXTS = frozenset((".mp3", ".wav", ".flac", ".mp4", ".m4a", ".ogg", ".opus"))
 _MAX_UPLOAD_BYTES = 400 * 1024 * 1024  # 400 MB
 _WS_RE = re.compile(r"\s+")
+
+# Now that imports queue instead of running immediately, a full queue is a
+# capacity statement the user can act on, not a transient "try again".
+_URL_QUEUE_FULL_DETAIL = (
+    f"Queue is full ({MAX_PENDING_URL_JOBS} links waiting) - cancel a job or wait"
+)
+_UPLOAD_QUEUE_FULL_DETAIL = (
+    f"Upload queue is full ({MAX_PENDING_UPLOAD_JOBS} waiting) - cancel a job or wait"
+)
 
 
 def _sanitize_title(filename: str) -> str:
@@ -90,14 +107,6 @@ def _rmtree_job(job_id: str) -> None:
         logger.warning("failed to remove job dir %s", job_dir, exc_info=True)
 
 
-def _task_error_cb(task: asyncio.Task) -> None:
-    if task.cancelled():
-        return
-    exc = task.exception()
-    if exc is not None:
-        logger.error("pipeline task raised unhandled exception", exc_info=exc)
-
-
 class JobRequest(BaseModel):
     url: str
     # Subset of stems to include in the post-processing "selected mix"
@@ -138,18 +147,20 @@ async def _create_youtube_job(request: Request) -> dict[str, str]:
         selected = list(STEM_NAMES)
 
     job = Job(id=uuid.uuid4().hex[:12], selected_stems=selected, source_url=url)
-    if not registry_register_if_capacity(job, MAX_PENDING_JOBS):
-        raise HTTPException(status_code=503, detail="Server busy, please try again later")
-    task = asyncio.create_task(run_pipeline(job, url, JOBS_DIR))
-    task.add_done_callback(_task_error_cb)
+    if not registry_register_if_capacity(job, MAX_PENDING_URL_JOBS):
+        raise HTTPException(status_code=503, detail=_URL_QUEUE_FULL_DETAIL)
+    jobqueue.enqueue(job.id)
+    registry_persist(JOBS_DIR)
     return {"job_id": job.id}
 
 
 async def _create_local_job(request: Request) -> dict[str, str]:
     # Fast pre-check: if already at capacity, reject before touching disk.
     # The real atomic check happens in register_if_capacity after the upload.
-    if sum(1 for j in registry_all_jobs().values() if j.status == "queued") >= MAX_PENDING_JOBS:
-        raise HTTPException(status_code=503, detail="Server busy, please try again later")
+    # Only other uploads count here: a queue full of links costs no disk and
+    # must not block a file import.
+    if registry_pending_count(uploads=True) >= MAX_PENDING_UPLOAD_JOBS:
+        raise HTTPException(status_code=503, detail=_UPLOAD_QUEUE_FULL_DETAIL)
 
     # Quick pre-check on Content-Length to fail fast for obviously oversized
     # uploads without buffering the whole body first.
@@ -228,11 +239,11 @@ async def _create_local_job(request: Request) -> dict[str, str]:
         duration_sec=duration,
         source_url=local_source_url,
     )
-    if not registry_register_if_capacity(job, MAX_PENDING_JOBS):
+    if not registry_register_if_capacity(job, MAX_PENDING_UPLOAD_JOBS):
         shutil.rmtree(job_dir, ignore_errors=True)
-        raise HTTPException(status_code=503, detail="Server busy, please try again later")
-    task = asyncio.create_task(run_local_pipeline(job, source_path, JOBS_DIR))
-    task.add_done_callback(_task_error_cb)
+        raise HTTPException(status_code=503, detail=_UPLOAD_QUEUE_FULL_DETAIL)
+    jobqueue.enqueue(job.id)
+    registry_persist(JOBS_DIR)
     return {"job_id": job.id}
 
 
@@ -264,9 +275,24 @@ def cancel_job(job_id: str) -> dict:
     if job.status in ("done", "error", "cancelled"):
         return job.to_state()
     job.cancel_requested = True
-    proc = registry_get_proc(job_id)
-    if proc is not None and proc.poll() is None:
-        proc.terminate()
+
+    # Still waiting: the worker will never pick it up, so finalise it here.
+    # Previously a queued job only honoured cancel once its turn arrived, kept
+    # occupying a capacity slot until then, and a queued upload held its source
+    # file (up to 400 MB) for the whole wait.
+    if jobqueue.discard(job_id):
+        _set(job, status="cancelled", stage="Cancelled")
+        jobqueue.cleanup_job_dir(job_id)
+        registry_persist(JOBS_DIR)
+        return job.to_state()
+
+    # Only the running job owns the shared demucs worker. Terminating on any
+    # other id would kill someone else's separation if a stale set_proc entry
+    # ever survived -- cheap insurance now that many job ids are live at once.
+    if job_id == jobqueue.running_id():
+        proc = registry_get_proc(job_id)
+        if proc is not None and proc.poll() is None:
+            proc.terminate()
     return job.to_state()
 
 

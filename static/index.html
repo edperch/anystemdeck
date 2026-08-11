@@ -57,7 +57,7 @@
                 <path d="M12 3v12 M7 8l5-5 5 5 M5 21h14"/>
               </svg>
             </button>
-            <input id="fileInput" type="file" accept=".mp3,.wav,.flac,.mp4,.m4a,.ogg,.opus,audio/mpeg,audio/wav,audio/flac,video/mp4,audio/mp4,audio/ogg,audio/opus" style="display:none" aria-hidden="true" />
+            <input id="fileInput" type="file" multiple accept=".mp3,.wav,.flac,.mp4,.m4a,.ogg,.opus,audio/mpeg,audio/wav,audio/flac,video/mp4,audio/mp4,audio/ogg,audio/opus" style="display:none" aria-hidden="true" />
           </div>
 
           <!-- Divider -->
@@ -166,6 +166,14 @@
                 <path d="M3 6h18 M8 6V4h8v2 M19 6l-1 14H6L5 6"/>
               </svg>
               <span>Trash</span>
+            </button>
+            <button class="rail-btn rail-queue hidden" type="button" title="Import queue" aria-label="Import queue" aria-pressed="false">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+                <path d="M4 6h10 M4 12h10 M4 18h6"/>
+                <path d="M16 15l3 3 3-3 M19 18V9"/>
+              </svg>
+              <span>Queue</span>
+              <span class="rail-badge hidden" id="queueBadge" aria-hidden="true"></span>
             </button>
             <div style="flex:1"></div>
             <button class="rail-btn" id="settingsBtn" type="button" aria-label="Settings" aria-haspopup="dialog">

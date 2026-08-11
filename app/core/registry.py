@@ -8,7 +8,7 @@ import threading
 import uuid
 from pathlib import Path
 
-from app.core.config import JOB_ID_RE, STEM_NAMES
+from app.core.config import DEMUCS_MODEL, JOB_ID_RE, STEM_NAMES
 from app.core.models import Job
 
 logger = logging.getLogger("stemdeck.registry")
@@ -23,6 +23,20 @@ _procs: dict[str, subprocess.Popen] = {}
 _lock = threading.Lock()
 _REGISTRY_FILE = "registry.json"
 _TERMINAL = {"done"}
+# Jobs that were queued or mid-flight when the process died. They are persisted
+# too (so a queue left running survives a restart) but restored as "queued" and
+# handed back to the queue -- see restore(). _TERMINAL stays narrow because
+# restore() and _recover_done_job() both mean "finished successfully" by it.
+_RESUMABLE = {"queued", "processing", "downloading", "analyzing", "separating"}
+_PERSISTED = _TERMINAL | _RESUMABLE
+
+# One resume only. A job that reliably kills the process (a demucs OOM taking
+# the backend down with it) would otherwise be re-queued on every start,
+# wedging the queue forever.
+_MAX_RESUME_ATTEMPTS = 1
+
+# Ids restore() wants re-queued, drained once by the app lifespan.
+_pending_resume: list[str] = []
 
 
 def register(job: Job) -> Job:
@@ -31,11 +45,27 @@ def register(job: Job) -> Job:
     return job
 
 
+def is_upload(job: Job) -> bool:
+    """Uploads are the jobs that occupy disk while they wait."""
+    return (job.source_url or "").startswith("local:")
+
+
+def pending_count(*, uploads: bool) -> int:
+    """How many jobs of one kind are waiting for their turn."""
+    with _lock:
+        return sum(1 for j in _jobs.values() if j.status == "queued" and is_upload(j) == uploads)
+
+
 def register_if_capacity(job: Job, max_pending: int) -> bool:
     """Atomically check pending count and register if under capacity.
-    Returns True if registered, False if the queue is full."""
+    Returns True if registered, False if the queue is full.
+
+    Capacity is counted per kind: a waiting upload holds its source file on
+    disk, a waiting URL holds nothing, so a backlog of one must not block the
+    other."""
+    uploads = is_upload(job)
     with _lock:
-        pending = sum(1 for j in _jobs.values() if j.status == "queued")
+        pending = sum(1 for j in _jobs.values() if j.status == "queued" and is_upload(j) == uploads)
         if pending >= max_pending:
             return False
         _jobs[job.id] = job
@@ -94,7 +124,7 @@ def persist(jobs_dir: Path) -> None:
         records = [
             job.to_record()
             for job in sorted(_jobs.values(), key=lambda item: item.created_at)
-            if job.status in _TERMINAL
+            if job.status in _PERSISTED
         ]
         payload = json.dumps({"version": REGISTRY_VERSION, "jobs": records}, indent=2) + "\n"
         tmp = jobs_dir / f".registry.{uuid.uuid4().hex}.tmp"
@@ -111,22 +141,45 @@ def restore(jobs_dir: Path) -> None:
     """Load persisted jobs and recover completed orphan jobs from disk."""
     jobs_dir.mkdir(parents=True, exist_ok=True)
     path = registry_path(jobs_dir)
+    changed = False
     if path.is_file():
         try:
             data = _migrate(json.loads(path.read_text(encoding="utf-8")))
             to_add = {}
+            resume: list[Job] = []
             for record in data.get("jobs", []):
                 job = Job.from_record(record)
-                if JOB_ID_RE.match(job.id) and job.status in _TERMINAL and job.title:
+                if not JOB_ID_RE.match(job.id):
+                    continue
+                if job.status in _TERMINAL and job.title:
                     to_add[job.id] = job
+                elif job.status in _RESUMABLE:
+                    recovered = _resume_or_recover(job, jobs_dir / job.id)
+                    if recovered is not None:
+                        to_add[recovered.id] = recovered
+                        # The bumped resume_attempts has to reach disk here. The
+                        # next persist is whenever the job finishes, so without
+                        # this a job that kills the process every time is read
+                        # back with the same count on every start and retried
+                        # forever -- the exact loop the cap exists to stop.
+                        changed = True
+                        if recovered.status in _RESUMABLE:
+                            resume.append(recovered)
             with _lock:
                 _jobs.update(to_add)
+            # The user's order first, then oldest first. queue_position is
+            # rewritten whenever the queue changes, so a queue the user
+            # reordered comes back in that order rather than submission order.
+            # Records written before that field existed all default to 0, where
+            # created_at decides exactly as it used to.
+            _pending_resume.extend(
+                j.id for j in sorted(resume, key=lambda j: (j.queue_position, j.created_at))
+            )
         except (OSError, json.JSONDecodeError, TypeError, ValueError):
             logger.warning("failed to load registry from %s", path, exc_info=True)
 
     with _lock:
         known = set(_jobs)
-    changed = False
     for job_dir in jobs_dir.iterdir():
         if not job_dir.is_dir() or not JOB_ID_RE.match(job_dir.name) or job_dir.name in known:
             continue
@@ -137,6 +190,45 @@ def restore(jobs_dir: Path) -> None:
             changed = True
     if changed:
         persist(jobs_dir)
+
+
+def _resume_or_recover(job: Job, job_dir: Path) -> Job | None:
+    """Decide what a job that was in flight when the process died becomes.
+
+    Three states of the same directory need telling apart. If the stems are all
+    there, the crash landed between the last stem being written and the "done"
+    persist, so the work is finished and re-running it would duplicate the
+    library entry. Otherwise the job goes back in the queue from the top, after
+    the partial demucs output is cleared so collect() cannot mistake it for
+    results. A job that has already burned its resume is failed loudly rather
+    than retried forever."""
+    recovered = _recover_done_job(job_dir)
+    if recovered is not None:
+        return recovered
+
+    job.resume_attempts += 1
+    if job.resume_attempts > _MAX_RESUME_ATTEMPTS:
+        job.status = "error"
+        job.stage_message = "Error: Interrupted"
+        job.error = "Interrupted by a restart twice. Import it again to retry."
+        return job
+
+    shutil.rmtree(job_dir / DEMUCS_MODEL, ignore_errors=True)
+    job.status = "queued"
+    job.stage_message = "Queued"
+    job.progress = 0.0
+    job.cancel_requested = False
+    job.stems = []
+    job.mix_url = None
+    return job
+
+
+def take_pending_resume() -> list[str]:
+    """Ids to re-queue after a restart. Pops, so a resume can only fire once."""
+    with _lock:
+        ids = list(_pending_resume)
+        _pending_resume.clear()
+    return ids
 
 
 def _recover_done_job(job_dir: Path) -> Job | None:

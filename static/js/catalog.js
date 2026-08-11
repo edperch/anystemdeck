@@ -2,8 +2,13 @@
 import { STEM_NAMES } from "./constants.js";
 import { wireUpAudio, updateFooterTrack } from "./player.js";
 import { initSections } from "./sections.js";
-import { bpmChip, keyChip, saveSelectedStems, selectedStems, titleEl } from "./state.js";
-import { showError, importFromUrl } from "./job.js";
+import { bpmChip, foregroundJobId, keyChip, saveSelectedStems, selectedStems, titleEl } from "./state.js";
+import { showError, importFromUrl, detachForegroundJob } from "./job.js";
+import {
+  cancelQueuedJob, getQueueSnapshot, isPaused, onJobSettled, onQueueChange, ordinal,
+  queueCount, queueRowStates, reorderQueuedJob, runningLabel, startQueue,
+  startQueueStream,
+} from "./queue.js";
 import { fmtTime, storeGet, storeSet } from "./utils.js";
 
 // Escape user-supplied strings before inserting into innerHTML.
@@ -494,9 +499,9 @@ function moveTrackToTrash(trackId) {
 }
 
 function setCatalogView(view) {
-  catalogView = ["trash", "favorites"].includes(view) ? view : "library";
+  catalogView = ["trash", "favorites", "queue"].includes(view) ? view : "library";
   const app = document.querySelector(".app");
-  if (catalogView === "trash" || catalogView === "favorites") {
+  if (catalogView !== "library") {
     app?.classList.remove("cat-collapsed");
     localStorage.setItem("stemdeck.catalog.collapsed", "0");
   }
@@ -522,6 +527,11 @@ async function loadTrackIntoStudio(trackId) {
     showError("This track's audio is no longer available. Re-upload to restore it.");
     return;
   }
+  // The user has chosen to look at something else, so the running import gives
+  // up the studio. It keeps running and keeps updating its own row; it just
+  // stops repainting this view (and, at completion, replacing the audio that
+  // is about to load here).
+  if (trackId !== foregroundJobId) detachForegroundJob();
   const hadStoredAudio = Boolean(track.audioStems?.length);
   const token = ++_loadTrackToken;
 
@@ -590,6 +600,47 @@ function createFolder() {
   saveState();
   render();
   openFolderEditor(folder.id);
+}
+
+/** Put a whole playlist import in a folder of its own.
+ *
+ *  Placement happens before addTrackToLibrary, which only assigns a folder to a
+ *  track that is not in one yet -- so claiming the ids first is what keeps these
+ *  tracks out of Unsorted. Reuses an existing folder of the same name so
+ *  re-importing a playlist tops it up instead of creating a duplicate.
+ */
+export function addPlaylistToLibrary(playlistTitle, jobs) {
+  const name = String(playlistTitle || "Playlist").trim().slice(0, 80) || "Playlist";
+  let folder = folders.find((f) => f.id !== TRASH_ID && !f.parentId && f.name === name);
+  if (!folder) {
+    folder = makeFolder({ name });
+    folders.unshift(folder);
+  }
+
+  for (const job of jobs) {
+    if (!folder.items.includes(job.job_id)) folder.items.push(job.job_id);
+    addTrackToLibrary({
+      id: job.job_id,
+      title: job.title || job.source_url || "Queued track",
+      channel: "Processing",
+      thumb: "",
+      stems: [...selectedStems],
+      selectedStems: [...selectedStems],
+      audioStems: [],
+      status: "queued",
+      bpm: null,
+      key: null,
+      scale: null,
+      keyConfidence: null,
+      lufs: null,
+      peakDb: null,
+      sourceUrl: job.source_url,
+    });
+  }
+  folder.collapsed = false;
+  saveState();
+  render();
+  return folder.id;
 }
 
 function deleteFolder(folderId) {
@@ -969,7 +1020,7 @@ function renderRecentItem(trackId) {
   el.innerHTML = `
     <div class="cat-thumb">${thumbHtml(track)}</div>
     <div class="cat-meta">
-      <div class="cat-title">${esc(track.title ?? "Unknown track")}</div>
+      <div class="cat-title">${esc(displayTitle(track.title))}</div>
       <div class="cat-sub"><span>${esc(sub)}</span></div>
     </div>
     <div class="cat-status${PROCESSING_STATUSES.has(track.status) ? " processing" : isUnavailable ? " unavailable" : ""}"></div>
@@ -979,6 +1030,26 @@ function renderRecentItem(trackId) {
 }
 
 // ─── Rendering ───
+
+// A queued URL import has no title yet -- nothing has been downloaded, so the
+// only thing to show is the URL the user pasted, which renders as a truncated
+// unreadable string. Name the source instead until the real title arrives.
+const _SOURCE_LABELS = [
+  [/(^|\.)youtube\.com$|(^|\.)youtu\.be$|(^|\.)youtube-nocookie\.com$/, "YouTube"],
+  [/(^|\.)soundcloud\.com$/, "SoundCloud"],
+];
+
+export function displayTitle(title) {
+  const text = String(title ?? "").trim();
+  if (!/^https?:\/\//i.test(text)) return text || "Unknown track";
+  try {
+    const host = new URL(text).hostname.replace(/^www\./, "");
+    const match = _SOURCE_LABELS.find(([re]) => re.test(host));
+    return `${match ? match[1] : host} link`;
+  } catch {
+    return text;
+  }
+}
 
 function thumbHtml(track) {
   if (track.thumb) return `<img src="${esc(track.thumb)}" alt="" loading="lazy" />`;
@@ -1016,7 +1087,7 @@ function renderTrackItem(trackId, { inTrash = false } = {}) {
   el.innerHTML = `
     <div class="cat-thumb">${thumbHtml(track)}</div>
     <div class="cat-meta">
-      <div class="cat-title">${esc(track.title ?? "Unknown track")}</div>
+      <div class="cat-title">${esc(displayTitle(track.title))}</div>
       <div class="cat-sub">
         <span>${esc(track.channel ?? "")}</span>
         <span class="dot">·</span>
@@ -1250,10 +1321,12 @@ function render() {
   const trashIds = new Set(trash?.items || []);
   const isTrashView = catalogView === "trash";
   const isFavoritesView = catalogView === "favorites";
-  const isLibraryView = !isTrashView && !isFavoritesView;
+  const isQueueView = catalogView === "queue";
+  const isLibraryView = !isTrashView && !isFavoritesView && !isQueueView;
 
   catalog?.classList.toggle("trash-view", isTrashView);
   catalog?.classList.toggle("favorites-view", isFavoritesView);
+  catalog?.classList.toggle("queue-view", isQueueView);
 
   document.querySelector(".rail-library")?.classList.toggle("active", isLibraryView);
   document.querySelector(".rail-library")?.setAttribute("aria-pressed", String(isLibraryView));
@@ -1261,9 +1334,21 @@ function render() {
   document.querySelector(".rail-favorites")?.setAttribute("aria-pressed", String(isFavoritesView));
   document.querySelector(".rail-trash")?.classList.toggle("active", isTrashView);
   document.querySelector(".rail-trash")?.setAttribute("aria-pressed", String(isTrashView));
+  document.querySelector(".rail-queue")?.classList.toggle("active", isQueueView);
+  document.querySelector(".rail-queue")?.setAttribute("aria-pressed", String(isQueueView));
 
   if (searchInput) {
     searchInput.placeholder = isTrashView ? "Search trash…" : isFavoritesView ? "Search favorites…" : "Search library…";
+  }
+
+  // ── Queue view ──
+  // Rendered from the queue snapshot, not the library: it shows what the
+  // backend is actually working on, in the order it will work on it.
+  if (isQueueView) {
+    renderQueueList(list);
+    renderStrip(strip, folders.filter((f) => f.id !== TRASH_ID && !f.parentId));
+    updateQueueBadge();
+    return;
   }
 
   const nonTrash = folders.filter((f) => f.id !== TRASH_ID && !f.parentId);
@@ -1375,6 +1460,343 @@ function render() {
   }
 
   renderStrip(strip, nonTrash);
+  updateQueueBadge();
+  applyQueueDecorations();
+}
+
+// ─── Import queue decoration ───
+//
+// Rows are patched in place rather than re-rendered. The queue stream delivers
+// a frame several times a second, and a full render() rebuilds the whole
+// sidebar and re-runs every drag/click wiring -- at that rate it would fight
+// the user for the DOM. render() calls this once at the end so a genuine
+// rebuild picks the decoration back up.
+
+function progressBarHtml() {
+  return '<div class="cat-progress"><div class="cat-progress-fill"></div></div>';
+}
+
+function decorateRow(el, rowState) {
+  const sub = el.querySelector(".cat-sub");
+  if (!sub) return;
+
+  if (!rowState) {
+    // Left the queue (finished, failed or cancelled). render() will have
+    // rebuilt the row from the library entry, so just drop the decoration.
+    el.classList.remove("in-queue", "queue-waiting", "queue-running");
+    el.querySelector(".cat-progress")?.remove();
+    if (el.dataset.subRestore) {
+      sub.innerHTML = el.dataset.subRestore;
+      delete el.dataset.subRestore;
+    }
+    return;
+  }
+
+  const waiting = rowState.state === "waiting";
+  el.classList.add("in-queue");
+  el.classList.toggle("queue-waiting", waiting);
+  el.classList.toggle("queue-running", !waiting);
+
+  // Keep the original sub line so it can come back if this row is still on
+  // screen when the job leaves the queue.
+  if (!el.dataset.subRestore) el.dataset.subRestore = sub.innerHTML;
+  const label = `<span class="cat-queue-label">${esc(rowState.label)}</span>`;
+  if (sub.innerHTML !== label) sub.innerHTML = label;
+
+  let bar = el.querySelector(".cat-progress");
+  if (waiting) {
+    bar?.remove();
+    return;
+  }
+  if (!bar) {
+    sub.insertAdjacentHTML("afterend", progressBarHtml());
+    bar = el.querySelector(".cat-progress");
+  }
+  const fill = bar?.querySelector(".cat-progress-fill");
+  if (fill) fill.style.width = `${Math.round(rowState.progress * 100)}%`;
+}
+
+/** A background import has finished (or failed, or was cancelled). It has no
+ *  per-job stream, so fetch its final state once and complete its library entry
+ *  -- stems, duration and analysis all land here, which is what makes the track
+ *  playable from the sidebar without a page reload. */
+async function completeSettledJob(jobId) {
+  const existing = tracks[jobId];
+  if (!existing) return; // not ours (or already deleted)
+  try {
+    const res = await fetch(`/api/jobs/${jobId}`, { cache: "no-store" });
+    if (!res.ok) {
+      // 404 means the job is gone from the backend entirely.
+      if (res.status === 404) updateTrackStatus(jobId, "unavailable");
+      return;
+    }
+    const state = await res.json();
+    if (state.status === "cancelled") {
+      // Nothing was produced; drop the placeholder row rather than leaving a
+      // track that can never be loaded.
+      delete tracks[jobId];
+      removeTrackFromFolders(jobId);
+      saveState();
+      render();
+      return;
+    }
+    const track = stateMetadataToTrack(state, { ...existing, id: jobId });
+    track.id = jobId;
+    track.channel = state.status === "done" ? "Extracted" : existing.channel;
+    addTrackToLibrary(track);
+  } catch (e) {
+    console.warn("[catalog] could not finish background job", jobId, e);
+  }
+}
+
+// ─── Queue view ───
+
+function queueEntries(snap) {
+  const entries = [];
+  if (snap.running) entries.push({ job: snap.running, running: true });
+  for (const job of snap.queued ?? []) entries.push({ job, running: false });
+  return entries;
+}
+
+function queueRowHtml({ job, running }, place, { paused = false } = {}) {
+  const track = tracks[job.job_id];
+  const label = running ? runningLabel(job) : paused ? "Paused" : `Queued - ${ordinal(place)} in line`;
+  const thumb = track ? thumbHtml(track) : thumbHtml({ thumb: job.thumbnail });
+  // The running job cannot be reordered -- it is already running. Only waiting
+  // rows drag, and only they offer "play next".
+  const handle = running
+    ? ""
+    : `<span class="queue-grip" title="Drag to reorder" aria-hidden="true">
+         <svg viewBox="0 0 24 24" width="10" height="10" fill="currentColor">
+           <circle cx="9" cy="5" r="1.5"/><circle cx="15" cy="5" r="1.5"/>
+           <circle cx="9" cy="12" r="1.5"/><circle cx="15" cy="12" r="1.5"/>
+           <circle cx="9" cy="19" r="1.5"/><circle cx="15" cy="19" r="1.5"/>
+         </svg>
+       </span>`;
+  return `
+    <div class="cat-item queue-row ${running ? "queue-running" : "queue-waiting"}" data-id="${esc(job.job_id)}"${running ? "" : ' draggable="true"'}>
+      ${handle}
+      <div class="cat-thumb">${thumb}</div>
+      <div class="cat-meta">
+        <div class="cat-title">${esc(displayTitle(job.title || track?.title || job.source_url))}</div>
+        <div class="cat-sub"><span class="cat-queue-label">${esc(label)}</span></div>
+        ${running ? '<div class="cat-progress"><div class="cat-progress-fill"></div></div>' : ""}
+      </div>
+      ${running || place <= 2 ? "" : `<button class="queue-top" type="button" title="Extract this one next"
+              aria-label="Move ${esc(displayTitle(job.title || job.source_url))} to the front of the queue">
+        <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true">
+          <path d="M12 19V5 M5 12l7-7 7 7"></path>
+        </svg>
+      </button>`}
+      <button class="queue-cancel" type="button" title="Cancel this import"
+              aria-label="Cancel import of ${esc(displayTitle(job.title || job.source_url))}">
+        <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true">
+          <path d="M18 6 6 18 M6 6l12 12"></path>
+        </svg>
+      </button>
+    </div>`;
+}
+
+// True while the user is dragging a queue row. Incoming queue frames arrive
+// several times a second; re-rendering the list mid-drag would pull the row out
+// from under the cursor and cancel the drag.
+let _queueDragId = null;
+
+export function isQueueDragging() {
+  return _queueDragId !== null;
+}
+
+/** The id the dragged row should sit after, given where it was dropped.
+ *  Null means the front of the queue. */
+function dropAnchorId(listEl, draggedId, clientY) {
+  const rows = [...listEl.querySelectorAll(".queue-row")].filter(
+    (r) => r.dataset.id !== draggedId,
+  );
+  let anchor = null;
+  for (const row of rows) {
+    const box = row.getBoundingClientRect();
+    if (clientY > box.top + box.height / 2) anchor = row.dataset.id;
+  }
+  return anchor;
+}
+
+function wireQueueRow(el, listEl) {
+  el.querySelector(".queue-cancel")?.addEventListener("click", async (e) => {
+    e.stopPropagation();
+    const btn = e.currentTarget;
+    btn.disabled = true;
+    await cancelQueuedJob(el.dataset.id);
+  });
+
+  el.querySelector(".queue-top")?.addEventListener("click", async (e) => {
+    e.stopPropagation();
+    e.currentTarget.disabled = true;
+    await reorderQueuedJob(el.dataset.id, null);
+  });
+
+  if (el.getAttribute("draggable") !== "true") return;
+
+  el.addEventListener("dragstart", (e) => {
+    _queueDragId = el.dataset.id;
+    el.classList.add("dragging");
+    e.dataTransfer.effectAllowed = "move";
+    // Firefox refuses to start a drag without payload.
+    e.dataTransfer.setData("text/plain", el.dataset.id);
+  });
+
+  el.addEventListener("dragend", () => {
+    _queueDragId = null;
+    el.classList.remove("dragging");
+    for (const r of listEl.querySelectorAll(".queue-row")) r.classList.remove("drop-below");
+  });
+}
+
+function wireQueueListDrop(listEl) {
+  listEl.addEventListener("dragover", (e) => {
+    if (!_queueDragId) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    const anchor = dropAnchorId(listEl, _queueDragId, e.clientY);
+    for (const r of listEl.querySelectorAll(".queue-row")) {
+      r.classList.toggle("drop-below", !!anchor && r.dataset.id === anchor);
+    }
+  });
+
+  listEl.addEventListener("drop", async (e) => {
+    if (!_queueDragId) return;
+    e.preventDefault();
+    const dragged = _queueDragId;
+    const anchor = dropAnchorId(listEl, dragged, e.clientY);
+    _queueDragId = null;
+    for (const r of listEl.querySelectorAll(".queue-row")) r.classList.remove("drop-below");
+    if (anchor !== dragged) await reorderQueuedJob(dragged, anchor);
+  });
+}
+
+function queuePausedBannerHtml(count) {
+  const noun = count === 1 ? "track" : "tracks";
+  return `
+    <div class="queue-paused-banner">
+      <div class="queue-paused-text">
+        Paused - ${count} ${noun} from your last session.
+      </div>
+      <button class="queue-start-btn" type="button">Start</button>
+    </div>`;
+}
+
+function renderQueueList(listEl, snap = getQueueSnapshot()) {
+  const entries = queueEntries(snap);
+  listEl.innerHTML = "";
+
+  const section = document.createElement("div");
+  section.className = "lib-section queue-section";
+  section.innerHTML = `<div class="lib-section-head"><span>IMPORT QUEUE</span></div>`;
+
+  if (isPaused(snap)) {
+    section.insertAdjacentHTML("beforeend", queuePausedBannerHtml(entries.length));
+    section.querySelector(".queue-start-btn")?.addEventListener("click", async (e) => {
+      e.currentTarget.disabled = true;
+      e.currentTarget.textContent = "Starting…";
+      await startQueue();
+    });
+  }
+
+  if (!entries.length) {
+    section.insertAdjacentHTML(
+      "beforeend",
+      '<span class="folder-empty trash-empty">Nothing importing. Queued tracks appear here.</span>',
+    );
+    listEl.appendChild(section);
+    return;
+  }
+
+  const paused = isPaused(snap);
+  section.insertAdjacentHTML(
+    "beforeend",
+    entries.map((entry, i) => queueRowHtml(entry, i + 1, { paused })).join(""),
+  );
+  listEl.appendChild(section);
+  for (const el of section.querySelectorAll(".queue-row")) wireQueueRow(el, listEl);
+  wireQueueListDrop(listEl);
+  updateQueueRows(snap);
+}
+
+/** Patch the open queue view in place. Only a change to which jobs are present
+ *  (or their order) costs a rebuild; progress and stage text are written
+ *  straight to the existing nodes, because this runs several times a second. */
+function updateQueueRows(snap = getQueueSnapshot()) {
+  const listEl = document.getElementById("catalogList");
+  if (!listEl || catalogView !== "queue") return;
+  // A frame landing mid-drag would rebuild the list and yank the row out
+  // from under the cursor.
+  if (isQueueDragging()) return;
+
+  const entries = queueEntries(snap);
+  const shown = [...listEl.querySelectorAll(".queue-row")].map((el) => el.dataset.id);
+  const wanted = entries.map((e) => e.job.job_id);
+  const bannerShown = !!listEl.querySelector(".queue-paused-banner");
+  if (
+    shown.length !== wanted.length ||
+    shown.some((id, i) => id !== wanted[i]) ||
+    bannerShown !== isPaused(snap)
+  ) {
+    renderQueueList(listEl, snap);
+    return;
+  }
+
+  entries.forEach((entry, i) => {
+    const el = listEl.querySelector(`.queue-row[data-id="${entry.job.job_id}"]`);
+    if (!el) return;
+    const label = entry.running
+      ? runningLabel(entry.job)
+      : isPaused(snap)
+        ? "Paused"
+        : `Queued - ${ordinal(i + 1)} in line`;
+    const labelEl = el.querySelector(".cat-queue-label");
+    if (labelEl && labelEl.textContent !== label) labelEl.textContent = label;
+    const fill = el.querySelector(".cat-progress-fill");
+    if (fill) fill.style.width = `${Math.round((entry.job.progress || 0) * 100)}%`;
+  });
+}
+
+/** The rail button only exists while there is something to look at, and carries
+ *  the count so the queue is legible without opening it. */
+function updateQueueBadge(snap = getQueueSnapshot()) {
+  const btn = document.querySelector(".rail-queue");
+  const badge = document.getElementById("queueBadge");
+  if (!btn) return;
+  const count = queueCount(snap);
+  btn.classList.toggle("hidden", count === 0 && catalogView !== "queue");
+  if (badge) {
+    badge.textContent = count > 99 ? "99+" : String(count);
+    badge.classList.toggle("hidden", count === 0);
+  }
+}
+
+function onQueueFrame(snap) {
+  updateQueueBadge(snap);
+  if (catalogView !== "queue") {
+    applyQueueDecorations(snap);
+    return;
+  }
+  if (queueCount(snap) === 0) {
+    // Nothing left to manage. Fall back to the library rather than leaving the
+    // user in a view that can only ever be empty from here. Deliberately not
+    // done inside updateQueueBadge, which render() calls -- that would recurse.
+    setCatalogView("library");
+    return;
+  }
+  updateQueueRows(snap);
+}
+
+function applyQueueDecorations(snap = getQueueSnapshot()) {
+  const states = queueRowStates(snap);
+  for (const el of document.querySelectorAll(".cat-item[data-id]")) {
+    const state = states.get(el.dataset.id);
+    // Only touch rows that are, or just were, in the queue.
+    if (!state && !el.classList.contains("in-queue")) continue;
+    decorateRow(el, state);
+  }
 }
 
 // ─── Catalog panel collapse ───
@@ -1418,6 +1840,7 @@ function wireCatalogRailViews() {
   document.querySelector(".rail-library")?.addEventListener("click", () => setCatalogView("library"));
   document.querySelector(".rail-favorites")?.addEventListener("click", () => setCatalogView("favorites"));
   document.querySelector(".rail-trash")?.addEventListener("click", () => setCatalogView("trash"));
+  document.querySelector(".rail-queue")?.addEventListener("click", () => setCatalogView("queue"));
   document.getElementById("clearBinBtn")?.addEventListener("click", () => {
     const trash = getTrashFolder();
     const toDelete = [...(trash?.items || [])];
@@ -2070,17 +2493,19 @@ function networkSettingsHtml() {
   `;
 }
 
-// General settings: max track length (minutes) + MP4 video quality. Read live
+// General settings: max track length (minutes), playlist import limit, and
+// MP4 video quality. Read live
 // and POSTed on change to /api/settings (same runtime store as the toggle).
 async function wireGeneralSettings(overlay) {
   const durInput = overlay.querySelector(".set-max-duration");
+  const playlistInput = overlay.querySelector(".set-playlist-max");
   const heightSel = overlay.querySelector(".set-video-height");
   const sampleRateSel = overlay.querySelector(".set-export-samplerate");
   const portInput = overlay.querySelector(".set-port");
   const deviceSel = overlay.querySelector(".set-demucs-device");
   const deviceResolved = overlay.querySelector(".set-demucs-resolved");
   const qualitySel = overlay.querySelector(".set-separation-quality");
-  if (!durInput && !heightSel && !sampleRateSel && !portInput && !deviceSel && !qualitySel) return;
+  if (!durInput && !playlistInput && !heightSel && !sampleRateSel && !portInput && !deviceSel && !qualitySel) return;
 
   // Last server-confirmed device choice, to revert the select when the server
   // rejects a forced device (e.g. CUDA not available on this machine).
@@ -2088,6 +2513,7 @@ async function wireGeneralSettings(overlay) {
 
   const apply = (d) => {
     if (durInput && d.max_duration_sec) durInput.value = String(Math.round(d.max_duration_sec / 60));
+    if (playlistInput && d.playlist_max_items) playlistInput.value = String(d.playlist_max_items);
     if (heightSel && d.video_max_height) heightSel.value = String(d.video_max_height);
     if (sampleRateSel && d.export_sample_rate) sampleRateSel.value = String(d.export_sample_rate);
     if (portInput && d.port) portInput.value = String(d.port);
@@ -2120,6 +2546,7 @@ async function wireGeneralSettings(overlay) {
     if (cleaned !== input.value) input.value = cleaned;
   });
   digitsOnly(durInput);
+  digitsOnly(playlistInput);
   digitsOnly(portInput);
 
   try {
@@ -2141,6 +2568,10 @@ async function wireGeneralSettings(overlay) {
   durInput?.addEventListener("change", () => {
     const mins = Math.max(1, Math.min(20, parseInt(durInput.value, 10) || 20));
     post({ max_duration_sec: mins * 60 });
+  });
+  playlistInput?.addEventListener("change", () => {
+    const items = Math.max(1, Math.min(200, parseInt(playlistInput.value, 10) || 50));
+    post({ playlist_max_items: items });
   });
   heightSel?.addEventListener("change", () => {
     post({ video_max_height: parseInt(heightSel.value, 10) });
@@ -2482,6 +2913,13 @@ function openLibraryEditor() {
             </div>
             <input type="text" class="settings-num-input set-max-duration" inputmode="numeric" maxlength="2" aria-label="Max track length in minutes" />
           </div>
+          <div class="settings-row">
+            <div class="settings-row-text">
+              <div class="settings-row-title">Playlist import limit</div>
+              <div class="settings-row-desc">Most tracks one playlist import will queue (max 200).</div>
+            </div>
+            <input type="text" class="settings-num-input set-playlist-max" inputmode="numeric" maxlength="3" aria-label="Playlist import limit" />
+          </div>
         </div>
         <div class="settings-section">
           <div class="settings-row">
@@ -2806,6 +3244,11 @@ export async function initCatalog() {
   setDisplayedVersion(currentVersion);
   render();
 
+  // Patch rows in place on every queue frame. A full render() here would
+  // rebuild the sidebar several times a second.
+  onQueueChange(onQueueFrame);
+  onJobSettled(completeSettledJob);
+  startQueueStream();
 
   loadCurrentVersion().finally(checkForUpdate);
   syncWithServer();

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import ctypes
 import functools
 import io
 import logging
@@ -33,8 +32,9 @@ from app.core.config import (
     ensure_runtime_dirs,
 )
 from app.core.logging_setup import configure_logging
+from app.core.process import process_exists as _process_exists
 from app.core.registry import all_jobs as registry_all_jobs
-from app.core.registry import registry_path
+from app.core.registry import registry_path, take_pending_resume
 from app.core.registry import reset_all as reset_registry
 from app.core.registry import restore as restore_registry
 from app.core.settings import (
@@ -43,6 +43,7 @@ from app.core.settings import (
     get_demucs_device_choice,
     get_export_sample_rate,
     get_max_duration_sec,
+    get_playlist_max_items,
     get_port,
     get_separation_quality,
     get_video_max_height,
@@ -50,6 +51,7 @@ from app.core.settings import (
     set_demucs_device,
     set_export_sample_rate,
     set_max_duration_sec,
+    set_playlist_max_items,
     set_port,
     set_separation_quality,
     set_video_max_height,
@@ -78,26 +80,6 @@ except ImportError:
     pass
 
 _log = logging.getLogger("stemdeck")
-
-
-def _process_exists(pid: int) -> bool:
-    if os.name != "nt":
-        try:
-            os.kill(pid, 0)
-        except ProcessLookupError:
-            return False
-        except PermissionError:
-            return True
-        return True
-
-    PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
-    ERROR_INVALID_PARAMETER = 87
-    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-    handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
-    if handle:
-        kernel32.CloseHandle(handle)
-        return True
-    return ctypes.get_last_error() != ERROR_INVALID_PARAMETER
 
 
 def app_version() -> str:
@@ -170,6 +152,29 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     t = asyncio.create_task(_sweep_loop())
     _background_tasks.add(t)
     t.add_done_callback(_background_tasks.discard)
+    # The single queue consumer. Started here rather than at import time because
+    # restore_registry() runs at module scope, where there is no running loop.
+    from app.pipeline import jobqueue
+
+    qt = jobqueue.start_worker()
+    _background_tasks.add(qt)
+    qt.add_done_callback(_background_tasks.discard)
+    # Jobs that were queued or in flight when the process last died. restore()
+    # already put them back to "queued"; this puts them back in the queue.
+    #
+    # Deliberately paused: opening the app must not start separating on its own.
+    # A restored queue can be dozens of tracks and hours of GPU, and the user
+    # may well have opened StemDeck to do something else entirely. They press
+    # Start (or simply import something new, which lifts the pause).
+    resumed = take_pending_resume()
+    if resumed:
+        jobqueue.pause()
+        for job_id in resumed:
+            jobqueue.enqueue(job_id, autostart=False)
+        _log.info(
+            "restored %d interrupted job(s) from the previous session; queue is paused",
+            len(resumed),
+        )
     if os.environ.get("STEMDECK_DESKTOP") == "1":
         parent_pid = os.environ.get("STEMDECK_PARENT_PID")
         if parent_pid:
@@ -183,6 +188,10 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
                     _background_tasks.add(wt)
                     wt.add_done_callback(_background_tasks.discard)
     yield
+    # Stop taking new work. Deliberately not cancelling the in-flight job: it is
+    # blocked in asyncio.to_thread, which cannot be cancelled, so it dies with
+    # the process exactly as it did before the queue existed.
+    jobqueue.request_stop()
     # Tear down the persistent demucs worker (#309) so a clean shutdown never
     # leaves it as an orphaned process -- it has no parent-death watchdog of
     # its own, unlike the desktop backend itself.
@@ -264,6 +273,7 @@ def _settings_payload() -> dict[str, object]:
     return {
         "allow_network": get_allow_network(),
         "max_duration_sec": get_max_duration_sec(),
+        "playlist_max_items": get_playlist_max_items(),
         "video_max_height": get_video_max_height(),
         "export_sample_rate": get_export_sample_rate(),
         "separation_quality": get_separation_quality(),
@@ -302,6 +312,7 @@ async def update_settings(request: Request) -> dict[str, object]:
         set_allow_network(bool(body["allow_network"]))
     for key, setter in (
         ("max_duration_sec", set_max_duration_sec),
+        ("playlist_max_items", set_playlist_max_items),
         ("video_max_height", set_video_max_height),
         ("port", set_port),
     ):
@@ -355,6 +366,11 @@ def reset_app_data() -> dict[str, object]:
     active = [j for j in registry_all_jobs().values() if j.status in _ACTIVE_JOB_STATUSES]
     if active:
         raise HTTPException(status_code=409, detail="cannot reset while a job is in progress")
+    # Clear the queue alongside the registry, or the worker would keep popping
+    # ids that no longer resolve and the queue view would report ghosts.
+    from app.pipeline import jobqueue
+
+    jobqueue.clear()
     reset_registry(JOBS_DIR)
     return {"ok": True}
 

@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+from app.core import registry as _registry
 from app.core.models import Job
 from app.core.registry import _jobs
 from app.core.registry import persist as persist_registry
@@ -15,8 +16,153 @@ from app.core.registry import restore as restore_registry
 @pytest.fixture(autouse=True)
 def _isolate_registry():
     _jobs.clear()
+    _registry._pending_resume.clear()
     yield
     _jobs.clear()
+    _registry._pending_resume.clear()
+
+
+# ── resuming a queue across a restart ────────────────────────────────────────
+
+
+def _stems_dir(tmp_path: Path, job_id: str, names=("vocals", "drums")) -> None:
+    d = tmp_path / job_id / "stems"
+    d.mkdir(parents=True, exist_ok=True)
+    for n in names:
+        (d / f"{n}.wav").write_bytes(b"RIFF")
+
+
+def test_a_queued_job_survives_a_restart(tmp_path: Path):
+    """Only done jobs used to be persisted, so closing the app silently threw
+    away everything the user had queued."""
+    job = Job(id="abcdef000001", status="queued", title="Waiting", source_url="local:Waiting")
+    _jobs[job.id] = job
+
+    persist_registry(tmp_path)
+    _jobs.clear()
+    restore_registry(tmp_path)
+
+    assert _jobs[job.id].status == "queued"
+    assert _registry.take_pending_resume() == [job.id]
+
+
+def test_take_pending_resume_only_fires_once(tmp_path: Path):
+    _jobs["abcdef000001"] = Job(id="abcdef000001", status="queued", title="Waiting")
+    persist_registry(tmp_path)
+    _jobs.clear()
+    restore_registry(tmp_path)
+
+    assert _registry.take_pending_resume() == ["abcdef000001"]
+    assert _registry.take_pending_resume() == []
+
+
+def test_an_interrupted_job_whose_stems_landed_is_done_not_rerun(tmp_path: Path):
+    """The crash window between the last stem being written and the done-persist.
+    Re-running would duplicate the library entry and redo the whole separation."""
+    job = Job(id="abcdef000002", status="separating", title="Nearly done")
+    _jobs[job.id] = job
+    persist_registry(tmp_path)
+    _stems_dir(tmp_path, job.id)
+    _jobs.clear()
+
+    restore_registry(tmp_path)
+
+    assert _jobs[job.id].status == "done"
+    assert _registry.take_pending_resume() == []
+
+
+def test_an_interrupted_job_without_stems_is_requeued(tmp_path: Path):
+    job = Job(id="abcdef000003", status="separating", title="Half done", progress=0.6)
+    _jobs[job.id] = job
+    persist_registry(tmp_path)
+    _jobs.clear()
+
+    restore_registry(tmp_path)
+
+    restored = _jobs[job.id]
+    assert restored.status == "queued"
+    assert restored.progress == 0.0
+    assert restored.resume_attempts == 1
+    assert _registry.take_pending_resume() == [job.id]
+
+
+def test_partial_demucs_output_is_cleared_before_a_resume(tmp_path: Path):
+    """collect() would otherwise mistake a half-written model dir for results."""
+    from app.core.config import DEMUCS_MODEL
+
+    job = Job(id="abcdef000004", status="separating", title="Half done")
+    _jobs[job.id] = job
+    persist_registry(tmp_path)
+    partial = tmp_path / job.id / DEMUCS_MODEL / "track"
+    partial.mkdir(parents=True)
+    (partial / "vocals.wav").write_bytes(b"partial")
+    _jobs.clear()
+
+    restore_registry(tmp_path)
+
+    assert not (tmp_path / job.id / DEMUCS_MODEL).exists()
+
+
+def test_a_crash_loop_ends_without_the_job_ever_completing(tmp_path: Path):
+    """The counter has to reach disk during restore, not only when the job
+    finally finishes. A job that takes the process down never gets that far, so
+    if restore did not persist, every start would read resume_attempts back as 0
+    and retry it forever."""
+    job = Job(id="abcdef000006", status="separating", title="Poison")
+    _jobs[job.id] = job
+    persist_registry(tmp_path)
+
+    # Crash 1: nothing ran, nothing else persisted -- just restart.
+    _jobs.clear()
+    _registry._pending_resume.clear()
+    restore_registry(tmp_path)
+    assert _jobs[job.id].status == "queued"
+
+    # Crash 2: the retry took the process down again, still with no persist of
+    # its own. The restart must read the bumped count off disk and stop.
+    _jobs.clear()
+    _registry._pending_resume.clear()
+    restore_registry(tmp_path)
+    assert _jobs[job.id].status == "error"
+    assert _registry.take_pending_resume() == []
+
+
+def test_a_job_interrupted_twice_fails_instead_of_looping(tmp_path: Path):
+    """A job that reliably takes the process down would otherwise be re-queued
+    on every start, wedging the queue forever."""
+    job = Job(id="abcdef000005", status="separating", title="Poison", resume_attempts=1)
+    _jobs[job.id] = job
+    persist_registry(tmp_path)
+    _jobs.clear()
+
+    restore_registry(tmp_path)
+
+    assert _jobs[job.id].status == "error"
+    assert "again" in (_jobs[job.id].error or "")
+    assert _registry.take_pending_resume() == []
+
+
+def test_resumed_jobs_keep_their_original_order(tmp_path: Path):
+    for i, jid in enumerate(("abcdef00000a", "abcdef00000b", "abcdef00000c")):
+        _jobs[jid] = Job(id=jid, status="queued", title=f"T{i}", created_at=100.0 + i)
+    persist_registry(tmp_path)
+    _jobs.clear()
+
+    restore_registry(tmp_path)
+
+    assert _registry.take_pending_resume() == ["abcdef00000a", "abcdef00000b", "abcdef00000c"]
+
+
+def test_cancelled_and_errored_jobs_are_still_not_persisted(tmp_path: Path):
+    """Widening persistence to cover the queue must not resurrect dead jobs."""
+    _jobs["abcdef000006"] = Job(id="abcdef000006", status="cancelled", title="Nope")
+    _jobs["abcdef000007"] = Job(id="abcdef000007", status="error", title="Nope")
+    persist_registry(tmp_path)
+    _jobs.clear()
+
+    restore_registry(tmp_path)
+
+    assert _jobs == {}
 
 
 def test_persist_and_restore_terminal_job(tmp_path: Path):
@@ -174,3 +320,38 @@ def test_delete_updates_persisted_registry(tmp_path: Path, monkeypatch):
     assert not job_dir.exists()
     data = json.loads((tmp_path / "registry.json").read_text(encoding="utf-8"))
     assert data["jobs"] == []
+
+
+def test_a_reordered_queue_comes_back_in_the_users_order(tmp_path: Path):
+    """Order is the main thing a user controls in a serial queue, so it has to
+    survive a restart -- not fall back to submission order."""
+    from app.pipeline import jobqueue
+
+    ids = ["abcdef00000a", "abcdef00000b", "abcdef00000c"]
+    for i, jid in enumerate(ids):
+        job = Job(id=jid, status="queued", title=jid[-1], created_at=1000.0 + i)
+        _jobs[jid] = job
+        jobqueue.enqueue(jid)
+    # The user drags the last one to the front.
+    assert jobqueue.reorder("abcdef00000c", None) is True
+    persist_registry(tmp_path)
+
+    _jobs.clear()
+    _registry._pending_resume.clear()
+    jobqueue._queue.clear()
+    restore_registry(tmp_path)
+
+    assert _registry.take_pending_resume() == ["abcdef00000c", "abcdef00000a", "abcdef00000b"]
+
+
+def test_records_without_a_position_still_restore_oldest_first(tmp_path: Path):
+    """Registries written before reordering existed default to 0, where
+    created_at decides exactly as it used to."""
+    for i, jid in enumerate(["abcdef0000e1", "abcdef0000e2"]):
+        _jobs[jid] = Job(id=jid, status="queued", title=jid, created_at=2000.0 - i)
+    persist_registry(tmp_path)
+    _jobs.clear()
+    _registry._pending_resume.clear()
+
+    restore_registry(tmp_path)
+    assert _registry.take_pending_resume() == ["abcdef0000e2", "abcdef0000e1"]

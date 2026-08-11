@@ -83,7 +83,19 @@ JOB_TTL_SECONDS = max(300, _env_int("STEMDECK_JOB_TTL_SECONDS", 24 * 3600))  # 2
 # Swept unconditionally -- even deployments with a persistent library must not
 # accumulate failure evidence forever.
 FAILED_TTL_SECONDS = max(3600, _env_int("STEMDECK_FAILED_TTL_SECONDS", 7 * 24 * 3600))  # 7 d
-MAX_PENDING_JOBS = max(1, min(50, _env_int("STEMDECK_MAX_PENDING_JOBS", 3)))
+# Depth of the import queue: jobs waiting for their turn, not counting the one
+# running. Counted separately by kind, because the two cost wildly different
+# things. A queued upload holds its source file on disk for the whole wait, so
+# 20 of them is already an 8 GB worst case. A queued URL holds nothing at all --
+# it downloads when its turn comes -- so the only real cost is a registry
+# record, and a 50-track playlist should not have to be imported in batches.
+MAX_PENDING_UPLOAD_JOBS = max(1, min(200, _env_int("STEMDECK_MAX_PENDING_JOBS", 20)))
+MAX_PENDING_URL_JOBS = max(1, min(500, _env_int("STEMDECK_MAX_PENDING_URL_JOBS", 200)))
+# Ceiling on how much of a playlist one import may expand to. Enforced twice:
+# as yt-dlp's playlistend so nothing beyond it is ever fetched, and again after
+# normalization. Unrelated to MAX_PENDING_JOBS, which bounds the queue itself --
+# a playlist larger than the queue has room for fills what it can and says so.
+PLAYLIST_MAX_ITEMS = max(1, min(200, _env_int("STEMDECK_PLAYLIST_MAX_ITEMS", 50)))
 TIMEOUT_FFMPEG = _env_int("STEMDECK_TIMEOUT_FFMPEG", 300)
 TIMEOUT_ANALYZE = _env_int("STEMDECK_TIMEOUT_ANALYZE", 120)
 TIMEOUT_DEMUCS_STALL = _env_int("STEMDECK_TIMEOUT_DEMUCS_STALL", 1800)

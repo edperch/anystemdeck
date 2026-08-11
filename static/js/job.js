@@ -1,13 +1,16 @@
 import {
   form, urlInput, submitBtn, errorEl, jobBox, jobTitleEl, jobStageEl,
   jobDetailEl, jobCancelBtn, progressEl, titleEl, bpmChip, keyChip,
-  eventSource, setEventSource, setCurrentJobId, currentJobId,
+  eventSource, setEventSource, setCurrentJobId,
+  foregroundJobId, setForegroundJobId,
+  audioEngine, multitrack,
   selectedStems,
 } from "./state.js";
 import { destroyPlayer, wireUpAudio, setWaveformLoading, updateFooterTrack } from "./player.js";
 import { stagePhrases } from "./phrases.js";
 import { addTrackToLibrary, setCurrentTrack, updateTrackStatus, applyStemPresenceCards } from "./catalog.js";
 import { initSections } from "./sections.js";
+import { importPlaylist, looksLikePlaylist } from "./playlist.js";
 
 // Playful stage label rotation (Claude-Code-style flair). The backend
 // emits truthful stage strings; we surface them in the small #job-detail
@@ -21,12 +24,33 @@ const jobSources = new Map();
 
 const TERMINAL_STATUSES = new Set(["done", "error", "cancelled"]);
 
+// Last library-visible values written per job, so a 4 Hz progress stream does
+// not re-run addTrackToLibrary (a full localStorage write plus a whole-sidebar
+// render) for frames that change nothing the sidebar shows. Every frame carries
+// the complete job state, so skipping redundant ones loses nothing: the next
+// frame that does change status carries the analysis fields too.
+const libraryRowKeys = new Map();
+
+function libraryRowKey(state) {
+  return [state.status, state.title || "", state.thumbnail || ""].join("\u0000");
+}
+
+// `processing` here means "a submit is in flight", not "a job is running".
+// With a queue the form has to come back the instant the job is accepted, so
+// the user can queue the next one.
 function setSubmitProcessing(processing) {
   submitBtn.disabled = processing;
   submitBtn.classList.toggle("loading", processing);
   document.querySelector(".strip-sq-process")?.classList.toggle("loading", processing);
   const label = submitBtn.querySelector("span");
   if (label) label.textContent = processing ? "Processing" : "Process";
+}
+
+/** True when audio is loaded in the studio. Either engine counts: the Web Audio
+ *  path sets audioEngine, the streaming path sets multitrack, and destroyPlayer
+ *  clears both. Read at call time so the live bindings are current. */
+function studioHasTrack() {
+  return !!(audioEngine || multitrack);
 }
 
 function pickPhrase(status) {
@@ -98,7 +122,15 @@ export function showError(message, detail, { retry = true } = {}) {
   errorEl.classList.remove("hidden");
 }
 
-export function reset() {
+function clearImportError() {
+  errorEl.classList.add("hidden");
+  errorEl.textContent = "";
+}
+
+// Clear the import chrome (progress box, error, phrase rotation, foreground
+// SSE) without touching the studio. Split out of reset() so a submit that goes
+// to the back of the queue does not tear down audio the user is playing.
+function resetImportUi() {
   if (eventSource) {
     eventSource.close();
     setEventSource(null);
@@ -106,9 +138,7 @@ export function reset() {
   stopJobPolling();
   stopPhraseRotation();
   lastStatus = null;
-  destroyPlayer();
-  errorEl.classList.add("hidden");
-  errorEl.textContent = "";
+  clearImportError();
   jobBox.classList.add("hidden");
   jobCancelBtn.classList.add("hidden");
   jobTitleEl.textContent = "";
@@ -116,48 +146,33 @@ export function reset() {
   jobDetailEl.textContent = "";
   progressEl.value = 0;
   setSubmitProcessing(false);
+  setForegroundJobId(null);
+}
+
+export function reset() {
+  resetImportUi();
+  destroyPlayer();
   setCurrentJobId(null);
 }
 
-function applyState(state) {
-  if (state.job_id) {
-    addTrackToLibrary({
-      id: state.job_id,
-      title: state.title || urlInput.value || "Processing track",
-      channel: state.status === "done" ? "Extracted" : "Processing",
-      thumb: state.thumbnail,
-      stems: state.selected_stems || state.stems?.map((stem) => stem.name) || [...selectedStems],
-      selectedStems: state.selected_stems || [...selectedStems],
-      audioStems: state.stems || [],
-      status: state.status,
-      duration: state.duration,
-      bpm: state.bpm,
-      key: state.key,
-      scale: state.scale,
-      keyConfidence: state.key_confidence,
-      lufs: state.lufs,
-      peakDb: state.peak_db,
-      stemPresence: state.stem_presence,
-      sourceUrl: jobSources.get(state.job_id) || urlInput.value,
-      createdAt: state.created_at,
-    });
-    setCurrentTrack(state.job_id);
-  }
-  if (state.title) {
-    jobTitleEl.textContent = state.title;
-    titleEl.textContent = state.title;
-  }
-  if (state.bpm) bpmChip.textContent = `${state.bpm} BPM`;
-  if (state.key) keyChip.textContent = state.key;
-  if (state.title || state.bpm || state.key || state.thumbnail) {
-    updateFooterTrack({
-      title: state.title,
-      thumbnail: state.thumbnail,
-      key: state.key,
-      bpm: state.bpm,
-      stemCount: state.stems ? state.stems.filter((s) => s.name !== "original").length : null,
-    });
-  }
+// The running import no longer owns the studio: the user opened another track.
+// The job keeps running and its SSE stays connected -- it still updates the
+// library row -- it just stops repainting a view that is now showing something
+// else. Cancel moves to the queue view, which is why the button goes away.
+export function detachForegroundJob() {
+  if (!foregroundJobId) return;
+  setForegroundJobId(null);
+  stopPhraseRotation();
+  setWaveformLoading(false);
+  jobBox.classList.add("hidden");
+  jobCancelBtn.classList.add("hidden");
+}
+
+// The analysis cards under the waveform. Split out of applyState so the
+// studio-owned DOM lives behind one call: only the job the user is actually
+// looking at may write here, and that is far easier to see when it is one
+// named function than fifty inline element lookups.
+function applyStudioSummary(state) {
   const summaryKey = document.getElementById("summary-key");
   const summaryBpm = document.getElementById("summary-bpm");
   const summaryScale = document.getElementById("summary-scale");
@@ -208,6 +223,63 @@ function applyState(state) {
   if (state.stem_presence != null) {
     applyStemPresenceCards(state.stem_presence);
   }
+}
+
+function applyState(state) {
+  // Everything below the library update writes to DOM the studio owns, and
+  // only the import the user is actually watching may touch it. A background
+  // job still gets its library row updated -- that is the point of the queue.
+  const isForeground = !!state.job_id && state.job_id === foregroundJobId;
+
+  if (state.job_id && libraryRowKeys.get(state.job_id) !== libraryRowKey(state)) {
+    libraryRowKeys.set(state.job_id, libraryRowKey(state));
+    addTrackToLibrary({
+      id: state.job_id,
+      // urlInput only speaks for the foreground job. While a background import
+      // runs the user may already be typing the next URL in there, and it must
+      // not end up as some other track's title or source.
+      title: state.title || (isForeground ? urlInput.value : "") || "Processing track",
+      channel: state.status === "done" ? "Extracted" : "Processing",
+      thumb: state.thumbnail,
+      stems: state.selected_stems || state.stems?.map((stem) => stem.name) || [...selectedStems],
+      selectedStems: state.selected_stems || [...selectedStems],
+      audioStems: state.stems || [],
+      status: state.status,
+      duration: state.duration,
+      bpm: state.bpm,
+      key: state.key,
+      scale: state.scale,
+      keyConfidence: state.key_confidence,
+      lufs: state.lufs,
+      peakDb: state.peak_db,
+      stemPresence: state.stem_presence,
+      sourceUrl: jobSources.get(state.job_id) || (isForeground ? urlInput.value : ""),
+      createdAt: state.created_at,
+    });
+  }
+
+  if (state.job_id && TERMINAL_STATUSES.has(state.status)) libraryRowKeys.delete(state.job_id);
+
+  // Everything from here down is studio DOM.
+  if (!isForeground) return;
+
+  setCurrentTrack(state.job_id);
+  if (state.title) {
+    jobTitleEl.textContent = state.title;
+    titleEl.textContent = state.title;
+  }
+  if (state.bpm) bpmChip.textContent = `${state.bpm} BPM`;
+  if (state.key) keyChip.textContent = state.key;
+  if (state.title || state.bpm || state.key || state.thumbnail) {
+    updateFooterTrack({
+      title: state.title,
+      thumbnail: state.thumbnail,
+      key: state.key,
+      bpm: state.bpm,
+      stemCount: state.stems ? state.stems.filter((s) => s.name !== "original").length : null,
+    });
+  }
+  applyStudioSummary(state);
   // Stage label is owned by the phrase-rotation timer below; we don't
   // overwrite it from each SSE tick. The truthful backend stage goes
   // to the small detail line instead.
@@ -224,22 +296,26 @@ function applyState(state) {
     lastStatus = state.status;
   }
 
+  // The three terminal branches no longer clear the submit button: it is
+  // released as soon as the POST returns, so the next import can be queued
+  // while this one is still running.
   if (state.status === "error") {
     stopJobPolling();
     updateTrackStatus(state.job_id, "error");
     setWaveformLoading(false);
     showError(state.error || "Unknown error", state.error_detail);
-    setSubmitProcessing(false);
+    setForegroundJobId(null);
   } else if (state.status === "cancelled") {
     stopJobPolling();
     updateTrackStatus(state.job_id, "cancelled");
     setWaveformLoading(false);
     jobBox.classList.add("hidden");
-    setSubmitProcessing(false);
+    setForegroundJobId(null);
   } else if (state.status === "done") {
     stopJobPolling();
     updateTrackStatus(state.job_id, "done");
     jobBox.classList.add("hidden");
+    setForegroundJobId(null);
     if (!renderedJobs.has(state.job_id)) {
       renderedJobs.add(state.job_id);
       wireUpAudio(
@@ -254,7 +330,6 @@ function applyState(state) {
       );
       initSections(state.job_id, state.sections, state.duration || 0);
     }
-    setSubmitProcessing(false);
   }
 }
 
@@ -350,7 +425,9 @@ function connectEvents(jobId) {
 }
 
 async function cancelCurrentJob() {
-  const id = currentJobId;
+  // The import, not the track in the studio. Reading currentJobId here meant
+  // that opening another track mid-import pointed Cancel at the wrong job.
+  const id = foregroundJobId;
   if (!id) return;
   jobCancelBtn.disabled = true;
   jobCancelBtn.textContent = "Cancelling…";
@@ -364,6 +441,41 @@ async function cancelCurrentJob() {
     jobCancelBtn.disabled = false;
     jobCancelBtn.textContent = "Cancel";
   }
+}
+
+async function postFileJob(file) {
+  const fd = new FormData();
+  fd.append("file", file);
+  fd.append("stems", JSON.stringify([...selectedStems]));
+  const res = await fetch("/api/jobs", { method: "POST", body: fd });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.detail || res.statusText);
+  return data.job_id;
+}
+
+/** Give an accepted upload its library row straight away, so a batch appears as
+ *  rows the moment each file lands rather than only once every upload is done. */
+function registerUploadRow(jobId, file) {
+  const title = sanitizeFilename(file.name);
+  const sourceUrl = `local:${title}`;
+  jobSources.set(jobId, sourceUrl);
+  addTrackToLibrary({
+    id: jobId,
+    title,
+    channel: "Processing",
+    thumb: "",
+    stems: [...selectedStems],
+    selectedStems: [...selectedStems],
+    audioStems: [],
+    status: "queued",
+    bpm: null,
+    key: null,
+    scale: null,
+    keyConfidence: null,
+    lufs: null,
+    peakDb: null,
+    sourceUrl,
+  });
 }
 
 function sanitizeFilename(name) {
@@ -403,7 +515,9 @@ export async function importFromUrl(url, { title, stems } = {}) {
     return null;
   }
 
+  setSubmitProcessing(false);
   setCurrentJobId(jobId);
+  setForegroundJobId(jobId);
   jobSources.set(jobId, url);
   // Merges into the existing library entry by sourceUrl (replaceTrackId),
   // preserving its folder placement; status updates as SSE frames arrive.
@@ -439,13 +553,87 @@ export function wireJobForm() {
 
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
-    reset();
+
+    // An import must never take a loaded studio away from the user. With a
+    // track playing, the new job goes straight to the background: no player
+    // teardown, no loading overlay, no takeover when it finishes. It reports
+    // progress on its library row instead.
+    //
+    // An import already holding the foreground keeps it, too. Otherwise
+    // queueing a second track would point the studio overlay at a job that has
+    // not started, and the first import -- the one about to finish -- would no
+    // longer be the one that loads.
+    const background = studioHasTrack() || !!foregroundJobId;
+    if (background) {
+      // Deliberately NOT resetImportUi(): that closes the running import's
+      // event stream and drops its foreground claim, which would leave the job
+      // about to finish with nothing listening for its completion.
+      clearImportError();
+    } else {
+      reset();
+    }
     setSubmitProcessing(true);
 
     const fileInput = document.getElementById("fileInput");
     // Prefer _file cache: browsers (WKWebView, Chromium) silently clear
     // fileInput.files after a fetch() submission, breaking re-submits.
     const file = fileInput?._file ?? fileInput?.files?.[0] ?? null;
+
+    // A playlist is its own flow: expand, confirm the count, then queue every
+    // track into a folder named after it. Nothing takes the studio.
+    if (!file && looksLikePlaylist(urlInput.value)) {
+      const url = urlInput.value;
+      const queued = await importPlaylist(url, [...selectedStems]);
+      setSubmitProcessing(false);
+      if (queued) urlInput.value = "";
+      return;
+    }
+    // Several files dropped at once: upload them one after another. Parallel
+    // uploads of several 400 MB bodies would thrash memory on both ends, and
+    // the endpoint takes exactly one file per request anyway. The first one
+    // takes the studio if it is free, exactly as a single import would; the
+    // rest queue behind it.
+    const batch = fileInput?._files ?? null;
+    if (batch && batch.length > 1) {
+      if (!background) setWaveformLoading(true, "Uploading…");
+      let queued = 0;
+      let failure = null;
+      for (const item of batch) {
+        try {
+          const id = await postFileJob(item);
+          registerUploadRow(id, item);
+          queued += 1;
+          if (queued === 1 && !background) {
+            setCurrentJobId(id);
+            setForegroundJobId(id);
+            setCurrentTrack(id);
+            jobBox.classList.add("hidden");
+            jobCancelBtn.classList.add("hidden");
+            startPhraseRotation("queued");
+            lastStatus = "queued";
+            connectEvents(id);
+          }
+        } catch (err) {
+          failure = err;
+          break; // a full queue will reject the rest too; stop asking
+        }
+      }
+      setSubmitProcessing(false);
+      fileInput._clear?.();
+      if (failure) {
+        if (!queued && !background) {
+          setWaveformLoading(false);
+          setForegroundJobId(null);
+        }
+        showError(
+          `Queued ${queued} of ${batch.length} files: ${failure.message}`,
+          null,
+          { retry: false },
+        );
+      }
+      return;
+    }
+
     const sanitized = file ? sanitizeFilename(file.name) : null;
     const sourceUrl = file ? `local:${sanitized}` : urlInput.value;
     const displayTitle = sanitized ?? (urlInput.value || "Processing track");
@@ -455,9 +643,13 @@ export function wireJobForm() {
 
     // Show overlay immediately for both paths. File uploads show "Uploading…"
     // in the overlay phrase until the fetch completes and SSE takes over.
-    setWaveformLoading(true, file ? "Uploading…" : "");
-    if (file) {
-      lastStatus = "queued";
+    // Skipped entirely for a background import -- the overlay covers the
+    // studio, which is exactly what must not happen here.
+    if (!background) {
+      setWaveformLoading(true, file ? "Uploading…" : "");
+      if (file) {
+        lastStatus = "queued";
+      }
     }
 
     let fetchInit;
@@ -492,7 +684,12 @@ export function wireJobForm() {
       return;
     }
 
-    setCurrentJobId(jobId);
+    // Released here, not when the job finishes: the queue is what the button
+    // hands off to now, so the form is free again the moment the job exists.
+    setSubmitProcessing(false);
+    // The server has the upload; disarm the picker so the next click cannot
+    // silently import the same file a second time.
+    if (file) fileInput._clear?.();
     jobSources.set(jobId, sourceUrl);
     addTrackToLibrary({
       id: jobId,
@@ -511,10 +708,22 @@ export function wireJobForm() {
       peakDb: null,
       sourceUrl,
     });
+
+    if (background) {
+      // No per-job stream: opening one per queued import would burn through
+      // the browser's ~6 connections per origin and starve stem loading. The
+      // shared queue stream drives the row, and catalog.js completes the
+      // library entry when the job leaves the queue.
+      if (postUrlText) postUrlText.textContent = "";
+      return;
+    }
+
+    setCurrentJobId(jobId);
+    setForegroundJobId(jobId);
     setCurrentTrack(jobId);
 
-    // Both paths: keep job box hidden, overlay drives the UI.
-    // Start phrase rotation now that the job exists on the server.
+    // Keep job box hidden, overlay drives the UI. Start phrase rotation now
+    // that the job exists on the server.
     jobBox.classList.add("hidden");
     jobCancelBtn.classList.add("hidden");
     startPhraseRotation("queued");
