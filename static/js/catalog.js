@@ -2493,6 +2493,138 @@ function networkSettingsHtml() {
   `;
 }
 
+/** Long paths are truncated from the LEFT: the folder name is what the user
+ *  needs to see, and the leading /Users/... is the part they already know.
+ *  Done here rather than with CSS -- the direction:rtl trick that gives a
+ *  leading ellipsis also moves the path's leading slash to the far end, so
+ *  /private/tmp/x renders as tmp/x/ and reads like a different path. */
+export function shortenPath(path, max = 52) {
+  const text = String(path ?? "");
+  if (text.length <= max) return text;
+  return "…" + text.slice(text.length - (max - 1));
+}
+
+function formatSize(bytes) {
+  if (!bytes) return "";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let value = bytes;
+  let i = 0;
+  while (value >= 1024 && i < units.length - 1) {
+    value /= 1024;
+    i += 1;
+  }
+  return `${value >= 10 || i === 0 ? Math.round(value) : value.toFixed(1)} ${units[i]}`;
+}
+
+// Where extracted stems live (#354). Documents is a fine default until you
+// notice it is syncing tens of gigabytes to iCloud.
+async function wireStemsLocation(overlay) {
+  const pathEl = overlay.querySelector(".stems-location-path");
+  const sizeEl = overlay.querySelector(".stems-location-size");
+  const btn = overlay.querySelector(".set-stems-location");
+  const msg = overlay.querySelector(".stems-location-msg");
+  if (!pathEl || !btn) return;
+
+  const hideRow = () =>
+    overlay.querySelector(".stems-location")?.closest(".settings-row")?.remove();
+
+  let current = null;
+
+  const setMessage = (text, kind = "") => {
+    if (!msg) return;
+    msg.textContent = text || "";
+    msg.className = `stems-location-msg${kind ? " " + kind : ""}`;
+  };
+
+  const apply = (d) => {
+    current = d.path;
+    pathEl.textContent = shortenPath(d.path);
+    pathEl.title = d.path;
+    if (sizeEl) sizeEl.textContent = formatSize(d.bytes);
+    // Reopening Settings after a move, before the restart, should still say so.
+    if (d.restart_required) setMessage("Restart StemDeck to finish switching over.", "ok");
+  };
+
+  // The backend decides whether this setting exists at all -- it is false on a
+  // server, Docker or Unraid deployment, where storage comes from a mounted
+  // volume the operator chose and moving it from inside the app would fight the
+  // mount. Asking it, rather than sniffing for Tauri, keeps that judgement in
+  // one place and means the row is testable in a browser against a desktop
+  // backend.
+  try {
+    const r = await fetch("/api/settings/stems-location", { cache: "no-store" });
+    if (!r.ok) {
+      hideRow();
+      return;
+    }
+    const data = await r.json();
+    if (!data.editable) {
+      hideRow();
+      return;
+    }
+    apply(data);
+  } catch (e) {
+    console.warn("[settings] could not read the stems location:", e);
+    hideRow();
+    return;
+  }
+
+  btn.addEventListener("click", async () => {
+    let picked = null;
+    const invoke = window.__TAURI__?.core?.invoke;
+    if (invoke) {
+      try {
+        picked = await invoke("pick_stems_folder");
+      } catch (e) {
+        console.warn("[settings] folder picker failed:", e);
+        setMessage("Could not open the folder picker.", "error");
+        return;
+      }
+    } else {
+      // No native picker outside the desktop shell. Only reachable when a
+      // desktop-mode backend is being driven from a browser, which is a
+      // development setup -- in the shipped app invoke is always there.
+      picked = window.prompt("Full path to the folder for extracted stems:", current || "");
+    }
+    if (!picked) return; // cancelled
+
+    btn.disabled = true;
+    setMessage("Moving stems… this can take a while for a large library.");
+    try {
+      const r = await fetch("/api/settings/stems-location", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path: picked }),
+      });
+      const data = await r.json();
+      if (!r.ok) {
+        setMessage(data.detail || "Could not move the stems folder.", "error");
+        return;
+      }
+      // Re-read rather than trust the POST: the GET reports where the stems
+      // actually are now, including the size at the new location.
+      try {
+        const again = await fetch("/api/settings/stems-location", { cache: "no-store" });
+        if (again.ok) apply(await again.json());
+        else apply({ path: data.path, bytes: 0 });
+      } catch (e) {
+        console.warn("[settings] refresh failed:", e);
+        apply({ path: data.path, bytes: 0 });
+      }
+      setMessage(
+        `Moved ${data.moved_entries} item${data.moved_entries === 1 ? "" : "s"}. ` +
+          "Restart StemDeck to finish switching over.",
+        "ok",
+      );
+    } catch (e) {
+      console.warn("[settings] move failed:", e);
+      setMessage("Could not reach the server.", "error");
+    } finally {
+      btn.disabled = false;
+    }
+  });
+}
+
 // General settings: max track length (minutes), playlist import limit, and
 // MP4 video quality. Read live
 // and POSTed on change to /api/settings (same runtime store as the toggle).
@@ -2920,6 +3052,17 @@ function openLibraryEditor() {
             </div>
             <input type="text" class="settings-num-input set-playlist-max" inputmode="numeric" maxlength="3" aria-label="Playlist import limit" />
           </div>
+          <div class="settings-row settings-row-stack">
+            <div class="settings-row-text">
+              <div class="settings-row-title">StemData location</div>
+            </div>
+            <div class="stems-location">
+              <code class="stems-location-path" title=""></code>
+              <span class="stems-location-size"></span>
+              <button class="settings-btn set-stems-location" type="button">Change…</button>
+            </div>
+            <div class="stems-location-msg" role="status" aria-live="polite"></div>
+          </div>
         </div>
         <div class="settings-section">
           <div class="settings-row">
@@ -3115,6 +3258,7 @@ function openLibraryEditor() {
   refreshLibrarySyncSummary();
   const isDesktop = Boolean(window.__TAURI__?.core?.invoke);
   wireGeneralSettings(overlay);
+  wireStemsLocation(overlay);
   wireNetworkSetting(overlay);
   if (!isDesktop) {
     overlay.querySelector(".net-access-input")?.setAttribute("disabled", "");
