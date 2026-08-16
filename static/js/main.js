@@ -6,7 +6,7 @@ import { STEM_NAMES, syncStemNamesFromAPI } from "./constants.js";
 import { renderEmptyShell, buildStripStems, downloadCurrentMix, downloadCurrentVideo, downloadAllStemsZip, downloadRegionMix, drawFooterPlaceholder } from "./player.js";
 import { wireJobForm, showError } from "./job.js";
 import { wireTransportButtons } from "./transport.js";
-import { wireBeatGridUi, toggleBeatGridEditor } from "./beatgridUi.js";
+import { wireBeatGridUi } from "./beatgridUi.js";
 import { togglePlayPause, updateLoopRegionVisual, toggleMetronome } from "./transport.js";
 import { wireStemListControls, wireMixerToolbar } from "./mixer.js";
 import { initCatalog } from "./catalog.js";
@@ -335,6 +335,12 @@ function wireFooterControls() {
   }
 
   // ── Close panels on outside click ──
+  // Inside the menu is not "away": ticking an option must not dismiss it. The
+  // export panel carries two checkboxes (click track, count-in) that a user
+  // may well want both of, and without this the first tick closed the menu and
+  // the second needed it reopened. Rows that *should* close the menu do it
+  // themselves -- the export actions via enterBusy() -> closePanel().
+  exportPanel?.addEventListener("click", (e) => e.stopPropagation());
   document.addEventListener("click", closeAllChipPanels);
 }
 
@@ -492,9 +498,6 @@ document.addEventListener("keydown", (e) => {
   } else if (e.code === "KeyK") {
     e.preventDefault();
     toggleMetronome();
-  } else if (e.code === "KeyG") {
-    e.preventDefault();
-    toggleBeatGridEditor();
   } else if (e.code === "KeyI" && loopEnabled && multitrack) {
     e.preventDefault();
     setLoopStart(Math.min(multitrack.getCurrentTime(), loopEnd - 0.5));
