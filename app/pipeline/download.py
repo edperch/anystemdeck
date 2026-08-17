@@ -94,6 +94,10 @@ _YOUTUBE_HOSTS = frozenset(
         "m.youtube.com",
         "music.youtube.com",
         "youtu.be",
+        # The "privacy-enhanced mode" embed domain -- same site, same extractor,
+        # shows up in copy-pasted embed/share code rather than the address bar.
+        "youtube-nocookie.com",
+        "www.youtube-nocookie.com",
     )
 )
 # Note: on.soundcloud.com (the share shortener) is intentionally excluded — it
@@ -169,12 +173,18 @@ def normalize_youtube_url(url: str) -> str:
     the playlist extractor. Pass non-YouTube URLs through unchanged.
 
     Cases handled:
-      * `watch?v=X&list=...` -> `watch?v=X` (drop the playlist context)
+      * `watch?v=X&list=...` -> `watch?v=X` (drop the playlist context,
+        regardless of what other tracking/context params ride along --
+        `si=`, `t=`, `app=desktop`, etc.)
       * `?list=RD<videoId>&start_radio=1` -> `watch?v=<videoId>` (Radio
         playlists embed the seed in the list ID; YouTube refuses to view the
         playlist directly with "This playlist type is unviewable.")
       * `youtu.be/<videoId>` -> `watch?v=<videoId>`
       * `youtube.com/shorts/<videoId>` -> `watch?v=<videoId>`
+      * `youtube.com/live/<videoId>` -> `watch?v=<videoId>` (premieres and
+        creator livestreams keep this URL once they end and become a normal
+        VOD -- common for concert/DJ-set recordings)
+      * `youtube-nocookie.com/...` -> the same forms on `youtube.com`
     Everything else (PL/OL/algorithmic playlists with no derivable seed) is
     left alone -- yt-dlp will surface its own error.
     """
@@ -187,7 +197,7 @@ def normalize_youtube_url(url: str) -> str:
         if host.startswith(prefix):
             host = host[len(prefix) :]
             break
-    if host not in ("youtube.com", "youtu.be"):
+    if host not in ("youtube.com", "youtu.be", "youtube-nocookie.com"):
         return url
 
     qs = urllib.parse.parse_qs(parsed.query)
@@ -206,10 +216,13 @@ def normalize_youtube_url(url: str) -> str:
         if _VIDEO_ID_RE.match(vid):
             return f"https://www.youtube.com/watch?v={vid}"
 
-    if host == "youtube.com" and parsed.path.startswith("/shorts/"):
-        vid = parsed.path[len("/shorts/") :].lstrip("/").split("/")[0]
-        if _VIDEO_ID_RE.match(vid):
-            return f"https://www.youtube.com/watch?v={vid}"
+    if host in ("youtube.com", "youtube-nocookie.com"):
+        for path_prefix in ("/shorts/", "/live/", "/embed/"):
+            if parsed.path.startswith(path_prefix):
+                vid = parsed.path[len(path_prefix) :].lstrip("/").split("/")[0]
+                if _VIDEO_ID_RE.match(vid):
+                    return f"https://www.youtube.com/watch?v={vid}"
+                break
 
     return url
 
