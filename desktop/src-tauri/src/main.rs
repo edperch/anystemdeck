@@ -2193,6 +2193,7 @@ fn curl_exit_is_retriable(code: Option<i32>) -> bool {
 /// messages -- this is shared by every curl-based download, so a hardcoded
 /// noun here was previously wrong for every caller except the one it happened
 /// to be written for.
+#[cfg(unix)]
 fn download_file(url: &str, target: &Path, timeout: Duration, label: &str) -> Result<(), String> {
     let tmp = target.with_extension("download");
     if tmp.exists() {
