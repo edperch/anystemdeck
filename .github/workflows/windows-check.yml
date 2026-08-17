@@ -1,0 +1,56 @@
+name: Windows Rust Check
+
+# Manual only -- not on every PR/push, to keep the self-hosted runner's load
+# and cost unchanged from today. Companion to macos-check.yml: ci.yml (which
+# does run on every PR) is 100% ubuntu-latest, so nothing behind
+# #[cfg(windows)] -- or, as it turned out, code that lost a #[cfg(unix)] gate
+# and started compiling on Windows by accident -- has ever had a real
+# compiler pass before merging. That exact gap shipped a broken Windows
+# build in v0.11.1's first release attempt.
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    # Runner must have rustup and the MSVC toolchain (same requirements as
+    # windows-release.yml, which this intentionally does not replace -- this
+    # only builds/checks, never packages or uploads anything).
+    runs-on: [self-hosted, windows, x64]
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+        working-directory: desktop/src-tauri
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - name: cargo fmt --check
+        run: cargo fmt --check
+
+      - name: cargo build
+        run: cargo build --tests
+
+      - name: cargo clippy
+        # -A flags suppress pre-existing lints unrelated to this workflow's
+        # purpose (tracked separately, not introduced by whatever change this
+        # check is run against) so a real regression isn't lost in known noise.
+        # unused_variables (pip_pid) and needless_return are Windows-build-only
+        # findings from this workflow's first-ever run -- nothing has
+        # type-checked this target before, so they predate this workflow
+        # rather than being caused by it.
+        run: |
+          cargo clippy --tests -- -D warnings \
+            -A clippy::derivable_impls \
+            -A clippy::single_match \
+            -A clippy::trim_split_whitespace \
+            -A unused_variables \
+            -A clippy::needless_return
+
+      - name: cargo test
+        run: cargo test
