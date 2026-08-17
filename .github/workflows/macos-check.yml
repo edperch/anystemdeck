@@ -1,0 +1,49 @@
+name: macOS Rust Check
+
+# Manual only -- not on every PR/push, to keep the self-hosted runner's load
+# and cost unchanged from today. Exists because ci.yml (which does run on
+# every PR) is 100% ubuntu-latest, and a Linux runner cannot type-check code
+# behind #[cfg(target_os = "macos")] at all -- that code is stripped before
+# semantic analysis even starts, not just skipped at test time. This is the
+# only way to get a real compiler pass over it before merging.
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    # Runner must be darwin/arm64 with Xcode CLT and rustup (same requirements
+    # as macos-release.yml, which this intentionally does not replace -- this
+    # only builds/checks, never signs, packages, or uploads anything).
+    runs-on: [self-hosted, macOS, ARM64]
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+        working-directory: desktop/src-tauri
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - name: cargo fmt --check
+        run: cargo fmt --check
+
+      - name: cargo build
+        run: cargo build
+
+      - name: cargo clippy
+        # -A flags suppress 3 pre-existing lints unrelated to this workflow's
+        # purpose (tracked separately, not introduced by whatever change this
+        # check is run against) so a real regression isn't lost in known noise.
+        run: |
+          cargo clippy -- -D warnings \
+            -A clippy::derivable_impls \
+            -A clippy::single_match \
+            -A clippy::trim_split_whitespace
+
+      - name: cargo test
+        run: cargo test
