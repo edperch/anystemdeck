@@ -529,11 +529,26 @@ function applyStoredStemSelection(track) {
   }
 }
 
+// A track's files went missing (folder deleted or moved outside the app).
+// URL-sourced tracks can be rebuilt from the source, so trigger that
+// directly rather than making the user hunt for a "resync" button in
+// Settings. Local uploads have no source bytes left to rebuild from (#354's
+// cleanup deletes the upload once the pipeline is done with it), so the
+// only path back is a fresh re-upload.
+function reimportUnavailableTrack(trackId, track) {
+  updateTrackStatus(trackId, "unavailable");
+  if (track.sourceUrl && !track.sourceUrl.startsWith("local:")) {
+    importFromUrl(track.sourceUrl, { title: track.title, stems: track.selectedStems });
+    return;
+  }
+  showError("This track's audio is no longer available. Re-upload to restore it.");
+}
+
 async function loadTrackIntoStudio(trackId) {
   let track = tracks[trackId];
   if (!track) return;
   if (track.status === "unavailable") {
-    showError("This track's audio is no longer available. Re-upload to restore it.");
+    reimportUnavailableTrack(trackId, track);
     return;
   }
   // The user has chosen to look at something else, so the running import gives
@@ -561,6 +576,10 @@ async function loadTrackIntoStudio(trackId) {
       track = stateMetadataToTrack(state, track);
       tracks[trackId] = track;
       saveState();
+      if (state.status === "unavailable") {
+        reimportUnavailableTrack(trackId, track);
+        return;
+      }
     } else if (res.status === 404) {
       track = { ...track, status: "unavailable" };
       tracks[trackId] = track;
@@ -1016,6 +1035,20 @@ function makeSectionEl(labelText) {
   return section;
 }
 
+// A URL-sourced track can be rebuilt by re-running the import; a local
+// upload has no source bytes left to rebuild from, only a re-upload gets it
+// back (see reimportUnavailableTrack).
+function canReimportTrack(track) {
+  return Boolean(track.sourceUrl) && !track.sourceUrl.startsWith("local:");
+}
+
+function unavailableWarningHtml(track) {
+  const label = canReimportTrack(track)
+    ? "Track unavailable - click to reimport"
+    : "Track unavailable - re-upload to restore";
+  return `<span class="cat-unavailable-warning">${esc(label)}</span>`;
+}
+
 function renderRecentItem(trackId) {
   const track = tracks[trackId];
   if (!track) return null;
@@ -1030,7 +1063,7 @@ function renderRecentItem(trackId) {
     <div class="cat-thumb">${thumbHtml(track)}</div>
     <div class="cat-meta">
       <div class="cat-title">${esc(displayTitle(track.title))}</div>
-      <div class="cat-sub"><span>${esc(sub)}</span></div>
+      <div class="cat-sub">${isUnavailable ? unavailableWarningHtml(track) : `<span>${esc(sub)}</span>`}</div>
     </div>
     <div class="cat-status${PROCESSING_STATUSES.has(track.status) ? " processing" : isUnavailable ? " unavailable" : ""}"></div>
   `;
@@ -1093,15 +1126,16 @@ function renderTrackItem(trackId, { inTrash = false } = {}) {
   el.dataset.id = trackId;
 
   const stemCount = track.stems?.length ?? 0;
+  const subHtml = isUnavailable
+    ? unavailableWarningHtml(track)
+    : `<span>${esc(track.channel ?? "")}</span>
+        <span class="dot">·</span>
+        <span>${inTrash ? "Removed" : `${stemCount} stem${stemCount !== 1 ? "s" : ""}`}</span>`;
   el.innerHTML = `
     <div class="cat-thumb">${thumbHtml(track)}</div>
     <div class="cat-meta">
       <div class="cat-title">${esc(displayTitle(track.title))}</div>
-      <div class="cat-sub">
-        <span>${esc(track.channel ?? "")}</span>
-        <span class="dot">·</span>
-        <span>${inTrash ? "Removed" : `${stemCount} stem${stemCount !== 1 ? "s" : ""}`}</span>
-      </div>
+      <div class="cat-sub">${subHtml}</div>
     </div>
     <div class="cat-status${PROCESSING_STATUSES.has(track.status) ? " processing" : isUnavailable ? " unavailable" : ""}"></div>
     ${inTrash ? "" : `<button class="cat-del" type="button" title="Move to Trash">
@@ -2408,6 +2442,25 @@ function wireSupportersDialog() {
   dialog.addEventListener("keydown", (e) => { if (e.code === "Escape") hide(); });
 }
 
+// Ground truth for "done" <-> "unavailable" is the server (it checks the
+// stems folder on disk), catching a job whose registry entry survived but
+// whose files did not - something mere presence in `jobs` cannot tell apart
+// from a healthy one. Shared by the passive startup sync and the
+// user-triggered "Resync" button so both apply the same rule.
+function reconcileAvailability(jobs) {
+  const serverIds = new Set(jobs.map((j) => j.job_id));
+  const serverStatus = new Map(jobs.map((j) => [j.job_id, j.status]));
+  const trashIds = new Set(getTrashFolder()?.items || []);
+  for (const [id, t] of Object.entries(tracks)) {
+    if (trashIds.has(id)) continue;
+    if (t.status !== "done" && t.status !== "unavailable") continue;
+    if (serverIds.has(id)) t.status = serverStatus.get(id) === "unavailable" ? "unavailable" : "done";
+    else if (t.status === "done") t.status = "unavailable"; // gone from the registry entirely
+  }
+  saveState();
+  render();
+}
+
 async function syncWithServer() {
   try {
     const res = await fetch("/api/jobs", { cache: "no-store" });
@@ -2423,6 +2476,7 @@ async function syncWithServer() {
       track.id = state.job_id;
       addTrackToLibrary(track);
     }
+    reconcileAvailability(jobs);
   } catch (e) { console.warn("[catalog] failed to load jobs from backend:", e); }
 }
 
@@ -3392,22 +3446,12 @@ async function resyncLibrary() {
   try {
     const res = await fetch("/api/jobs", { cache: "no-store" });
     if (!res.ok) throw new Error(`status ${res.status}`);
-    const jobs = await res.json();
-    const serverIds = new Set(jobs.map((j) => j.job_id));
 
-    await syncWithServer(); // forward: pull in any new server jobs
-
-    const trashIds = new Set(getTrashFolder()?.items || []);
-    for (const [id, t] of Object.entries(tracks)) {
-      if (trashIds.has(id)) continue;
-      if (t.status === "done" && !serverIds.has(id)) t.status = "unavailable";
-      else if (t.status === "unavailable" && serverIds.has(id)) t.status = "done";
-    }
-    saveState();
-    render();
+    await syncWithServer(); // pulls in new server jobs, reconciles done <-> unavailable
     if (libraryEditor) renderLibraryRows(libraryEditor.querySelector(".library-editor-body"));
 
     // Collect what's still unavailable; auto-restore the ones with a URL source.
+    const trashIds = new Set(getTrashFolder()?.items || []);
     const unavailable = Object.entries(tracks)
       .filter(([id, t]) => !trashIds.has(id) && t.status === "unavailable")
       .map(([, t]) => t);

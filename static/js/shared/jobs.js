@@ -72,5 +72,9 @@ export function jobToCard(state) {
     initial: coverInitial(title),
     gradient: coverGradient(id || title),
     thumb: typeof state.thumbnail === "string" ? state.thumbnail : "",
+    // Carried through (not just derived into `sub`) so an "unavailable" card
+    // can be reimported without a second fetch for its own source URL/stems.
+    sourceUrl: state.source_url || null,
+    selectedStems: state.selected_stems || [],
   };
 }

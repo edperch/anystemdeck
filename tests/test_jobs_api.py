@@ -361,3 +361,134 @@ def test_sse_503_when_connection_cap_reached(client):
         assert r.status_code == 503
     finally:
         events_mod._sse_active = original
+
+
+# ─── Track unavailable when stem files are missing from disk ─────────────────
+#
+# A "done" job's status field in the registry stays "done" even after its
+# stems folder is deleted or moved outside the app (the registry has no way to
+# know) - list_jobs/get_job check disk on every request and report
+# "unavailable" instead, so the client never has to guess from a 404 or from
+# the job disappearing off the list, neither of which catches this case.
+
+
+def test_list_jobs_flags_a_done_job_with_no_stems_dir_as_unavailable(client, tmp_path, monkeypatch):
+    import app.api.jobs as jobs_mod
+
+    monkeypatch.setattr(jobs_mod, "JOBS_DIR", tmp_path)
+    job = Job(id="abcdefabcdef", status="done", title="Gone")
+    _jobs[job.id] = job
+
+    r = client.get("/api/jobs")
+    assert r.status_code == 200
+    [state] = r.json()
+    assert state["status"] == "unavailable"
+
+
+def test_get_job_flags_a_done_job_with_an_empty_stems_dir_as_unavailable(
+    client, tmp_path, monkeypatch
+):
+    import app.api.jobs as jobs_mod
+
+    monkeypatch.setattr(jobs_mod, "JOBS_DIR", tmp_path)
+    job = Job(id="abcdefabcdef", status="done", title="Emptied")
+    _jobs[job.id] = job
+    (tmp_path / job.id / "stems").mkdir(parents=True)
+
+    r = client.get(f"/api/jobs/{job.id}")
+    assert r.status_code == 200
+    assert r.json()["status"] == "unavailable"
+
+
+def test_list_jobs_reports_done_when_stems_are_present(client, tmp_path, monkeypatch):
+    import app.api.jobs as jobs_mod
+
+    monkeypatch.setattr(jobs_mod, "JOBS_DIR", tmp_path)
+    job = Job(id="abcdefabcdef", status="done", title="Still here")
+    _jobs[job.id] = job
+    stems_dir = tmp_path / job.id / "stems"
+    stems_dir.mkdir(parents=True)
+    (stems_dir / "vocals.wav").write_bytes(b"RIFF1234")
+
+    r = client.get("/api/jobs")
+    [state] = r.json()
+    assert state["status"] == "done"
+
+
+def test_missing_stems_are_not_flagged_while_relocating(client, tmp_path, monkeypatch):
+    """A library move (#354) makes the stems folder briefly absent on purpose -
+    that is not the same failure as a user deleting it, and must not flash the
+    unavailable badge mid-move."""
+    import app.api.jobs as jobs_mod
+    import app.core.stems_location as stems_location
+
+    monkeypatch.setattr(jobs_mod, "JOBS_DIR", tmp_path)
+    monkeypatch.setattr(stems_location, "_relocating", True)
+    job = Job(id="abcdefabcdef", status="done", title="Mid-move")
+    _jobs[job.id] = job
+
+    r = client.get("/api/jobs")
+    [state] = r.json()
+    assert state["status"] == "done"
+
+
+# ─── GET /jobs/{id}/failure: stderr tail and traceback sections ──────────────
+
+
+def test_get_failure_separates_tail_from_traceback(client, tmp_path, monkeypatch):
+    """error.txt can carry both a `--- stderr tail ---` and a
+    `--- traceback ---` section; the parser must not lump the second into the
+    first just because it also comes after a "---" marker."""
+    import app.api.jobs as jobs_mod
+
+    monkeypatch.setattr(jobs_mod, "JOBS_DIR", tmp_path)
+    failed_dir = tmp_path / "failed" / "abcdefabcdef"
+    failed_dir.mkdir(parents=True)
+    (failed_dir / "error.txt").write_text(
+        "\n".join(
+            [
+                "time: 2026-08-17T16:50:02+00:00",
+                "stage: Error: Processing failed",
+                "device: cpu",
+                "cause: unknown",
+                "exception: RuntimeError('boom')",
+                "",
+                "--- stderr tail ---",
+                "line one of stderr",
+                "line two of stderr",
+                "",
+                "--- traceback ---",
+                "Traceback (most recent call last):",
+                '  File "<home>/app/pipeline/runner.py", line 320, in _run_async',
+                "RuntimeError: boom",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    r = client.get("/api/jobs/abcdefabcdef/failure")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["tail"] == ["line one of stderr", "line two of stderr"]
+    assert body["traceback"] == [
+        "Traceback (most recent call last):",
+        '  File "<home>/app/pipeline/runner.py", line 320, in _run_async',
+        "RuntimeError: boom",
+    ]
+
+
+def test_get_failure_traceback_is_empty_list_when_absent(client, tmp_path, monkeypatch):
+    """Older quarantined jobs (or ones that never reached the pipeline) may
+    have no traceback section -- the field must still be present as [], not
+    missing, so the client doesn't have to special-case it."""
+    import app.api.jobs as jobs_mod
+
+    monkeypatch.setattr(jobs_mod, "JOBS_DIR", tmp_path)
+    failed_dir = tmp_path / "failed" / "abcdefabcdef"
+    failed_dir.mkdir(parents=True)
+    (failed_dir / "error.txt").write_text("stage: Error\ncause: unknown\n", encoding="utf-8")
+
+    r = client.get("/api/jobs/abcdefabcdef/failure")
+    assert r.status_code == 200
+    assert r.json()["traceback"] == []

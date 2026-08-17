@@ -108,6 +108,30 @@ def _rmtree_job(job_id: str) -> None:
         logger.warning("failed to remove job dir %s", job_dir, exc_info=True)
 
 
+def _job_files_missing(job: Job) -> bool:
+    """True when a "done" job's stem files are gone from disk: the folder was
+    deleted or moved outside the app, not just an in-flight relocation (#354),
+    which is a known, temporary absence and must not flap the library."""
+    if is_relocating():
+        return False
+    stems_dir = (JOBS_DIR / job.id / "stems").resolve()
+    if not stems_dir.is_relative_to(JOBS_DIR.resolve()):
+        return True
+    return not stems_dir.is_dir() or not any(stems_dir.iterdir())
+
+
+def _job_state(job: Job) -> dict:
+    """job.to_state() with "done" downgraded to "unavailable" when the stem
+    files are missing from disk - ground truth for the client, replacing the
+    old approach of the frontend guessing from a 404 or a disappearance from
+    the job list, neither of which caught a job whose registry entry survived
+    but whose stems folder did not."""
+    state = job.to_state()
+    if job.status == "done" and _job_files_missing(job):
+        state["status"] = "unavailable"
+    return state
+
+
 class JobRequest(BaseModel):
     url: str
     # Subset of stems to include in the post-processing "selected mix"
@@ -259,7 +283,7 @@ async def _create_local_job(request: Request) -> dict[str, str]:
 def list_jobs() -> list[dict]:
     """List all completed jobs in the library, sorted by creation time."""
     return [
-        job.to_state()
+        _job_state(job)
         for job in sorted(registry_all_jobs().values(), key=lambda j: j.created_at)
         if job.status == "done"
     ]
@@ -271,7 +295,7 @@ def get_job(job_id: str) -> dict:
     job = registry_get(job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="job not found")
-    return job.to_state()
+    return _job_state(job)
 
 
 @router.post("/{job_id}/cancel")
