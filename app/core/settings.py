@@ -39,8 +39,8 @@ _SETTINGS_PATH = DATA_DIR / "settings.json"
 _LOCK = threading.RLock()
 _state: dict | None = None  # whole settings dict, loaded lazily
 
-# Clamp bounds. Max track length is capped at 20 min (the product ceiling).
-_DURATION_MIN, _DURATION_MAX = 60, 1200  # 1 min .. 20 min
+# Clamp bounds. Max track length is capped at 60 min (the product ceiling).
+_DURATION_MIN, _DURATION_MAX = 60, 3600  # 1 min .. 60 min
 _HEIGHT_MIN, _HEIGHT_MAX = 144, 2160
 _PLAYLIST_MIN, _PLAYLIST_MAX = 1, 200
 _PORT_MIN, _PORT_MAX = 1024, 65535
