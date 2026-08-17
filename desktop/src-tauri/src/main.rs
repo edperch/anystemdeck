@@ -49,6 +49,33 @@ const DEFAULT_MACOS_FFMPEG_SHA256: &str =
 #[cfg(target_os = "macos")]
 const DEFAULT_MACOS_FFPROBE_SHA256: &str =
     "aeade29dee3c3844e9bcc974f4ae4b29cc4f87994177d77003a8589fa531009e";
+// Primary macOS FFmpeg source: shaka-project's static builds, built from
+// source via GitHub Actions and served from GitHub Releases -- GitHub's
+// global CDN behind it, the same class of fix that already solved this for
+// Windows (#248, moved off gyan.dev's single mirror). evermeet.cx above is
+// now the fallback only: a single host with no CDN, reported unreachable
+// from multiple regions (#388). Binaries are raw (not zip-wrapped) and
+// published per-architecture. All four hashes were independently verified
+// (downloaded, sha256'd, and cross-checked against the release notes' own
+// published MD5s and each binary's Mach-O magic bytes) before pinning here.
+// Bump the release tag and all four hashes together when updating.
+#[cfg(target_os = "macos")]
+const SHAKA_FFMPEG_RELEASE: &str = "n8.1.2-1";
+#[cfg(target_os = "macos")]
+const SHAKA_FFMPEG_BASE_URL: &str =
+    "https://github.com/shaka-project/static-ffmpeg-binaries/releases/download";
+#[cfg(target_os = "macos")]
+const SHAKA_FFMPEG_SHA256_ARM64: &str =
+    "e7b9fcd97f95f333512d6e8b8ac24d9dbc08f189f36047695499bd7b57214b22";
+#[cfg(target_os = "macos")]
+const SHAKA_FFMPEG_SHA256_X64: &str =
+    "62c87854d851f202fc4a29bdda0fe7b6ebcddd37b863482ce1bdc81151b03fe4";
+#[cfg(target_os = "macos")]
+const SHAKA_FFPROBE_SHA256_ARM64: &str =
+    "ded4c698b8ff38d0bc1fd30fcc5e768dc46f58bc15a8dfd61f98615ba49cde5c";
+#[cfg(target_os = "macos")]
+const SHAKA_FFPROBE_SHA256_X64: &str =
+    "d530823f480a3c7eb6334f18a00197d1e9f1070e86172b9aa89c4bf4022bd879";
 // Linux: a static amd64 build (ffmpeg + ffprobe in one .tar.xz) downloaded at
 // first launch, mirroring the Windows/macOS model so we never redistribute
 // FFmpeg ourselves. Overridable via STEMDECK_FFMPEG_URL. The archive unpacks to
@@ -2154,7 +2181,19 @@ async fn download_file_with_progress(
 }
 
 #[cfg(unix)]
-fn download_file(url: &str, target: &Path, timeout: Duration) -> Result<(), String> {
+// curl exit codes worth a retry: 6 (couldn't resolve host), 7 (couldn't
+// connect), 28 (operation timeout) are transient network conditions. Anything
+// else -- a 404, a checksum the caller rejects, --fail's exit 22 on an HTTP
+// error -- won't succeed on retry, so don't burn the user's time on one.
+fn curl_exit_is_retriable(code: Option<i32>) -> bool {
+    matches!(code, Some(6) | Some(7) | Some(28))
+}
+
+/// `label` names what's being fetched ("FFmpeg", "ffprobe", ...) for error
+/// messages -- this is shared by every curl-based download, so a hardcoded
+/// noun here was previously wrong for every caller except the one it happened
+/// to be written for.
+fn download_file(url: &str, target: &Path, timeout: Duration, label: &str) -> Result<(), String> {
     let tmp = target.with_extension("download");
     if tmp.exists() {
         fs::remove_file(&tmp).map_err(|e| format!("failed to remove {}: {e}", tmp.display()))?;
@@ -2164,25 +2203,38 @@ fn download_file(url: &str, target: &Path, timeout: Duration) -> Result<(), Stri
     #[cfg(debug_assertions)]
     if let Some(path) = url.strip_prefix("file://") {
         fs::copy(Path::new(path), &tmp)
-            .map_err(|e| format!("failed to copy runtime pack from {url}: {e}"))?;
+            .map_err(|e| format!("failed to copy {label} from {url}: {e}"))?;
         return fs::rename(&tmp, target)
-            .map_err(|e| format!("failed to move runtime pack to {}: {e}", target.display()));
+            .map_err(|e| format!("failed to move {label} to {}: {e}", target.display()));
     }
     #[cfg(debug_assertions)]
     if Path::new(url).is_file() {
         fs::copy(Path::new(url), &tmp)
-            .map_err(|e| format!("failed to copy runtime pack from {url}: {e}"))?;
+            .map_err(|e| format!("failed to copy {label} from {url}: {e}"))?;
         return fs::rename(&tmp, target)
-            .map_err(|e| format!("failed to move runtime pack to {}: {e}", target.display()));
+            .map_err(|e| format!("failed to move {label} to {}: {e}", target.display()));
     }
 
-    {
+    // Without --connect-timeout curl falls back to the OS's own TCP connect
+    // timeout, which can run 60-130s depending on the network stack -- a
+    // genuinely unreachable host (regionally blocked, DNS-filtered, or just
+    // down) left the setup wizard hanging that long before saying so (#reported
+    // via evermeet.cx from a user in Asia). 20s is generous for a slow-but-live
+    // connection while failing fast on one that isn't.
+    const CONNECT_TIMEOUT_SECS: &str = "20";
+    const MAX_ATTEMPTS: u32 = 3;
+    const RETRY_BACKOFF: [Duration; 2] = [Duration::from_secs(2), Duration::from_secs(5)];
+
+    let mut last_detail = String::new();
+    for attempt in 0..MAX_ATTEMPTS {
         let mut command = Command::new("curl");
         command
             .args([
                 "--fail",
                 "--location",
                 "--show-error",
+                "--connect-timeout",
+                CONNECT_TIMEOUT_SECS,
                 "--output",
                 &tmp.display().to_string(),
                 "--",
@@ -2190,18 +2242,28 @@ fn download_file(url: &str, target: &Path, timeout: Duration) -> Result<(), Stri
             ])
             .stdout(Stdio::null())
             .stderr(Stdio::piped());
-        let output = command_output_with_timeout(command, timeout, "runtime pack download")?;
-        if !output.status.success() || !tmp.is_file() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(format!(
-                "failed to download runtime pack from {url}: {}",
-                stderr.trim()
-            ));
+        let output = command_output_with_timeout(command, timeout, label)?;
+        if output.status.success() && tmp.is_file() {
+            return fs::rename(&tmp, target)
+                .map_err(|e| format!("failed to move {label} to {}: {e}", target.display()));
         }
+
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        last_detail = if stderr.is_empty() {
+            format!("curl exited with status {:?}", output.status.code())
+        } else {
+            stderr
+        };
+        if !curl_exit_is_retriable(output.status.code()) || attempt + 1 == MAX_ATTEMPTS {
+            break;
+        }
+        std::thread::sleep(RETRY_BACKOFF[attempt as usize]);
     }
 
-    fs::rename(&tmp, target)
-        .map_err(|e| format!("failed to move runtime pack to {}: {e}", target.display()))
+    Err(format!(
+        "Could not reach the download server for {label}. Check your internet \
+         connection and try again. ({last_detail})"
+    ))
 }
 
 fn verify_runtime_archive(
@@ -2576,7 +2638,7 @@ fn download_linux_ffmpeg(data_dir: &Path) -> Result<(), String> {
     fs::create_dir_all(&downloads)
         .map_err(|e| format!("failed to create {}: {e}", downloads.display()))?;
     let archive = downloads.join("ffmpeg-linux.tar.xz");
-    download_file(&url, &archive, Duration::from_secs(30 * 60))?;
+    download_file(&url, &archive, Duration::from_secs(30 * 60), "FFmpeg")?;
 
     // Extract with the system tar (xz support is standard on desktop Linux). The
     // static build unpacks to a single ffmpeg-<ver>-amd64-static/ directory.
@@ -2625,19 +2687,22 @@ fn download_linux_ffmpeg(data_dir: &Path) -> Result<(), String> {
     Ok(())
 }
 
-// Pick the SHA256 to enforce for a download: the pinned hash when the URL is the
-// built-in default, otherwise an explicit override hash from `env_var` if set,
-// else None (skip). Mirrors the Windows path's "verify default, skip override".
+// "arm64" on Apple Silicon, "x64" everywhere else -- takes the arch string
+// rather than reading std::env::consts::ARCH itself so both branches are
+// unit-testable on any host, not just the one they happen to be running on.
 #[cfg(target_os = "macos")]
-fn expected_ffmpeg_sha256(
-    url: &str,
-    default_url: &str,
-    pinned_sha256: &str,
-    env_var: &str,
-) -> Option<String> {
-    if url == default_url {
-        return Some(pinned_sha256.to_ascii_lowercase());
+fn macos_arch_suffix(arch: &str) -> &'static str {
+    match arch {
+        "aarch64" => "arm64",
+        _ => "x64",
     }
+}
+
+// An override hash from `env_var`, trimmed and lowercased, or None if unset/
+// blank. Mirrors the Windows override path: an explicit custom URL skips
+// pinned-hash verification unless the matching *_SHA256 env var is also set.
+#[cfg(target_os = "macos")]
+fn override_sha256(env_var: &str) -> Option<String> {
     env::var(env_var)
         .ok()
         .map(|s| s.trim().to_ascii_lowercase())
@@ -2663,48 +2728,130 @@ fn verify_pinned_sha256(path: &Path, expected: Option<&str>, label: &str) -> Res
     Ok(())
 }
 
+/// evermeet.cx (zip-wrapped, universal binary) is used both for the fallback
+/// path and for a custom STEMDECK_FFMPEG_URL override -- that env var has
+/// always pointed at a zip in this shape, so overrides keep working exactly
+/// as before regardless of what the built-in primary source looks like.
 #[cfg(target_os = "macos")]
-fn download_macos_ffmpeg(data_dir: &Path) -> Result<(), String> {
-    let ffmpeg_url = env_path_override("STEMDECK_FFMPEG_URL")
-        .map(|p| p.display().to_string())
-        .unwrap_or_else(|| DEFAULT_MACOS_FFMPEG_URL.to_string());
-    let ffprobe_url = env_path_override("STEMDECK_FFPROBE_URL")
-        .map(|p| p.display().to_string())
-        .unwrap_or_else(|| DEFAULT_MACOS_FFPROBE_URL.to_string());
-    // Verify the pinned hash for the default (built-in) URLs; for custom override
-    // URLs honour an explicit STEMDECK_FFMPEG_SHA256 / STEMDECK_FFPROBE_SHA256 when
-    // provided, otherwise skip (parity with the Windows override behaviour).
-    let ffmpeg_expected = expected_ffmpeg_sha256(
-        &ffmpeg_url,
-        DEFAULT_MACOS_FFMPEG_URL,
-        DEFAULT_MACOS_FFMPEG_SHA256,
-        "STEMDECK_FFMPEG_SHA256",
-    );
-    let ffprobe_expected = expected_ffmpeg_sha256(
-        &ffprobe_url,
-        DEFAULT_MACOS_FFPROBE_URL,
-        DEFAULT_MACOS_FFPROBE_SHA256,
-        "STEMDECK_FFPROBE_SHA256",
-    );
-    let downloads = data_dir.join("downloads");
+fn download_macos_ffmpeg_zip_source(
+    ffmpeg_url: &str,
+    ffprobe_url: &str,
+    ffmpeg_expected: Option<&str>,
+    ffprobe_expected: Option<&str>,
+    downloads: &Path,
+    ffmpeg_dir: &Path,
+) -> Result<(), String> {
     let ffmpeg_zip = downloads.join("ffmpeg-macos.zip");
     let ffprobe_zip = downloads.join("ffprobe-macos.zip");
+    download_file(
+        ffmpeg_url,
+        &ffmpeg_zip,
+        Duration::from_secs(30 * 60),
+        "FFmpeg",
+    )?;
+    verify_pinned_sha256(&ffmpeg_zip, ffmpeg_expected, "FFmpeg")?;
+    download_file(
+        ffprobe_url,
+        &ffprobe_zip,
+        Duration::from_secs(30 * 60),
+        "ffprobe",
+    )?;
+    verify_pinned_sha256(&ffprobe_zip, ffprobe_expected, "ffprobe")?;
+
+    extract_single_binary_from_zip(&ffmpeg_zip, &ffmpeg_dir.join("ffmpeg"), "ffmpeg")?;
+    extract_single_binary_from_zip(&ffprobe_zip, &ffmpeg_dir.join("ffprobe"), "ffprobe")?;
+    make_executable(&ffmpeg_dir.join("ffmpeg"))?;
+    make_executable(&ffmpeg_dir.join("ffprobe"))?;
+    Ok(())
+}
+
+/// Primary source: shaka-project's per-architecture builds, published as raw
+/// (non-zip) binaries -- downloaded straight to their final path, no
+/// extraction step.
+#[cfg(target_os = "macos")]
+fn download_macos_ffmpeg_primary(ffmpeg_dir: &Path) -> Result<(), String> {
+    let arch = macos_arch_suffix(std::env::consts::ARCH);
+    let (ffmpeg_sha, ffprobe_sha) = match arch {
+        "arm64" => (SHAKA_FFMPEG_SHA256_ARM64, SHAKA_FFPROBE_SHA256_ARM64),
+        _ => (SHAKA_FFMPEG_SHA256_X64, SHAKA_FFPROBE_SHA256_X64),
+    };
+    let ffmpeg_url = format!("{SHAKA_FFMPEG_BASE_URL}/{SHAKA_FFMPEG_RELEASE}/ffmpeg-osx-{arch}");
+    let ffprobe_url = format!("{SHAKA_FFMPEG_BASE_URL}/{SHAKA_FFMPEG_RELEASE}/ffprobe-osx-{arch}");
+    let ffmpeg_target = ffmpeg_dir.join("ffmpeg");
+    let ffprobe_target = ffmpeg_dir.join("ffprobe");
+
+    download_file(
+        &ffmpeg_url,
+        &ffmpeg_target,
+        Duration::from_secs(30 * 60),
+        "FFmpeg",
+    )?;
+    verify_pinned_sha256(&ffmpeg_target, Some(ffmpeg_sha), "FFmpeg")?;
+    download_file(
+        &ffprobe_url,
+        &ffprobe_target,
+        Duration::from_secs(30 * 60),
+        "ffprobe",
+    )?;
+    verify_pinned_sha256(&ffprobe_target, Some(ffprobe_sha), "ffprobe")?;
+
+    make_executable(&ffmpeg_target)?;
+    make_executable(&ffprobe_target)?;
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn download_macos_ffmpeg(data_dir: &Path) -> Result<(), String> {
+    let downloads = data_dir.join("downloads");
     fs::create_dir_all(&downloads)
         .map_err(|e| format!("failed to create {}: {e}", downloads.display()))?;
-
-    download_file(&ffmpeg_url, &ffmpeg_zip, Duration::from_secs(30 * 60))?;
-    verify_pinned_sha256(&ffmpeg_zip, ffmpeg_expected.as_deref(), "FFmpeg")?;
-    download_file(&ffprobe_url, &ffprobe_zip, Duration::from_secs(30 * 60))?;
-    verify_pinned_sha256(&ffprobe_zip, ffprobe_expected.as_deref(), "ffprobe")?;
-
     let ffmpeg_dir = data_dir.join("ffmpeg");
     fs::create_dir_all(&ffmpeg_dir)
         .map_err(|e| format!("failed to create {}: {e}", ffmpeg_dir.display()))?;
-    extract_single_binary_from_zip(&ffmpeg_zip, &ffmpeg_dir.join("ffmpeg"), "ffmpeg")?;
-    extract_single_binary_from_zip(&ffprobe_zip, &ffmpeg_dir.join("ffprobe"), "ffprobe")?;
 
-    make_executable(&ffmpeg_dir.join("ffmpeg"))?;
-    make_executable(&ffmpeg_dir.join("ffprobe"))?;
+    // An explicit override always wins and skips the primary/fallback dance
+    // entirely -- the user has already chosen a source. Goes through the
+    // zip-wrapped path, the shape this override has always expected.
+    if let Some(ffmpeg_override) = env_path_override("STEMDECK_FFMPEG_URL") {
+        let ffmpeg_url = ffmpeg_override.display().to_string();
+        let ffprobe_url = env_path_override("STEMDECK_FFPROBE_URL")
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|| DEFAULT_MACOS_FFPROBE_URL.to_string());
+        let ffmpeg_expected = override_sha256("STEMDECK_FFMPEG_SHA256");
+        let ffprobe_expected = override_sha256("STEMDECK_FFPROBE_SHA256");
+        return download_macos_ffmpeg_zip_source(
+            &ffmpeg_url,
+            &ffprobe_url,
+            ffmpeg_expected.as_deref(),
+            ffprobe_expected.as_deref(),
+            &downloads,
+            &ffmpeg_dir,
+        );
+    }
+
+    // Primary: shaka-project's per-architecture builds on GitHub Releases
+    // (GitHub's global CDN) -- the same class of fix that already solved this
+    // for Windows (#248, off gyan.dev's single mirror). evermeet.cx is the
+    // fallback: a single host with no CDN behind it, reported unreachable
+    // from multiple regions (#388).
+    if let Err(primary_err) = download_macos_ffmpeg_primary(&ffmpeg_dir) {
+        eprintln!("primary FFmpeg source failed, trying the evermeet.cx fallback: {primary_err}");
+        return download_macos_ffmpeg_zip_source(
+            DEFAULT_MACOS_FFMPEG_URL,
+            DEFAULT_MACOS_FFPROBE_URL,
+            Some(DEFAULT_MACOS_FFMPEG_SHA256),
+            Some(DEFAULT_MACOS_FFPROBE_SHA256),
+            &downloads,
+            &ffmpeg_dir,
+        )
+        .map_err(|fallback_err| {
+            format!(
+                "Could not download FFmpeg from either source.\n\
+                 Primary: {primary_err}\n\
+                 Fallback: {fallback_err}"
+            )
+        });
+    }
     Ok(())
 }
 
@@ -3135,6 +3282,8 @@ fn hide_console_window(_command: &mut Command) {}
 
 #[cfg(test)]
 mod tests {
+    #[cfg(target_os = "macos")]
+    use std::env;
     use std::fs;
     use std::path::PathBuf;
     use tempfile::TempDir;
@@ -3455,24 +3604,25 @@ mod tests {
 
     #[cfg(target_os = "macos")]
     #[test]
-    fn expected_sha_pins_default_url_and_skips_unknown_override() {
-        // Default URL -> the pinned hash.
-        let got = super::expected_ffmpeg_sha256(
-            super::DEFAULT_MACOS_FFMPEG_URL,
-            super::DEFAULT_MACOS_FFMPEG_URL,
-            super::DEFAULT_MACOS_FFMPEG_SHA256,
-            "STEMDECK_FFMPEG_SHA256_TEST_UNSET_172",
-        );
-        assert_eq!(got.as_deref(), Some(super::DEFAULT_MACOS_FFMPEG_SHA256));
-        // Custom override URL with no override hash env set -> None (skip,
-        // matching the Windows override behaviour).
-        let none = super::expected_ffmpeg_sha256(
-            "https://example.com/custom.zip",
-            super::DEFAULT_MACOS_FFMPEG_URL,
-            super::DEFAULT_MACOS_FFMPEG_SHA256,
-            "STEMDECK_FFMPEG_SHA256_TEST_UNSET_172",
-        );
-        assert!(none.is_none());
+    fn macos_arch_suffix_maps_aarch64_to_arm64_and_everything_else_to_x64() {
+        assert_eq!(super::macos_arch_suffix("aarch64"), "arm64");
+        assert_eq!(super::macos_arch_suffix("x86_64"), "x64");
+        assert_eq!(super::macos_arch_suffix("something-unexpected"), "x64");
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn override_sha256_reads_a_set_env_var_and_skips_when_unset_or_blank() {
+        let key = "STEMDECK_FFMPEG_SHA256_TEST_UNSET_388";
+        env::remove_var(key);
+        assert!(super::override_sha256(key).is_none());
+
+        env::set_var(key, "  ABCDEF  ");
+        assert_eq!(super::override_sha256(key).as_deref(), Some("abcdef"));
+
+        env::set_var(key, "   ");
+        assert!(super::override_sha256(key).is_none());
+        env::remove_var(key);
     }
 
     #[test]
