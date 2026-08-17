@@ -464,9 +464,10 @@ def get_failure(job_id: str) -> dict:
 
     _quarantine_failed_job writes jobs/failed/<id>/error.txt on every pipeline
     failure (#277) and until now nothing ever read it back: the UI had only the
-    one-line `error_detail`, so a bug report could not carry the stderr tail
-    that says *why* demucs died. Read-only, and never serves the whole file --
-    only the technical keys above, plus the tail.
+    one-line `error_detail`, so a bug report could not carry the stderr tail or
+    the full traceback that say *why* demucs died. Read-only, and never serves
+    the whole file -- only the technical keys above, plus the tail and
+    traceback (both already home-directory-redacted by the writer).
     """
     if not JOB_ID_RE.match(job_id):
         raise HTTPException(status_code=404, detail="job not found")
@@ -488,19 +489,32 @@ def get_failure(job_id: str) -> dict:
 
     fields: dict[str, str] = {}
     tail: list[str] = []
-    in_tail = False
+    tb: list[str] = []
+    section = "fields"
     for line in text.splitlines():
-        if line.strip() == "--- stderr tail ---":
-            in_tail = True
+        stripped = line.strip()
+        if stripped == "--- stderr tail ---":
+            section = "tail"
             continue
-        if in_tail:
+        if stripped == "--- traceback ---":
+            # The writer separates sections with a blank line for readability
+            # in the raw file; drop it here rather than let it show up as a
+            # trailing empty entry in `tail`.
+            if tail and tail[-1] == "":
+                tail.pop()
+            section = "traceback"
+            continue
+        if section == "tail":
             tail.append(line)
+            continue
+        if section == "traceback":
+            tb.append(line)
             continue
         key, sep, value = line.partition(":")
         if sep and key in _FAILURE_PUBLIC_KEYS:
             fields[key] = value.strip()
 
-    return {"job_id": job_id, **fields, "tail": tail}
+    return {"job_id": job_id, **fields, "tail": tail, "traceback": tb}
 
 
 @router.get("/{job_id}/beats")

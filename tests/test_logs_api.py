@@ -194,6 +194,53 @@ def test_tail_reads_the_previous_rotation_too(client, logs_dir):
     )
 
 
+def test_tail_redacts_a_source_url(client, logs_dir):
+    """download.py logs every job's source URL at info level, not just the
+    failing job's -- a raw log tail would otherwise leak the YouTube/
+    SoundCloud link for everything the reporter has imported in the fetched
+    window into a public GitHub issue or Discord message."""
+    (logs_dir / "stemdeck.log").write_text(
+        f"{_stamp(1)} I stemdeck.download [abc] download starting: "
+        "https://www.youtube.com/watch?v=dQw4w9WgXcQ\n",
+        encoding="utf-8",
+    )
+    body = client.get("/api/logs/application?minutes=60").text
+    assert "youtube.com" not in body
+    assert "dQw4w9WgXcQ" not in body
+    assert "<source-url-redacted>" in body
+
+
+def test_tail_redacts_an_ip_address(client, logs_dir):
+    """The mobile UI talks to this backend over the LAN when network access
+    is on, so uvicorn's access log (captured into backend.log on desktop) can
+    carry another device's address on the reporter's home network."""
+    (logs_dir / "backend.log").write_text(
+        f'{_stamp(1)} I stemdeck  INFO:     192.168.1.14:52341 - "GET /api/jobs HTTP/1.1" 200 OK\n',
+        encoding="utf-8",
+    )
+    body = client.get("/api/logs/backend?minutes=60").text
+    assert "192.168.1.14" not in body
+    assert "<ip>" in body
+
+
+def test_tail_redacts_the_users_home_directory(client, logs_dir):
+    """The notification centre's opt-in "include recent logs" button hands this
+    straight to a public GitHub issue or Discord message with no filtering step
+    of its own -- redaction has to happen here, not trust every future caller
+    to remember it (#report-full-stack)."""
+    from pathlib import Path
+
+    home = str(Path.home())
+    (logs_dir / "stemdeck.log").write_text(
+        f'{_stamp(1)} E stemdeck  File "{home}\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\threads.py", line 25\n',
+        encoding="utf-8",
+    )
+    body = client.get("/api/logs/application?minutes=60").text
+    assert home not in body
+    assert "<home>" in body
+    assert "threads.py" in body, "the rest of the path must survive -- it's the useful part"
+
+
 def test_tail_parses_the_setup_log_epoch_format(client, logs_dir):
     """setup.log is written by the Tauri shell with epoch seconds, because the
     crate has no date library."""

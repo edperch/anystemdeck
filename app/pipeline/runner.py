@@ -6,11 +6,13 @@ import logging
 import shutil
 import subprocess
 import time
+import traceback
 from datetime import datetime, timezone
 from pathlib import Path
 
 from app.core.config import DEMUCS_MODEL, TIMEOUT_FFMPEG
 from app.core.models import Job, JobCancelled, _set
+from app.core.redact import redact
 from app.core.registry import persist as persist_registry
 from app.pipeline.analyze import analyze
 from app.pipeline.beatgrid import compute_beat_grid
@@ -256,18 +258,30 @@ def _quarantine_failed_job(job: Job, job_dir: Path, jobs_dir: Path, exc: Excepti
     """Preserve failure evidence instead of destroying it (#277).
 
     Writes error.txt (stage, device, model, timings, classified cause, stderr
-    tail), strips the heavy audio payloads, and moves the dir to
-    jobs/failed/<id> where sweep_failed_jobs expires it after FAILED_TTL.
+    tail, full traceback), strips the heavy audio payloads, and moves the dir
+    to jobs/failed/<id> where sweep_failed_jobs expires it after FAILED_TTL.
     Best-effort throughout: any step failing falls back to plain removal so a
     pathological error can never leak disk."""
     tail: list[str] = getattr(exc, "tail", None) or []
     cause = classify_failure("\n".join([*tail, repr(exc)]))
     detail = cause
     if tail:
-        detail += f" — {tail[-1][:200]}"
+        # error_detail reaches the client directly (job state, notification
+        # card, and the report URL's "what" field) -- redact before the [:200]
+        # truncation, not after, so a redaction placeholder never gets cut in
+        # half.
+        detail += f" — {redact(tail[-1])[:200]}"
     job.error_detail = detail
 
     try:
+        # title/source stay unredacted: they never leave this file (the
+        # /failure API's allowlist excludes both, see app/api/jobs.py), so
+        # this is purely local diagnostic value for the person looking at
+        # their own disk. Everything below IS served to the client and is
+        # redacted accordingly -- exc!r can embed a source URL (yt-dlp errors
+        # often do), and the stderr tail/traceback can carry either a source
+        # URL or the reporter's home directory.
+        redacted_tail = [redact(line) for line in tail]
         lines = [
             f"time: {datetime.now(timezone.utc).isoformat(timespec='seconds')}",
             f"job: {job.id}",
@@ -278,10 +292,13 @@ def _quarantine_failed_job(job: Job, job_dir: Path, jobs_dir: Path, exc: Excepti
             f"model: {DEMUCS_MODEL}",
             f"cause: {cause}",
             f"timings: {json.dumps(job.stage_timings) if job.stage_timings else '(none)'}",
-            f"exception: {exc!r}",
+            f"exception: {redact(repr(exc))}",
         ]
-        if tail:
-            lines += ["", "--- stderr tail ---", *tail]
+        if redacted_tail:
+            lines += ["", "--- stderr tail ---", *redacted_tail]
+        tb = redact("".join(traceback.format_exception(type(exc), exc, exc.__traceback__))).rstrip()
+        if tb:
+            lines += ["", "--- traceback ---", tb]
         (job_dir / "error.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
         # Strip heavy payloads: the quarantine keeps diagnostics, not audio.

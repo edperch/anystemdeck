@@ -2792,6 +2792,18 @@ input, textarea { font-family: inherit; }
   font-family: var(--font-mono); font-size: 11px; line-height: 1.55;
   color: var(--fg-2); white-space: pre-wrap; overflow-wrap: anywhere;
 }
+/* Opt-in, not automatic: this pulls extra log content into what's about to be
+   copied into a public report, so it gets its own deliberate click rather
+   than firing every time the dialog opens (matches .library-editor-sync's
+   amber "extra action" treatment). */
+.failure-logs-btn {
+  align-self: flex-start;
+  min-height: 28px; margin-top: 8px; padding: 0 12px;
+  border-radius: 7px; border: 1px solid rgba(244, 183, 64, 0.3);
+  background: rgba(244, 183, 64, 0.16); color: var(--accent);
+  font-family: var(--font-mono); font-size: 11px; cursor: pointer;
+}
+.failure-logs-btn:disabled { opacity: 0.55; cursor: default; }
 /* Reporting is the reason this dialog exists, so it gets the app's primary
    button treatment (as Export Mix does) rather than the muted link style the
    About/release dialogs use for their several equal-weight links. */
