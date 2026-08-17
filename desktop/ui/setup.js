@@ -311,6 +311,18 @@ async function runSetup() {
               "FFmpeg setup did not complete. Check your internet connection and retry."
             );
           }
+        } catch (err) {
+          // showError (the outer catch-all) reads error.hint, so attach one
+          // here rather than only in the generic path -- a network/firewall
+          // block on the FFmpeg host is common enough (and retrying alone
+          // won't fix it) to deserve a specific next step, not just "retry".
+          const wrapped = new Error(String(err?.message ?? err));
+          wrapped.hint =
+            "If this keeps failing, your network or firewall may be blocking the FFmpeg " +
+            "download server. You can point StemDeck at a different FFmpeg build by " +
+            "setting the STEMDECK_FFMPEG_URL environment variable before launching, then " +
+            "retrying.";
+          throw wrapped;
         } finally {
           stopProgress();
         }
