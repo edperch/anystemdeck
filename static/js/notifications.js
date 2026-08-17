@@ -17,10 +17,14 @@ const FAILURES_KEY = "stemdeck:failures";
 // Enough to cover a bad session without letting a crash loop fill the store.
 const MAX_FAILURES = 20;
 const NEW_ISSUE_URL = "https://github.com/stemdeckapp/stemdeck/issues/new";
-// Practical ceiling for a URL handed to a browser or, on Windows, to
-// explorer.exe. GitHub itself tolerates more, but nothing here is worth
-// risking a silently truncated link for -- the tail is trimmed to fit.
-const MAX_URL_LENGTH = 6000;
+// Support channel for a quicker back-and-forth than a public issue -- same
+// invite as the About dialog's Discord icon (index.html).
+const DISCORD_URL = "https://discord.gg/JGk7FdZb9N";
+// Named views the Settings -> Logs viewer offers (app/main.py _LOG_VIEWS).
+// Opt-in only (fetchRecentLogs): unlike the per-job traceback, these cover
+// more than one failure and are worth a deliberate click, not an automatic
+// fetch every time the dialog opens.
+const LOG_VIEWS = ["backend", "application", "setup"];
 
 // What each failure class is called in the report and on the card.
 const KIND_LABELS = {
@@ -82,7 +86,45 @@ function technicalBlock(record, diag) {
 }
 
 /**
- * Build the pre-filled bug-report URL.
+ * The technical block plus the full (untruncated) stderr tail and backend
+ * traceback, for copying to the clipboard rather than the URL -- and for the
+ * dialog's own on-screen preview, so what's shown matches what gets pasted.
+ * Pure and exported for the same reason as buildReportUrl.
+ */
+export function buildReportText(record, diag = {}) {
+  const tail = Array.isArray(record.tail) ? record.tail : [];
+  const tb = Array.isArray(record.traceback) ? record.traceback : [];
+  const parts = [technicalBlock(record, diag)];
+  if (tail.length) parts.push("", "Stderr tail:", "```", ...tail, "```");
+  if (tb.length) parts.push("", "Traceback:", "```", ...tb, "```");
+  if (record.logs) {
+    for (const view of LOG_VIEWS) {
+      const text = record.logs[view];
+      if (text) parts.push("", `Recent ${view} log:`, "```", text, "```");
+    }
+  }
+  return parts.join("\n");
+}
+
+// Windows opens this URL via explorer.exe, which silently falls back to a
+// plain File Explorer window past roughly 2000 characters rather than
+// erroring, instead of opening GitHub (the bug this whole scheme guards
+// against). Kept a healthy margin under that so the fill reliably lands.
+// Exported so the length-ceiling test can check against the real value
+// rather than a duplicated magic number.
+export const SAFE_URL_CHARS = 1800;
+
+/**
+ * Build the pre-filled bug-report URL, filling the "Logs / screenshots"
+ * field directly with as much of the traceback/stderr tail as safely fits --
+ * no paste needed for the common case.
+ *
+ * What doesn't fit (a long trace, or anything from the opt-in "include
+ * recent logs" button, which never goes in the URL at all -- it can be far
+ * larger than a URL should ever carry) falls back to the clipboard, which
+ * buildReportText always has the complete version of; a note in the field
+ * says so. Truncation keeps the END of the trace, since that is where the
+ * actual failure line is.
  *
  * Pure and exported so the field mapping can be tested without a browser --
  * an OS string that does not match the dropdown option exactly is dropped by
@@ -90,7 +132,7 @@ function technicalBlock(record, diag) {
  */
 export function buildReportUrl(record, diag = {}) {
   const label = KIND_LABELS[record.kind] || "Something failed";
-  const title = `[Bug]: ${label}${record.cause ? ` — ${record.cause}` : ""}`;
+  const title = `[Bug]: ${label}${record.cause ? ` - ${record.cause}` : ""}`;
 
   const what = [
     `${label} in StemDeck.`,
@@ -106,35 +148,48 @@ export function buildReportUrl(record, diag = {}) {
     record.context?.stage ? `2. StemDeck failed at: ${record.context.stage}` : "2. It failed.",
   ].join("\n");
 
-  const tail = Array.isArray(record.tail) ? record.tail : [];
-  const build = (tailLines, note) => {
-    const parts = [technicalBlock(record, diag)];
-    if (tailLines.length) parts.push("", "```", ...tailLines, "```");
-    if (note) parts.push("", note);
-    const params = new URLSearchParams({
-      template: "bug_report.yml",
-      title,
-      what,
-      steps,
-      os: osOption(diag.buildTarget),
-      version: diag.version ? `v${diag.version}` : "",
-      install: installOption(diag.buildTarget, Boolean(diag.isDesktop)),
-      extra: parts.join("\n"),
-    });
-    return `${NEW_ISSUE_URL}?${params}`;
+  const base = {
+    template: "bug_report.yml",
+    title,
+    what,
+    steps,
+    os: osOption(diag.buildTarget),
+    version: diag.version ? `v${diag.version}` : "",
+    install: installOption(diag.buildTarget, Boolean(diag.isDesktop)),
+  };
+  const toUrl = (extra) => `${NEW_ISSUE_URL}?${new URLSearchParams({ ...base, extra })}`;
+
+  const tech = technicalBlock(record, diag);
+  const hasTraceback = Array.isArray(record.traceback) && record.traceback.length > 0;
+  const source = hasTraceback ? record.traceback : Array.isArray(record.tail) ? record.tail : [];
+  const sourceLabel = hasTraceback ? "Traceback" : "Stderr tail";
+  const hasLogs = Boolean(record.logs) && Object.values(record.logs).some(Boolean);
+  const pasteNote =
+    "_Full report (including any traceback beyond what fits here, and any recent logs you " +
+    "included) is on your clipboard from this click - paste to see everything._";
+
+  const build = (keep) => {
+    const parts = [tech];
+    if (keep > 0) {
+      const clipped = keep < source.length;
+      parts.push("", `${sourceLabel}${clipped ? " (end)" : ""}:`, "```", ...source.slice(-keep), "```");
+    }
+    if (keep < source.length || hasLogs) parts.push("", pasteNote);
+    return toUrl(parts.join("\n"));
   };
 
-  let url = build(tail, "");
-  if (url.length <= MAX_URL_LENGTH) return url;
-
-  // Too long: keep the end of the tail, which is where the actual error is,
-  // and point at the full logs rather than silently losing them.
-  const note = "_Tail truncated — full logs via Settings → Export logs._";
-  for (let keep = Math.min(tail.length, 20); keep > 0; keep--) {
-    url = build(tail.slice(-keep), note);
-    if (url.length <= MAX_URL_LENGTH) return url;
+  let url = build(source.length);
+  if (url.length <= SAFE_URL_CHARS) return url;
+  for (let keep = Math.min(source.length, 60); keep > 0; keep--) {
+    url = build(keep);
+    if (url.length <= SAFE_URL_CHARS) return url;
   }
-  return build([], note);
+  url = build(0);
+  if (url.length <= SAFE_URL_CHARS) return url;
+  // Pathological case: even the bare technical block didn't fit (an
+  // enormous "what"/"steps"). Fall back to clipboard-only, same as the
+  // original fix for this bug.
+  return toUrl("Copied to your clipboard - paste it into this field.");
 }
 
 // ─── Records ──────────────────────────────────────────────────────────────
@@ -320,24 +375,35 @@ async function openFailureDialog(record) {
   const msgEl = document.getElementById("failureMessage");
   const techEl = document.getElementById("failureTech");
   const reportEl = document.getElementById("failureReport");
+  const discordEl = document.getElementById("failureReportDiscord");
+  const logsBtn = document.getElementById("failureIncludeLogs");
 
   if (titleEl) titleEl.textContent = KIND_LABELS[record.kind] || "Something failed";
   if (whenEl) whenEl.textContent = new Date(record.at).toLocaleString();
   if (msgEl) msgEl.textContent = record.detail ? `${record.message}\n${record.detail}` : record.message;
   if (techEl) techEl.textContent = "Collecting details…";
   if (reportEl) reportEl.removeAttribute("href");
+  if (discordEl) discordEl.href = DISCORD_URL;
+  if (logsBtn) {
+    delete record.logs;
+    logsBtn.disabled = false;
+    logsBtn.textContent = "Include recent logs";
+  }
 
   dialog.classList.remove("hidden");
 
-  // The stderr tail lives in the quarantined error.txt and is fetched now
-  // rather than at capture time -- one request when a user actually looks,
-  // instead of one per failure whether or not they care.
+  // The stderr tail and full traceback live in the quarantined error.txt and
+  // are fetched now rather than at capture time -- one request when a user
+  // actually looks, instead of one per failure whether or not they care.
+  // Both are already home-directory-redacted server-side (redact_home) before
+  // this response is built, since this is headed for a public report.
   if (!record.tail && record.context?.jobId) {
     try {
       const res = await fetch(`/api/jobs/${record.context.jobId}/failure`);
       if (res.ok) {
         const data = await res.json();
         record.tail = Array.isArray(data.tail) ? data.tail : [];
+        record.traceback = Array.isArray(data.traceback) ? data.traceback : [];
         record.cause = record.cause || cleanCause(data.cause);
         record.context = {
           ...record.context,
@@ -349,21 +415,64 @@ async function openFailureDialog(record) {
         persist();
       } else {
         record.tail = [];
+        record.traceback = [];
       }
     } catch (e) {
       console.warn("[notifications] failure detail fetch failed:", e);
       record.tail = [];
+      record.traceback = [];
     }
   }
 
   const diag = await getDiagnostics();
-  if (techEl) {
-    const tail = record.tail?.length ? `\n\n${record.tail.join("\n")}` : "";
-    techEl.textContent = `${technicalBlock(record, diag)}${tail}`;
-  }
+  if (techEl) techEl.textContent = buildReportText(record, diag);
+  // One shared payload: the logs button mutates record.logs in place, and the
+  // report buttons must see that mutation on their next click without a
+  // separate re-sync step.
+  const payload = { record, diag };
   // Set at open time; the global external-link handler reads href on click and
   // routes it through Tauri's open_url on desktop, a new tab in a browser.
-  if (reportEl) reportEl.href = buildReportUrl(record, diag);
+  // The click handlers wired in wireFailureDialog read record/diag back off
+  // this element's dataset to copy the full report to the clipboard - the
+  // reason the URL itself can stay short (see buildReportUrl).
+  if (reportEl) {
+    reportEl.href = buildReportUrl(record, diag);
+    reportEl._reportPayload = payload;
+  }
+  if (discordEl) discordEl._reportPayload = payload;
+  if (logsBtn) logsBtn._reportPayload = payload;
+}
+
+/** Opt-in: the notification centre never fetches these on its own. Scoped to
+ * the failure's own timestamp (plus a small buffer) rather than a blind "last
+ * hour", since a user can open this dialog long after the failure happened.
+ * Already home-directory-redacted server-side (redact_home in main.py). */
+async function fetchRecentLogs(record) {
+  const minutes = Math.min(1440, Math.max(15, Math.ceil((Date.now() - record.at) / 60000) + 5));
+  const logs = {};
+  for (const view of LOG_VIEWS) {
+    try {
+      const res = await fetch(`/api/logs/${view}?minutes=${minutes}`);
+      logs[view] = res.ok ? (await res.text()).trim() : "";
+    } catch (e) {
+      console.warn(`[notifications] failed to fetch the ${view} log:`, e);
+      logs[view] = "";
+    }
+  }
+  return logs;
+}
+
+/** Full diagnostic text is only useful pasted somewhere, so both report
+ * buttons copy it to the clipboard on click - the GitHub link's `extra`
+ * field says as much, and Discord has nowhere to prefill at all. */
+async function copyReportToClipboard(el) {
+  const payload = el._reportPayload;
+  if (!payload) return;
+  try {
+    await navigator.clipboard.writeText(buildReportText(payload.record, payload.diag));
+  } catch (e) {
+    console.warn("[notifications] clipboard write failed:", e);
+  }
 }
 
 function wireFailureDialog() {
@@ -377,6 +486,20 @@ function wireFailureDialog() {
   document.getElementById("notifClearAll")?.addEventListener("click", (e) => {
     e.stopPropagation();
     clearFailures();
+  });
+  document.getElementById("failureReport")?.addEventListener("click", (e) => copyReportToClipboard(e.currentTarget));
+  document.getElementById("failureReportDiscord")?.addEventListener("click", (e) => copyReportToClipboard(e.currentTarget));
+  document.getElementById("failureIncludeLogs")?.addEventListener("click", async (e) => {
+    const btn = e.currentTarget;
+    const payload = btn._reportPayload;
+    if (!payload || btn.disabled) return;
+    btn.disabled = true;
+    btn.textContent = "Fetching logs…";
+    payload.record.logs = await fetchRecentLogs(payload.record);
+    persist();
+    const techEl = document.getElementById("failureTech");
+    if (techEl) techEl.textContent = buildReportText(payload.record, payload.diag);
+    btn.textContent = "Logs included";
   });
 }
 

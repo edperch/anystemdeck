@@ -186,6 +186,57 @@ async def test_pipeline_error_quarantines_evidence(tmp_path: Path):
     assert '"download": 1.2' in report
     assert not (quarantined / "source.wav").exists()
     assert not (quarantined / "stems").exists()
+    # Full traceback is captured too (#report-full-stack), not just the
+    # classified cause/tail -- named after the function that actually raised.
+    assert "--- traceback ---" in report
+    assert "in boom" in report
+    assert "SeparationError" in report
+
+
+def test_redact_home_strips_the_users_home_directory():
+    """A traceback carries absolute paths, and on Windows the Python install
+    path alone embeds the reporter's OS username -- this text is headed for a
+    public GitHub issue or Discord message, so it must never reach one raw."""
+    from app.core.redact import redact
+
+    home = str(Path.home())
+    text = f'File "{home}\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\asyncio\\threads.py", line 25'
+    redacted = redact(text)
+    assert home not in redacted
+    assert "<home>" in redacted
+    assert "threads.py" in redacted, "the rest of the path must survive -- it's the useful part"
+
+
+@pytest.mark.asyncio
+async def test_quarantine_redacts_a_source_url_embedded_in_the_exception(tmp_path: Path):
+    """yt-dlp errors often embed the URL they were fetching in the message
+    itself (e.g. "Unsupported URL: <url>") -- exc!r reaching error.txt
+    unredacted would leak it even though title:/source: are already excluded
+    from the public API response."""
+    job = Job(id="abcdefabcde7", source_url="https://www.youtube.com/watch?v=dQw4w9WgXcQ")
+    job_dir = tmp_path / job.id
+    (job_dir / "stems").mkdir(parents=True)
+    (job_dir / "stems" / "vocals.wav").write_bytes(b"RIFF" + b"\x00" * 64)
+    (job_dir / "source.wav").write_bytes(b"RIFF" + b"\x00" * 64)
+    source = job_dir / "source.wav"
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("Unsupported URL: https://www.youtube.com/watch?v=dQw4w9WgXcQ")
+
+    with patch("app.pipeline.runner._run_local_blocking", side_effect=boom):
+        await run_local_pipeline(job, source, tmp_path)
+
+    report = (tmp_path / "failed" / job.id / "error.txt").read_text(encoding="utf-8")
+    lines = report.splitlines()
+    source_line = next(line for line in lines if line.startswith("source:"))
+    exception_line = next(line for line in lines if line.startswith("exception:"))
+    # title:/source: are local-only (never served by the /failure API) and
+    # keep the real URL, unredacted, for the person looking at their own disk.
+    assert source_line == "source: https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+    # exception: IS served by the /failure API, and yt-dlp errors often embed
+    # the URL they were fetching in the message itself -- must be redacted.
+    assert "youtube.com" not in exception_line
+    assert "<source-url-redacted>" in exception_line
 
 
 @pytest.mark.asyncio

@@ -289,6 +289,7 @@ def test_restored_job_serves_stems(tmp_path: Path, monkeypatch):
     (tmp_path / "registry.json").write_text(json.dumps(data), encoding="utf-8")
 
     monkeypatch.setattr("app.api.stems.JOBS_DIR", tmp_path)
+    monkeypatch.setattr("app.api.jobs.JOBS_DIR", tmp_path)
     restore_registry(tmp_path)
 
     from app.main import app

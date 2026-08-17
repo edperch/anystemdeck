@@ -33,6 +33,7 @@ from app.core.config import (
 )
 from app.core.logging_setup import configure_logging
 from app.core.process import process_exists as _process_exists
+from app.core.redact import redact
 from app.core.registry import all_jobs as registry_all_jobs
 from app.core.registry import registry_path, take_pending_resume
 from app.core.registry import reset_all as reset_registry
@@ -666,9 +667,16 @@ def get_log_tail(view: str, minutes: int = 60) -> PlainTextResponse:
     if len(kept) > _LOG_TAIL_LINES:
         truncated = f"[... {len(kept) - _LOG_TAIL_LINES} earlier lines not shown ...]\n"
         kept = kept[-_LOG_TAIL_LINES:]
-    return PlainTextResponse(
-        truncated + "\n".join(kept) + "\n", media_type="text/plain; charset=utf-8"
-    )
+    # Redacted unconditionally, not just for the report flow's callers: a log
+    # line is a log line regardless of who asks for it, and the notification
+    # centre's "include recent logs" button hands this straight to a public
+    # GitHub issue or Discord message without a second filtering step. Strips
+    # the reporter's home directory, any YouTube/SoundCloud source URL (every
+    # job's download start is logged at info level -- not just the failing
+    # one), and any IPv4 address (the mobile UI talks to this backend over
+    # the LAN, so uvicorn's access log can carry another device's address).
+    body = redact(truncated + "\n".join(kept) + "\n")
+    return PlainTextResponse(body, media_type="text/plain; charset=utf-8")
 
 
 @app.get("/api/logs.zip", tags=["settings"])

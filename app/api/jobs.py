@@ -108,6 +108,30 @@ def _rmtree_job(job_id: str) -> None:
         logger.warning("failed to remove job dir %s", job_dir, exc_info=True)
 
 
+def _job_files_missing(job: Job) -> bool:
+    """True when a "done" job's stem files are gone from disk: the folder was
+    deleted or moved outside the app, not just an in-flight relocation (#354),
+    which is a known, temporary absence and must not flap the library."""
+    if is_relocating():
+        return False
+    stems_dir = (JOBS_DIR / job.id / "stems").resolve()
+    if not stems_dir.is_relative_to(JOBS_DIR.resolve()):
+        return True
+    return not stems_dir.is_dir() or not any(stems_dir.iterdir())
+
+
+def _job_state(job: Job) -> dict:
+    """job.to_state() with "done" downgraded to "unavailable" when the stem
+    files are missing from disk - ground truth for the client, replacing the
+    old approach of the frontend guessing from a 404 or a disappearance from
+    the job list, neither of which caught a job whose registry entry survived
+    but whose stems folder did not."""
+    state = job.to_state()
+    if job.status == "done" and _job_files_missing(job):
+        state["status"] = "unavailable"
+    return state
+
+
 class JobRequest(BaseModel):
     url: str
     # Subset of stems to include in the post-processing "selected mix"
@@ -259,7 +283,7 @@ async def _create_local_job(request: Request) -> dict[str, str]:
 def list_jobs() -> list[dict]:
     """List all completed jobs in the library, sorted by creation time."""
     return [
-        job.to_state()
+        _job_state(job)
         for job in sorted(registry_all_jobs().values(), key=lambda j: j.created_at)
         if job.status == "done"
     ]
@@ -271,7 +295,7 @@ def get_job(job_id: str) -> dict:
     job = registry_get(job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="job not found")
-    return job.to_state()
+    return _job_state(job)
 
 
 @router.post("/{job_id}/cancel")
@@ -440,9 +464,10 @@ def get_failure(job_id: str) -> dict:
 
     _quarantine_failed_job writes jobs/failed/<id>/error.txt on every pipeline
     failure (#277) and until now nothing ever read it back: the UI had only the
-    one-line `error_detail`, so a bug report could not carry the stderr tail
-    that says *why* demucs died. Read-only, and never serves the whole file --
-    only the technical keys above, plus the tail.
+    one-line `error_detail`, so a bug report could not carry the stderr tail or
+    the full traceback that say *why* demucs died. Read-only, and never serves
+    the whole file -- only the technical keys above, plus the tail and
+    traceback (both already home-directory-redacted by the writer).
     """
     if not JOB_ID_RE.match(job_id):
         raise HTTPException(status_code=404, detail="job not found")
@@ -464,19 +489,32 @@ def get_failure(job_id: str) -> dict:
 
     fields: dict[str, str] = {}
     tail: list[str] = []
-    in_tail = False
+    tb: list[str] = []
+    section = "fields"
     for line in text.splitlines():
-        if line.strip() == "--- stderr tail ---":
-            in_tail = True
+        stripped = line.strip()
+        if stripped == "--- stderr tail ---":
+            section = "tail"
             continue
-        if in_tail:
+        if stripped == "--- traceback ---":
+            # The writer separates sections with a blank line for readability
+            # in the raw file; drop it here rather than let it show up as a
+            # trailing empty entry in `tail`.
+            if tail and tail[-1] == "":
+                tail.pop()
+            section = "traceback"
+            continue
+        if section == "tail":
             tail.append(line)
+            continue
+        if section == "traceback":
+            tb.append(line)
             continue
         key, sep, value = line.partition(":")
         if sep and key in _FAILURE_PUBLIC_KEYS:
             fields[key] = value.strip()
 
-    return {"job_id": job_id, **fields, "tail": tail}
+    return {"job_id": job_id, **fields, "tail": tail, "traceback": tb}
 
 
 @router.get("/{job_id}/beats")

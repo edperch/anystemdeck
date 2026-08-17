@@ -67,7 +67,7 @@ def test_runtime_settings_round_trip_and_clamp():
 
     # Out-of-range values are clamped, not rejected.
     assert settings_mod.set_max_duration_sec(5) == 60  # floor
-    assert settings_mod.set_max_duration_sec(99999) == 1200  # ceiling = 20 min
+    assert settings_mod.set_max_duration_sec(99999) == 3600  # ceiling = 60 min
     assert settings_mod.set_video_max_height(99999) == 2160  # ceil
 
 

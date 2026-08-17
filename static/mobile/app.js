@@ -494,15 +494,24 @@ function libraryBody() {
     return `<div class="lib-note">No tracks yet. Head to <b>Extract</b> to split your first song.</div>`;
   }
   return `<div class="eyebrow">RECENT</div>
-    ${state.tracks.map((t) => `<div class="track-wrap${state.swipedTrackId === t.id ? " swiped" : ""}">
+    ${state.tracks.map((t) => {
+      const unavailable = t.status === "unavailable";
+      const canReimport = unavailable && t.sourceUrl && !t.sourceUrl.startsWith("local:");
+      const infoHtml = unavailable
+        ? `<div class="t">${esc(t.title)}</div><div class="s track-warn">${
+          canReimport ? "Track unavailable · tap to reimport" : "Track unavailable · re-upload to restore"
+        }</div>`
+        : `<div class="t">${esc(t.title)}</div><div class="s">${esc(t.sub)}</div><div class="m">${esc(t.meta)}</div>`;
+      return `<div class="track-wrap${state.swipedTrackId === t.id ? " swiped" : ""}">
       <button class="track-delete" data-action="delete" data-id="${esc(t.id)}">Delete</button>
-      <div class="track" data-action="open" data-id="${esc(t.id)}">
+      <div class="track" data-action="${unavailable ? "reimport" : "open"}" data-id="${esc(t.id)}">
         <div class="track-art" style="${artStyle(t)}">${artLabel(t)}</div>
-        <div class="track-info"><div class="t">${esc(t.title)}</div><div class="s">${esc(t.sub)}</div><div class="m">${esc(t.meta)}</div></div>
+        <div class="track-info">${infoHtml}</div>
         <div class="track-dot ${t.status}"></div>
-        <button class="track-load" data-action="open" data-id="${esc(t.id)}">Load</button>
+        <button class="track-load" data-action="${unavailable ? "reimport" : "open"}" data-id="${esc(t.id)}">${unavailable ? "Fix" : "Load"}</button>
       </div>
-    </div>`).join("")}`;
+    </div>`;
+    }).join("")}`;
 }
 
 function libraryScreen() {
@@ -898,6 +907,11 @@ app.addEventListener("click", (e) => {
       if (track) openTrack(track);
       return;
     }
+    case "reimport": {
+      const track = state.tracks.find((x) => x.id === t.dataset.id);
+      if (track) reimportTrack(track);
+      return;
+    }
     case "reload":
       loadLibrary();
       return;
@@ -918,6 +932,31 @@ app.addEventListener("change", (e) => {
     render();
   }
 });
+
+// A track's files are gone (folder deleted or moved outside the app).
+// URL-sourced tracks can be rebuilt by re-running the import; a local upload
+// has no source bytes left (the pipeline deletes the upload once it's done
+// with it), so that just gets a toast pointing at re-upload instead.
+async function reimportTrack(card) {
+  if (!card.sourceUrl || card.sourceUrl.startsWith("local:")) {
+    toast("This track's audio is gone. Re-upload it to restore it.");
+    return;
+  }
+  toast("Reimporting…");
+  try {
+    const res = await fetch("/api/jobs", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url: card.sourceUrl, stems: card.selectedStems || [] }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.detail || res.statusText);
+    await loadLibrary();
+  } catch (e) {
+    console.warn("[mobile] reimport failed:", e);
+    toast(`Couldn't reimport: ${e.message}`);
+  }
+}
 
 // Load the real library from /api/jobs (newest first). On success, seed the
 // Mixer with the most recent track if nothing is selected yet.

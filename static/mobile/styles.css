@@ -655,6 +655,10 @@ button {
   color: var(--muted-3);
   margin-top: 1px;
 }
+.track-info .s.track-warn {
+  color: var(--accent);
+  font-weight: 600;
+}
 .track-info .m {
   font-family: var(--mono);
   font-size: 10.5px;
