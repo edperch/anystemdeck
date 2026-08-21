@@ -411,22 +411,62 @@ fn documents_store_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     Ok(new_path)
 }
 
-/// The DEFAULT stems folder: ~/Documents/StemDeck/jobs/. Falls back to
-/// data_dir/jobs if document_dir is unavailable. Does NOT create it -- see
-/// documents_stemdeck_dir for why.
+/// True if `path` exists and contains at least one entry. Used to tell an
+/// already-in-use default folder apart from one nothing has ever written to.
+fn directory_has_entries(path: &Path) -> bool {
+    fs::read_dir(path)
+        .map(|mut entries| entries.next().is_some())
+        .unwrap_or(false)
+}
+
+/// The DEFAULT stems folder. Does NOT create it -- see documents_stemdeck_dir
+/// for why.
 ///
 /// Handed to the backend as STEMDECK_DEFAULT_JOBS_DIR, not STEMDECK_JOBS_DIR:
 /// the latter means "this deployment pins the location" and would override the
 /// folder the user picked in Settings (#354). The backend owns that choice; it
 /// is the one that has to move the library when it changes, including
 /// creating whichever path wins (app/core/config.py's ensure_runtime_dirs).
+///
+/// Two candidates, resolved in this order:
+///
+/// 1. ~/Documents/StemDeck/jobs, if it already has anything in it. Every
+///    install before this default existed used this path, so an existing
+///    user's real library lives there without any explicit `jobs_dir` in
+///    settings.json to record it -- it was simply "the default." Checking
+///    disk content directly (rather than writing a one-time migration flag
+///    into settings.json, which only the backend otherwise writes) keeps this
+///    self-contained: nothing to persist, no other-process race, and it stays
+///    correct on every future launch for as long as that folder holds data.
+/// 2. Otherwise, for the Windows portable package, local_data_dir()/jobs --
+///    i.e. next to data/cache and data/models inside the package itself,
+///    rather than leaving a footprint in Documents. Non-portable installs
+///    (installer builds, macOS, Linux) keep candidate 1 either way: the
+///    original Documents rationale (visible in Finder/Explorer, eligible for
+///    OneDrive/iCloud backup, survives reinstalls) still applies to them.
 fn documents_dir_for_jobs(app: &tauri::AppHandle) -> PathBuf {
-    match documents_stemdeck_dir(app) {
+    let legacy_default = match documents_stemdeck_dir(app) {
         Ok(dir) => dir.join("jobs"),
-        Err(_) => local_data_dir()
-            .map(|d| d.join("jobs"))
-            .unwrap_or_else(|_| PathBuf::from("jobs")),
+        Err(_) => {
+            return local_data_dir()
+                .map(|d| d.join("jobs"))
+                .unwrap_or_else(|_| PathBuf::from("jobs"));
+        }
+    };
+
+    if directory_has_entries(&legacy_default) {
+        return legacy_default;
     }
+
+    if let Ok(root) = app_root() {
+        if is_portable_package(&root) {
+            if let Ok(data_dir) = local_data_dir() {
+                return data_dir.join("jobs");
+            }
+        }
+    }
+
+    legacy_default
 }
 
 /// Native folder picker for the stems location. Returns None when the user
@@ -3914,6 +3954,25 @@ b6052160df96b31c9b1e33854a4dcda3d4b57641b880270f31736fb9f445d384  ffmpeg-n7.1-la
         // Marker in the app root (ships with the package) does.
         fs::write(root.path().join("portable.txt"), "").unwrap();
         assert!(super::is_portable_package(root.path()));
+    }
+
+    #[test]
+    fn directory_has_entries_true_for_a_populated_dir() {
+        let dir = make_tmp();
+        fs::write(dir.path().join("registry.json"), "{}").unwrap();
+        assert!(super::directory_has_entries(dir.path()));
+    }
+
+    #[test]
+    fn directory_has_entries_false_for_an_empty_dir() {
+        let dir = make_tmp();
+        assert!(!super::directory_has_entries(dir.path()));
+    }
+
+    #[test]
+    fn directory_has_entries_false_for_a_missing_dir() {
+        let dir = make_tmp();
+        assert!(!super::directory_has_entries(&dir.path().join("does-not-exist")));
     }
 
     #[test]
