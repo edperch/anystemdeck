@@ -341,17 +341,23 @@ fn main() {
         });
 }
 
-/// Returns ~/Documents/StemDeck/, creating it if needed. The Documents
+/// Returns ~/Documents/StemDeck/ WITHOUT creating it. The Documents
 /// *default* for the jobs folder (documents_dir_for_jobs below) and the
 /// source of a pre-#403 user-data.json for one-time migration
 /// (documents_store_path) -- chosen so the library is visible in
 /// Finder/Explorer, eligible for iCloud/OneDrive backup, and survives app
 /// reinstalls, before the user ever relocates it via Settings.
+///
+/// Deliberately does not mkdir: this is called on every startup just to
+/// compute the *default* jobs path, even when the user has relocated their
+/// library elsewhere via Settings and this default will never be used. Prior
+/// to the fix for #403 (part 2) this always recreated an empty
+/// ~/Documents/StemDeck/jobs, since the backend's own ensure_runtime_dirs
+/// (app/core/config.py) already mkdirs whichever JOBS_DIR actually wins that
+/// precedence -- this path only needs to exist when it is the one in use.
 fn documents_stemdeck_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     let documents = app.path().document_dir().map_err(|e| e.to_string())?;
-    let dir = documents.join("StemDeck");
-    fs::create_dir_all(&dir).map_err(|e| format!("failed to create ~/Documents/StemDeck: {e}"))?;
-    Ok(dir)
+    Ok(documents.join("StemDeck"))
 }
 
 /// The stems/jobs folder as it exists right now: the backend's own
@@ -406,19 +412,17 @@ fn documents_store_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
 }
 
 /// The DEFAULT stems folder: ~/Documents/StemDeck/jobs/. Falls back to
-/// data_dir/jobs if document_dir is unavailable.
+/// data_dir/jobs if document_dir is unavailable. Does NOT create it -- see
+/// documents_stemdeck_dir for why.
 ///
 /// Handed to the backend as STEMDECK_DEFAULT_JOBS_DIR, not STEMDECK_JOBS_DIR:
 /// the latter means "this deployment pins the location" and would override the
 /// folder the user picked in Settings (#354). The backend owns that choice; it
-/// is the one that has to move the library when it changes.
+/// is the one that has to move the library when it changes, including
+/// creating whichever path wins (app/core/config.py's ensure_runtime_dirs).
 fn documents_dir_for_jobs(app: &tauri::AppHandle) -> PathBuf {
     match documents_stemdeck_dir(app) {
-        Ok(dir) => {
-            let jobs = dir.join("jobs");
-            let _ = fs::create_dir_all(&jobs);
-            jobs
-        }
+        Ok(dir) => dir.join("jobs"),
         Err(_) => local_data_dir()
             .map(|d| d.join("jobs"))
             .unwrap_or_else(|_| PathBuf::from("jobs")),
