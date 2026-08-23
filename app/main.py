@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import functools
 import io
+import json
 import logging
 import os
 import re
@@ -94,9 +95,32 @@ _log = logging.getLogger("stemdeck")
 
 
 def app_version() -> str:
-    # Version is git-tag-derived via hatch-vcs (#169). Prefer installed package
-    # metadata (set at install/build from the tag); fall back to the generated
-    # app/_version.py for non-installed runs, then a dev placeholder.
+    # Version is git-tag-derived via hatch-vcs (#169).
+    #
+    # A packaged desktop install carries its version in the app layer
+    # (static/version.json, written by the make-portable scripts), and that is
+    # checked FIRST. The in-app updater (#421) replaces backend/ but
+    # deliberately never replaces python/, where the installed dist metadata
+    # lives -- so after a self-update that metadata is a version behind, and
+    # trusting it would make the app keep offering an update it already applied.
+    # The file is gitignored, so Docker images and source checkouts do not have
+    # it and correctly fall through to the metadata below.
+    try:
+        # utf-8-sig: some writers emit a BOM, which json.loads rejects.
+        raw = (STATIC_DIR / "version.json").read_text(encoding="utf-8-sig")
+        packaged = json.loads(raw).get("version")
+        if isinstance(packaged, str) and packaged.strip():
+            return packaged.strip()
+    except (OSError, ValueError, AttributeError):
+        # Absent or unreadable (OSError), not valid JSON or not decodable
+        # (ValueError), or valid JSON that is not an object so has no .get
+        # (AttributeError). All of those simply mean "no app-layer marker
+        # here", so fall through to the metadata below. Narrow rather than a
+        # bare except so a genuine bug in this function still surfaces instead
+        # of silently degrading the reported version (bandit B110).
+        pass
+    # Installed package metadata (set at install/build from the tag); then the
+    # generated app/_version.py for non-installed runs, then a dev placeholder.
     try:
         return package_version("stemdeck")
     except PackageNotFoundError:

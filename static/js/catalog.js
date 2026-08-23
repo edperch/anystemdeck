@@ -2060,7 +2060,14 @@ const FALLBACK_VERSION = "0.1.0";
 let currentVersion = FALLBACK_VERSION;
 const REPO_URL = "https://github.com/stemdeckapp/stemdeck";
 const RELEASES_URL = "https://github.com/stemdeckapp/stemdeck/releases";
-const RELEASES_API = "https://api.github.com/repos/stemdeckapp/stemdeck/releases/latest";
+// The releases LIST, not /releases/latest. GitHub defines "latest" as the most
+// recent NON-PRERELEASE release, so the moment a version ships with the
+// pre-release box ticked it becomes invisible here and nobody is ever told an
+// update exists. StemDeck has historically published even its alphas as normal
+// releases, which is why that has not bitten yet -- this makes the check
+// correct either way rather than dependent on remembering not to tick a box.
+const RELEASES_API =
+  "https://api.github.com/repos/stemdeckapp/stemdeck/releases?per_page=10";
 const DISMISSED_UPDATE_KEY = "stemdeck.dismissed_update";
 
 // The full GitHub release object from the last successful update check, used to
@@ -2266,6 +2273,153 @@ function pickReleaseAsset(release, target) {
   return asset ? { url: asset.browser_download_url, name } : null;
 }
 
+// ─── In-app updater ───
+// Downloads and applies an update without leaving the app, instead of sending
+// the user to a browser download -- see download_app_update/apply_app_update in
+// desktop/src-tauri/src/main.rs for the file swap.
+//
+// Windows and Linux only. Both ship a flat directory with the executable,
+// backend/ and python/ side by side, which is the shape the swap needs. macOS
+// resolves its backend inside the downloaded runtime pack rather than the .app,
+// so its app layer is a different thing entirely and is handled separately.
+//
+// The updater replaces the executable and backend/ ONLY. It never touches
+// python/, because an NVIDIA install rewrites that directory with CUDA torch on
+// first run and replacing it would silently drop the machine back to CPU. So an
+// in-app update is only safe when the release needs the same Python
+// dependencies the install already has -- that is what the runtime id gates.
+// When it doesn't match, we fall back to the normal full-package download.
+
+function findReleaseAsset(release, name) {
+  return (release.assets || []).find((a) => a.name === name) || null;
+}
+
+// Asset names the packaging scripts publish for each in-place-updatable
+// platform. The archive format differs because each script already produces
+// one: Compress-Archive on Windows, tar on Linux (which also preserves the
+// executable bit the relaunch depends on).
+function updaterAssetNames(target) {
+  if (target.os === "windows") {
+    return { app: "StemDeck-Windows-x64-app.zip", runtimeId: "StemDeck-Windows-x64-runtime-version.json" };
+  }
+  if (target.os === "linux") {
+    return { app: "StemDeck-Linux-x64-app.tar.gz", runtimeId: "StemDeck-Linux-x64-runtime-version.json" };
+  }
+  return null;
+}
+
+// Resolves the app-layer asset for the in-app updater, or null when this
+// release cannot be applied in place -- it predates the updater assets, is
+// missing one, or changed the Python dependency set. Null means "use the full
+// download link", which is always correct, just less convenient.
+//
+// The checksum and runtime-id files are read by Rust (`check_app_update`), not
+// fetched here. This page is served by the Python backend, so its CSP applies,
+// and connect-src allows api.github.com but NOT the github.com /
+// objects.githubusercontent.com hosts that serve release *assets*. Fetching
+// them from JS is blocked outright; Rust's HTTP client is not bound by the page
+// CSP, so the policy stays as tight as it is today.
+async function resolveInAppUpdatePlan(release, target) {
+  const names = updaterAssetNames(target);
+  if (!names) return null;
+  const appAsset = findReleaseAsset(release, names.app);
+  const appShaAsset = findReleaseAsset(release, `${names.app}.sha256`);
+  const runtimeIdAsset = findReleaseAsset(release, names.runtimeId);
+  if (!appAsset || !appShaAsset || !runtimeIdAsset) return null;
+
+  const check = await window.__TAURI__.core.invoke("check_app_update", {
+    query: {
+      appShaUrl: appShaAsset.browser_download_url,
+      runtimeIdUrl: runtimeIdAsset.browser_download_url,
+    },
+  });
+  if (!check?.supported) {
+    console.info("[catalog] in-app update unavailable:", check?.reason || "unknown");
+    return null;
+  }
+
+  return { appUrl: appAsset.browser_download_url, appSha256: check.appSha256 };
+}
+
+function showInappError(message) {
+  const errorEl = document.getElementById("releaseInappError");
+  if (!errorEl) return;
+  errorEl.textContent = `${i18nT("release.updateFailed")}: ${message}`;
+  errorEl.classList.remove("hidden");
+}
+
+// Wires the download/apply buttons for a resolved plan. Returns false (and
+// touches nothing) when this release has no in-app-updatable assets, so the
+// caller can fall back to the plain download link.
+async function wireInAppUpdate(target) {
+  const downloadBtn = document.getElementById("releaseDownloadApp");
+  const applyBtn = document.getElementById("releaseApplyUpdate");
+  const inapp = document.getElementById("releaseInapp");
+  const progress = document.getElementById("releaseInappProgress");
+  const progressText = document.getElementById("releaseInappProgressText");
+  const errorEl = document.getElementById("releaseInappError");
+  if (!downloadBtn || !applyBtn || !latestRelease) return false;
+
+  const plan = await resolveInAppUpdatePlan(latestRelease, target);
+  if (!plan) return false;
+
+  // The manual download stays visible alongside the auto-update pill: some
+  // people would rather grab the zip, and it is the escape hatch if an in-app
+  // update fails.
+  inapp?.classList.remove("hidden");
+  progress?.classList.add("hidden");
+  errorEl?.classList.add("hidden");
+  downloadBtn.disabled = false;
+  applyBtn.disabled = false;
+  downloadBtn.classList.remove("hidden");
+  applyBtn.classList.add("hidden");
+
+  // Indeterminate, not a byte-accurate bar. Real progress would mean listening
+  // to the Rust download event, and this page is served over http by the Python
+  // backend -- a remote origin, which the Tauri capability in
+  // desktop/src-tauri/capabilities/default.json does not cover, so
+  // `plugin:event|listen` is refused by the ACL. Granting a remote origin event
+  // permissions would widen exactly the IPC surface #171 locked down, and the
+  // app layer is ~5 MB. Not worth it. (App-defined commands like the invokes
+  // below are not ACL-gated, which is why those work.)
+  downloadBtn.onclick = async () => {
+    errorEl?.classList.add("hidden");
+    downloadBtn.disabled = true;
+    if (progressText) progressText.textContent = i18nT("release.downloading");
+    progress?.classList.remove("hidden");
+    progress?.classList.add("indeterminate");
+    try {
+      await window.__TAURI__.core.invoke("download_app_update", { plan });
+      progress?.classList.add("hidden");
+      downloadBtn.classList.add("hidden");
+      applyBtn.classList.remove("hidden");
+    } catch (e) {
+      console.warn("[catalog] download_app_update failed:", e);
+      showInappError(String(e?.message || e));
+      downloadBtn.disabled = false;
+      progress?.classList.add("hidden");
+    }
+  };
+
+  applyBtn.onclick = async () => {
+    errorEl?.classList.add("hidden");
+    applyBtn.disabled = true;
+    if (progressText) progressText.textContent = i18nT("release.applying");
+    progress?.classList.remove("hidden");
+    try {
+      // On success the app exits and relaunches -- this promise never resolves.
+      await window.__TAURI__.core.invoke("apply_app_update");
+    } catch (e) {
+      console.warn("[catalog] apply_app_update failed:", e);
+      showInappError(String(e?.message || e));
+      applyBtn.disabled = false;
+      progress?.classList.add("hidden");
+    }
+  };
+
+  return true;
+}
+
 async function openReleaseDialog() {
   const dialog = document.getElementById("releaseDialog");
   if (!dialog || !latestRelease) return;
@@ -2295,6 +2449,10 @@ async function openReleaseDialog() {
   } else if (download) {
     docker?.classList.add("hidden");
     const target = await getBuildTarget();
+
+    // The manual download is always offered. On Windows, when the release can
+    // be applied in place, an "Update now" pill appears beside it -- additive,
+    // never a replacement, so the zip stays one click away either way.
     const picked = pickReleaseAsset(latestRelease, target);
     if (picked) {
       download.href = picked.url;
@@ -2306,6 +2464,20 @@ async function openReleaseDialog() {
       download.textContent = i18nT("release.viewDownload");
     }
     download.classList.remove("hidden");
+
+    let usedInapp = false;
+    if (updaterAssetNames(target)) {
+      try {
+        usedInapp = await wireInAppUpdate(target);
+      } catch (e) {
+        console.warn("[catalog] in-app update setup failed, falling back to link:", e);
+      }
+    }
+    if (!usedInapp) {
+      document.getElementById("releaseInapp")?.classList.add("hidden");
+      document.getElementById("releaseDownloadApp")?.classList.add("hidden");
+      document.getElementById("releaseApplyUpdate")?.classList.add("hidden");
+    }
   }
 
   dialog.classList.remove("hidden");
@@ -2332,7 +2504,12 @@ async function checkForUpdate() {
     // The check itself succeeded, regardless of what it finds below — clear
     // any stale "update check failed" card (#401).
     dismissFailuresByKind("update");
-    const data = await res.json();
+    // Newest first, as GitHub returns them. Drafts are invisible to an
+    // unauthenticated request anyway, but filter them so a maintainer running a
+    // dev build is not offered a release that has no assets yet.
+    const releases = await res.json();
+    const data = Array.isArray(releases) ? releases.find((r) => !r.draft) : null;
+    if (!data) return;
     const latest = normalizeVersion(data.tag_name);
     // Compare canonically so a PEP440 current version (0.7.0a9) matches the
     // release tag form (0.7.0-alpha.9) and we don't nag an already-current app.

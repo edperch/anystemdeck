@@ -19,6 +19,30 @@ use tauri_plugin_store::StoreExt;
 use zip::ZipArchive;
 
 const SETUP_VERSION: u64 = 1;
+
+// ── In-app updater platform support (#421) ──────────────────────────────────
+//
+// Windows and Linux ship the same shape: a flat directory with the executable,
+// `backend/` and `python/` side by side, which is exactly what the swap needs.
+//
+// macOS is deliberately excluded. There `backend_dir()` resolves the backend
+// inside the downloaded runtime pack rather than the .app, so the app layer is
+// a different thing entirely and the existing runtime-pack updater already
+// covers most of it. Treating it as "the same but with .app" would be wrong.
+//
+// The archive format differs because each platform's packaging script already
+// produces one: Compress-Archive on Windows, tar on Linux.
+#[cfg(windows)]
+const UPDATE_APP_ARCHIVE: &str = "stemdeck-update-app.zip";
+#[cfg(target_os = "linux")]
+const UPDATE_APP_ARCHIVE: &str = "stemdeck-update-app.tar.gz";
+
+/// The shipped executable's filename. Defined for every platform so the
+/// leftover sweep does not need its own cfg dance.
+#[cfg(windows)]
+const APP_EXE_NAME: &str = "StemDeck.exe";
+#[cfg(not(windows))]
+const APP_EXE_NAME: &str = "StemDeck";
 // Windows FFmpeg comes from BtbN's GitHub build (served via GitHub's CDN, far
 // faster worldwide than the old gyan.dev single mirror -- #248). Unlike gyan.dev,
 // which published a per-file `{url}.sha256` companion, BtbN publishes ONE combined
@@ -191,6 +215,58 @@ struct RuntimeArchive {
     size: u64,
 }
 
+/// The app-layer artifact to install, resolved by the frontend from the GitHub
+/// Releases API (the same check already in static/js/catalog.js) and handed to
+/// `download_app_update`. Rust downloads, verifies and applies; it does not
+/// re-resolve "what is the latest version" itself.
+///
+/// There is no runtime artifact here on purpose. The updater replaces
+/// the executable and backend/ only -- python/ is never touched, because an
+/// NVIDIA install rewrites it with CUDA torch at first run and replacing the
+/// directory would silently drop that machine back to CPU. The frontend gates
+/// on the release's runtime id first, and falls back to the full-package
+/// download whenever the Python dependency set changed.
+// Only the Windows build reads these fields; the other platforms keep the
+// struct so download_app_update has one signature everywhere and can answer
+// with a clear "not available here" rather than a missing-command error.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(not(windows), allow(dead_code))]
+struct AppUpdatePlan {
+    app_url: String,
+    app_sha256: String,
+}
+
+/// Asset URLs lifted from the GitHub release JSON by the frontend, for
+/// `check_app_update` to resolve.
+///
+/// The small metadata files are fetched HERE rather than in JS on purpose. The
+/// page is served by the Python backend over http, so the backend's own
+/// Content-Security-Policy applies to it, and `connect-src` allows
+/// `api.github.com` but NOT `github.com`/`objects.githubusercontent.com` where
+/// release *assets* actually live (app/main.py). A `fetch()` for the checksum
+/// or the runtime id would be blocked outright and the updater would silently
+/// never appear. reqwest is not bound by the page CSP, so doing it in Rust
+/// keeps that policy exactly as tight as it is today.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(not(windows), allow(dead_code))]
+struct AppUpdateQuery {
+    app_sha_url: String,
+    runtime_id_url: String,
+}
+
+/// Whether this release can be installed in place, and the verified checksum to
+/// install it with. `reason` is for the log, not the user: the UI just falls
+/// back to the normal download link.
+#[derive(Serialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct AppUpdateAvailability {
+    supported: bool,
+    app_sha256: Option<String>,
+    reason: Option<String>,
+}
+
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct DownloadProgress {
@@ -249,6 +325,21 @@ fn main() {
                 }
             };
             let _ = fs::create_dir_all(&data_dir);
+
+            // Sweep what an in-app update left at the app root: the previous
+            // backend/ and exe, plus a staging dir if the update was
+            // interrupted before it could clean up. The new files are already
+            // in place, so these are only ever the old version's leftovers.
+            //
+            // Runs on EVERY launch, not just a version change. apply_app_update
+            // relaunches and then exits, so on the very first launch of the new
+            // build the outgoing process is usually still alive and Windows
+            // still holds StemDeck.exe.old open -- the delete fails silently
+            // and, gated on a version change that has already happened, would
+            // never be retried. Verified: after a real self-update both
+            // backend.old and StemDeck.exe.old were still on disk. Three path
+            // checks per launch is nothing; leaking ~30 MB forever is not.
+            sweep_update_leftovers();
 
             let version_file = data_dir.join("last_version.txt");
             let migration_flag = data_dir.join("store_migration_done");
@@ -310,6 +401,10 @@ fn main() {
             download_runtime_pack,
             verify_runtime_pack,
             extract_runtime_pack,
+            installed_runtime_id,
+            check_app_update,
+            download_app_update,
+            apply_app_update,
             ensure_external_assets,
             ensure_torch_device,
             warmup_models,
@@ -399,7 +494,8 @@ fn current_jobs_dir(app: &tauri::AppHandle) -> PathBuf {
 /// delete so a problem here can never lose the only copy of that data.
 fn documents_store_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     let jobs_dir = current_jobs_dir(app);
-    fs::create_dir_all(&jobs_dir).map_err(|e| format!("failed to create {}: {e}", jobs_dir.display()))?;
+    fs::create_dir_all(&jobs_dir)
+        .map_err(|e| format!("failed to create {}: {e}", jobs_dir.display()))?;
     let new_path = jobs_dir.join("user-data.json");
     if !new_path.is_file() {
         if let Ok(old_path) = documents_stemdeck_dir(app).map(|d| d.join("user-data.json")) {
@@ -733,6 +829,459 @@ fn extract_runtime_pack() -> Result<RuntimePackStatus, String> {
     let python = runtime.join("python").join("bin").join("python");
     patch_pyvenv_cfg(&python);
     runtime_pack_status()
+}
+
+/// Delete the `.old` siblings and staging dir an in-app update leaves at the
+/// app root (#421). Best-effort and idempotent: whatever is still locked by the
+/// outgoing process this launch is simply picked up on the next one.
+fn sweep_update_leftovers() {
+    let Ok(root) = app_root() else { return };
+    for name in ["backend.old", "python.old", "_update_app.tmp"] {
+        let stale = root.join(name);
+        if stale.is_dir() {
+            let _ = fs::remove_dir_all(&stale);
+        }
+    }
+    let stale_exe = root.join(format!("{APP_EXE_NAME}.old"));
+    if stale_exe.is_file() {
+        let _ = fs::remove_file(&stale_exe);
+    }
+}
+
+/// The Python dependency-set id of the runtime currently on disk, written into
+/// `python/runtime-version.json` by make-portable.ps1. `None` when the marker
+/// is absent -- a pre-#421 install, a macOS build, or a source checkout.
+///
+/// The frontend compares this against the release's published runtime id and
+/// only offers an in-app update when they match, since the updater cannot
+/// replace python/ (see `AppUpdatePlan`). `None` is treated as "cannot verify",
+/// which sends the user to the full-package download rather than risking an app
+/// layer whose imports the installed runtime may not satisfy.
+#[tauri::command]
+fn installed_runtime_id() -> Option<String> {
+    let root = app_root().ok()?;
+    let text = fs::read_to_string(root.join("python").join("runtime-version.json")).ok()?;
+    parse_runtime_id(&text)
+}
+
+/// Split from the command above so the marker's on-disk contract -- the exact
+/// shape make-portable.ps1 writes -- is unit-testable without an app root.
+fn parse_runtime_id(text: &str) -> Option<String> {
+    let value: serde_json::Value = serde_json::from_str(text).ok()?;
+    value.get("runtimeId")?.as_str().map(|s| s.to_string())
+}
+
+/// Decides whether the latest release can be applied in place, and resolves its
+/// checksum. Windows and Linux; every other platform reports unsupported.
+///
+/// An in-app update is offered only when the release's Python dependency set
+/// matches the installed one, because the updater cannot replace `python/`
+/// (see `AppUpdatePlan`). Any uncertainty -- an unreachable asset, an install
+/// with no recorded runtime id, a malformed checksum -- reports unsupported, so
+/// the UI falls back to the full download rather than risking an app layer
+/// whose imports the installed runtime cannot satisfy.
+#[tauri::command]
+async fn check_app_update(query: AppUpdateQuery) -> Result<AppUpdateAvailability, String> {
+    #[cfg(not(any(windows, target_os = "linux")))]
+    {
+        let _ = query;
+        Ok(AppUpdateAvailability {
+            supported: false,
+            reason: Some("in-app updates are not available on this platform".to_string()),
+            ..Default::default()
+        })
+    }
+    #[cfg(any(windows, target_os = "linux"))]
+    {
+        let unsupported = |reason: &str| {
+            Ok(AppUpdateAvailability {
+                supported: false,
+                reason: Some(reason.to_string()),
+                ..Default::default()
+            })
+        };
+
+        // A root-owned install (Linux `install.sh --global` puts it in
+        // /opt/stemdeck) cannot rewrite itself. Check before promising an
+        // update we would fail to apply.
+        match app_root() {
+            Ok(root) if !app_root_is_writable(&root) => {
+                return unsupported("this install is not writable by the current user");
+            }
+            Err(e) => return unsupported(&format!("could not resolve the app directory: {e}")),
+            _ => {}
+        }
+
+        let Some(installed) = installed_runtime_id() else {
+            return unsupported("this install records no runtime id");
+        };
+        let release_marker = match fetch_text(&query.runtime_id_url).await {
+            Ok(text) => text,
+            Err(e) => return unsupported(&format!("could not read the release runtime id: {e}")),
+        };
+        let Some(release_id) = parse_runtime_id(&release_marker) else {
+            return unsupported("the release runtime id could not be parsed");
+        };
+        if release_id != installed {
+            return unsupported(&format!(
+                "python dependencies changed ({installed} -> {release_id})"
+            ));
+        }
+
+        let checksum_file = match fetch_text(&query.app_sha_url).await {
+            Ok(text) => text,
+            Err(e) => return unsupported(&format!("could not read the update checksum: {e}")),
+        };
+        let Some(sha256) = parse_sha256_line(&checksum_file) else {
+            return unsupported("the update checksum could not be parsed");
+        };
+
+        Ok(AppUpdateAvailability {
+            supported: true,
+            app_sha256: Some(sha256),
+            reason: None,
+        })
+    }
+}
+
+/// Fetch a small text file (a checksum, a version marker). Capped so a wrong
+/// URL that points at something huge cannot be read into memory unbounded.
+#[cfg(any(windows, target_os = "linux"))]
+async fn fetch_text(url: &str) -> Result<String, String> {
+    const MAX_BYTES: usize = 64 * 1024;
+    let client = reqwest::Client::builder()
+        .connect_timeout(Duration::from_secs(15))
+        .timeout(Duration::from_secs(60))
+        .build()
+        .map_err(|e| format!("failed to build HTTP client: {e}"))?;
+    let response = client
+        .get(url)
+        .send()
+        .await
+        .map_err(|e| format!("request failed: {e}"))?;
+    if !response.status().is_success() {
+        return Err(format!("HTTP {}", response.status()));
+    }
+    let bytes = response
+        .bytes()
+        .await
+        .map_err(|e| format!("read failed: {e}"))?;
+    if bytes.len() > MAX_BYTES {
+        return Err(format!("response larger than {MAX_BYTES} bytes"));
+    }
+    String::from_utf8(bytes.to_vec()).map_err(|e| format!("response was not valid UTF-8: {e}"))
+}
+
+/// Pull the hash out of a `<sha256>  <filename>` checksum file, the shape
+/// make-portable.ps1 writes (Get-FileHash + Set-Content). Rejects anything that
+/// is not exactly one 64-char hex digest so a redirect to an HTML error page
+/// can never be mistaken for a checksum.
+#[cfg(any(windows, target_os = "linux", test))]
+fn parse_sha256_line(text: &str) -> Option<String> {
+    let token = text.split_whitespace().next()?.to_ascii_lowercase();
+    let ok = token.len() == 64 && token.chars().all(|c| c.is_ascii_hexdigit());
+    ok.then_some(token)
+}
+
+/// Downloads and checksum-verifies the app-layer update. Windows and Linux
+/// only: both ship a flat directory shaped for an in-place file swap.
+#[tauri::command]
+async fn download_app_update(
+    plan: AppUpdatePlan,
+    app_handle: tauri::AppHandle,
+) -> Result<(), String> {
+    #[cfg(not(any(windows, target_os = "linux")))]
+    {
+        let _ = (plan, app_handle);
+        Err("in-app updates are not available on this platform".to_string())
+    }
+    #[cfg(any(windows, target_os = "linux"))]
+    {
+        let data_dir = local_data_dir()?;
+        let downloads = data_dir.join("downloads");
+        fs::create_dir_all(&downloads)
+            .map_err(|e| format!("failed to create {}: {e}", downloads.display()))?;
+
+        let app_archive = downloads.join(UPDATE_APP_ARCHIVE);
+        // Drop any archive left by an earlier, abandoned download so apply can
+        // never install something the current plan did not ask for.
+        let _ = fs::remove_file(&app_archive);
+
+        download_file_with_progress(&plan.app_url, &app_archive, &app_handle).await?;
+        verify_update_sha256(&app_archive, &plan.app_sha256, "app update")
+    }
+}
+
+/// Verify a freshly downloaded update archive against its expected SHA256
+/// (from the release's own published `.sha256` companion file, resolved by
+/// the frontend) before it is ever extracted. On mismatch the file is removed
+/// so a corrupt or tampered download can never be applied.
+#[cfg(any(windows, target_os = "linux"))]
+fn verify_update_sha256(path: &Path, expected: &str, label: &str) -> Result<(), String> {
+    let actual = sha256_file(path)?;
+    if !actual.eq_ignore_ascii_case(expected.trim()) {
+        let _ = fs::remove_file(path);
+        return Err(format!(
+            "{label} archive checksum mismatch (expected {expected}, got {actual}). \
+             The download may be corrupt or tampered. Click Retry to try again."
+        ));
+    }
+    Ok(())
+}
+
+/// Unpack the downloaded app layer into `destination`, in whichever format
+/// this platform's packaging script produces. Both shapes put `StemDeck[.exe]`
+/// and `backend/` at the archive root, so the caller sees the same layout.
+///
+/// tar is used on Linux rather than zip specifically because it preserves the
+/// executable bit; a zip would land StemDeck without +x and the relaunch would
+/// fail with a permission error.
+#[cfg(any(windows, target_os = "linux"))]
+fn extract_update_archive(archive: &Path, destination: &Path) -> Result<(), String> {
+    fs::create_dir_all(destination)
+        .map_err(|e| format!("failed to create {}: {e}", destination.display()))?;
+    #[cfg(windows)]
+    {
+        let file = fs::File::open(archive)
+            .map_err(|e| format!("failed to open {}: {e}", archive.display()))?;
+        let mut zip = ZipArchive::new(file)
+            .map_err(|e| format!("failed to read zip {}: {e}", archive.display()))?;
+        zip.extract(destination)
+            .map_err(|e| format!("failed to extract {}: {e}", archive.display()))
+    }
+    #[cfg(target_os = "linux")]
+    {
+        extract_tar_archive(archive, destination)
+    }
+}
+
+/// Whether this install can rewrite its own files.
+///
+/// `packaging/linux/install.sh` offers a global install into `/opt/stemdeck`,
+/// which is root-owned while the app runs as the user. Renaming the binary
+/// there fails, so the updater has to decline up front and send the user to the
+/// normal download rather than discovering it half way through a swap. Windows
+/// portable installs are user-writable by construction, but the probe is cheap
+/// and honest on both.
+#[cfg(any(windows, target_os = "linux"))]
+fn app_root_is_writable(root: &Path) -> bool {
+    let probe = root.join(".stemdeck-update-probe");
+    match fs::File::create(&probe) {
+        Ok(_) => {
+            let _ = fs::remove_file(&probe);
+            true
+        }
+        Err(_) => false,
+    }
+}
+
+/// Stops the backend and waits for the process to actually exit.
+///
+/// The regular `stop_backend` hands the kill to a background thread and
+/// returns immediately -- fine on window close, wrong here. The backend runs
+/// *from* the very directories the update is about to replace: its interpreter
+/// is `python/`, its code is `backend/`. Windows refuses to rename a directory
+/// while a handle inside it is open, so starting the swap before the process is
+/// gone fails with a permission error, or worse, part-way through. Linux would
+/// tolerate it, but a backend still serving requests from a directory being
+/// swapped out is not something to rely on either.
+#[cfg(any(windows, target_os = "linux"))]
+fn stop_backend_and_wait(state: &BackendState, timeout: Duration) -> Result<(), String> {
+    let handles = match state.inner.lock() {
+        Ok(mut guard) => guard.handles.take(),
+        Err(_) => return Err("backend state is unavailable".to_string()),
+    };
+    let Some(mut handles) = handles else {
+        return Ok(());
+    };
+    // Give uvicorn a chance to drain in-flight requests before escalating,
+    // matching what stop_backend does on window close.
+    #[cfg(unix)]
+    {
+        // SAFETY: the child was spawned by us and has not been waited on, so
+        // its pid is still valid.
+        unsafe { libc::kill(handles.child.id() as libc::pid_t, libc::SIGTERM) };
+        let grace = Instant::now() + Duration::from_secs(3);
+        while Instant::now() < grace {
+            if handles.child.try_wait().ok().flatten().is_some() {
+                return Ok(());
+            }
+            thread::sleep(Duration::from_millis(100));
+        }
+    }
+    let _ = handles.child.kill();
+    let deadline = Instant::now() + timeout;
+    loop {
+        match handles.child.try_wait() {
+            Ok(Some(_)) => return Ok(()),
+            Ok(None) => {
+                if Instant::now() >= deadline {
+                    return Err(
+                        "the audio backend did not shut down in time; update cancelled".to_string(),
+                    );
+                }
+                thread::sleep(Duration::from_millis(100));
+            }
+            Err(e) => return Err(format!("failed to wait for the audio backend to exit: {e}")),
+        }
+    }
+}
+
+/// Rename, retrying briefly on Windows sharing violations.
+///
+/// Even once the backend process is gone, a virus scanner or the search
+/// indexer can hold a transient handle inside a directory that was just
+/// written or is about to move. These clear in well under a second; without a
+/// retry an unlucky scan turns into a failed update mid-swap.
+#[cfg(any(windows, target_os = "linux"))]
+fn rename_with_retry(from: &Path, to: &Path, what: &str) -> Result<(), String> {
+    const ATTEMPTS: u32 = 10;
+    let mut last_err = None;
+    for attempt in 0..ATTEMPTS {
+        match fs::rename(from, to) {
+            Ok(()) => return Ok(()),
+            Err(e) => {
+                last_err = Some(e);
+                if attempt + 1 < ATTEMPTS {
+                    thread::sleep(Duration::from_millis(150));
+                }
+            }
+        }
+    }
+    Err(format!(
+        "failed to {what}: {}",
+        last_err
+            .map(|e| e.to_string())
+            .unwrap_or_else(|| "unknown error".to_string())
+    ))
+}
+
+/// Applies a previously downloaded+verified app update in place, then
+/// relaunches. This is the one piece of the updater with no existing analog in
+/// the runtime-pack machinery above: it replaces the *running* exe, not an idle
+/// data directory.
+///
+/// Only reachable from an explicit "Restart to update" user action, never a
+/// background timer, and the backend is stopped first, so this can never land
+/// mid-job. Only the executable and `backend/` are replaced: `python/`,
+/// `portable.txt`, `cpu-only` and `data/` are all left exactly as they are, so
+/// an NVIDIA install keeps its CUDA torch and portable/GPU detection and user
+/// data all survive untouched.
+#[tauri::command]
+fn apply_app_update(
+    state: tauri::State<BackendState>,
+    app_handle: tauri::AppHandle,
+) -> Result<(), String> {
+    #[cfg(not(any(windows, target_os = "linux")))]
+    {
+        let _ = (state, app_handle);
+        Err("in-app updates are not available on this platform".to_string())
+    }
+    #[cfg(any(windows, target_os = "linux"))]
+    {
+        let root = app_root()?;
+        let data_dir = local_data_dir()?;
+        let downloads = data_dir.join("downloads");
+        let app_archive = downloads.join(UPDATE_APP_ARCHIVE);
+        if !app_archive.is_file() {
+            return Err(
+                "no downloaded app update found -- call download_app_update first".to_string(),
+            );
+        }
+
+        // ── Phase 1: stage and validate, touching nothing live ──
+        //
+        // Everything that can fail on its own (extraction, a truncated or
+        // wrong-shaped archive) happens here, before a single live file moves.
+        // Once phase 2 starts it is only renames, so a failure cannot leave the
+        // install straddling two versions -- a new backend/ beside the old exe
+        // would be a broken app with nothing left running to repair it.
+        let staging = root.join("_update_app.tmp");
+        if staging.exists() {
+            fs::remove_dir_all(&staging)
+                .map_err(|e| format!("failed to remove {}: {e}", staging.display()))?;
+        }
+
+        let staged = (|| -> Result<PathBuf, String> {
+            extract_update_archive(&app_archive, &staging)?;
+            let new_exe = staging.join(APP_EXE_NAME);
+            if !staging.join("backend").join("app").is_dir() || !new_exe.is_file() {
+                return Err(format!(
+                    "app update archive did not contain {APP_EXE_NAME} and backend/app"
+                ));
+            }
+            Ok(new_exe)
+        })();
+
+        let new_exe = match staged {
+            Ok(path) => path,
+            Err(e) => {
+                let _ = fs::remove_dir_all(&staging);
+                return Err(e);
+            }
+        };
+
+        // ── Phase 2: swap ──
+        //
+        // The backend must be gone first: it runs from backend/, and Windows
+        // will not rename a directory with live handles inside it.
+        stop_backend_and_wait(&state, Duration::from_secs(15))?;
+
+        let backend_dir = root.join("backend");
+        let backend_old = root.join("backend.old");
+        let exe_path = root.join(APP_EXE_NAME);
+        let exe_old = root.join(format!("{APP_EXE_NAME}.old"));
+        if backend_old.exists() {
+            fs::remove_dir_all(&backend_old)
+                .map_err(|e| format!("failed to remove {}: {e}", backend_old.display()))?;
+        }
+        if exe_old.exists() {
+            let _ = fs::remove_file(&exe_old);
+        }
+
+        if backend_dir.exists() {
+            rename_with_retry(
+                &backend_dir,
+                &backend_old,
+                "move the existing backend aside",
+            )?;
+        }
+        rename_with_retry(
+            &staging.join("backend"),
+            &backend_dir,
+            "install the updated backend",
+        )?;
+
+        // The exe goes last. Windows allows renaming a running process's own
+        // on-disk image -- the OS holds the file open by handle, not by path --
+        // so this needs no elevated privileges in a user-writable portable
+        // folder.
+        //
+        // Known residual gap: these two renames are back-to-back metadata
+        // updates on one volume, but they are not a single atomic operation. A
+        // hard crash in that window would leave StemDeck.exe absent with
+        // StemDeck.exe.old holding the previous build, recoverable only by a
+        // manual rename -- unlike the swaps above there is no surviving
+        // process to self-heal it on next launch. Closing it fully needs a
+        // separate bootstrap launcher that is never itself replaced; flagging
+        // it rather than treating it as solved.
+        rename_with_retry(&exe_path, &exe_old, "move the running app aside")?;
+        rename_with_retry(&new_exe, &exe_path, "install the updated app")?;
+
+        let _ = fs::remove_dir_all(&staging);
+        let _ = fs::remove_file(&app_archive);
+
+        // Relaunch the new exe detached, then exit. The old exe, renamed aside
+        // above, keeps running under its own open handle until this process
+        // actually exits; the *.old siblings are swept up on the next launch by
+        // setup()'s post-update cleanup.
+        Command::new(&exe_path)
+            .current_dir(&root)
+            .spawn()
+            .map_err(|e| format!("failed to relaunch the updated app: {e}"))?;
+        app_handle.exit(0);
+        Ok(())
+    }
 }
 
 /// Creates required data directories and runs any pending data migrations.
@@ -3816,6 +4365,93 @@ mod tests {
         // clear_webkit_data suppresses NotFound — this is the correct behavior.
     }
 
+    #[cfg(any(windows, target_os = "linux"))]
+    #[test]
+    fn a_writable_app_root_is_detected() {
+        let dir = make_tmp();
+        assert!(super::app_root_is_writable(dir.path()));
+        // the probe must not leave anything behind
+        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 0);
+    }
+
+    // install.sh --global puts the package in /opt, root-owned, while the app
+    // runs as the user. The updater has to decline up front rather than fail
+    // part way through the swap.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_read_only_app_root_is_rejected() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = make_tmp();
+        let mut perms = fs::metadata(dir.path()).unwrap().permissions();
+        perms.set_mode(0o555);
+        fs::set_permissions(dir.path(), perms).unwrap();
+        let writable = super::app_root_is_writable(dir.path());
+        let mut restore = fs::metadata(dir.path()).unwrap().permissions();
+        restore.set_mode(0o755);
+        fs::set_permissions(dir.path(), restore).unwrap();
+        assert!(
+            !writable,
+            "a root-owned install must not be offered an in-place update"
+        );
+    }
+
+    // --- In-app updater runtime-compatibility marker (#421) ---
+
+    #[test]
+    fn parses_the_runtime_id_make_portable_writes() {
+        // Byte-for-byte what scripts/windows/make-portable.ps1 emits into
+        // python/runtime-version.json (ConvertTo-Json -Compress, UTF-8, no BOM,
+        // trailing newline). If that shape changes, this fails rather than the
+        // updater silently reading None and sending everyone to the full
+        // download forever.
+        let written = "{\"runtimeId\":\"py3.12-dbda45e38e1044cf\"}\n";
+        assert_eq!(
+            super::parse_runtime_id(written).as_deref(),
+            Some("py3.12-dbda45e38e1044cf")
+        );
+    }
+
+    #[test]
+    fn unreadable_runtime_markers_are_none_not_a_wrong_match() {
+        // Every one of these must read as "unknown", which the frontend treats
+        // as incompatible. Returning a bogus id instead could let an app-only
+        // update land on a runtime that cannot satisfy its imports.
+        for text in [
+            "",
+            "not json",
+            "{}",
+            "{\"runtimeId\":null}",
+            "{\"runtimeId\":42}",
+            "{\"version\":\"0.12.2\"}",
+        ] {
+            assert_eq!(super::parse_runtime_id(text), None, "input: {text:?}");
+        }
+    }
+
+    #[test]
+    fn parses_the_checksum_file_make_portable_writes() {
+        // "<sha256>  <filename>" -- Get-FileHash + Set-Content.
+        let sha = "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824";
+        let written = format!("{}  StemDeck-Windows-x64-app.zip\n", sha.to_uppercase());
+        assert_eq!(super::parse_sha256_line(&written).as_deref(), Some(sha));
+    }
+
+    #[test]
+    fn a_non_checksum_response_is_rejected() {
+        // An asset URL that redirects to an HTML error page must never be
+        // mistaken for a checksum -- that would verify the download against
+        // garbage instead of failing closed.
+        for text in [
+            "",
+            "<!DOCTYPE html><html>404</html>",
+            "not-a-hash  file.zip",
+            "2cf24dba  file.zip",
+            "zzf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824  f.zip",
+        ] {
+            assert_eq!(super::parse_sha256_line(text), None, "input: {text:?}");
+        }
+    }
+
     // --- macOS FFmpeg checksum verification (#172) ---
 
     #[cfg(target_os = "macos")]
@@ -4056,7 +4692,9 @@ b6052160df96b31c9b1e33854a4dcda3d4b57641b880270f31736fb9f445d384  ffmpeg-n7.1-la
     #[test]
     fn directory_has_entries_false_for_a_missing_dir() {
         let dir = make_tmp();
-        assert!(!super::directory_has_entries(&dir.path().join("does-not-exist")));
+        assert!(!super::directory_has_entries(
+            &dir.path().join("does-not-exist")
+        ));
     }
 
     #[test]
