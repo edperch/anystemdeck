@@ -1,0 +1,21 @@
+AnyStemDeck
+Copyright 2026 Ed and AnyStemDeck contributors
+
+This product is a fork of StemDeck (https://github.com/stemdeckapp/stemdeck),
+Copyright the StemDeck contributors, licensed under the Apache License,
+Version 2.0. Substantial portions of this codebase originate there
+unmodified or lightly modified; see git history for the point of divergence.
+
+This product bundles or downloads, at runtime, model weights and code from:
+
+  * Demucs / HT-Demucs (https://github.com/facebookresearch/demucs)
+    Copyright Meta Platforms, Inc. Licensed under the MIT License.
+
+  * demucs-onnx (https://github.com/StemSplit/demucs-onnx)
+    Copyright 2026 StemSplit. Licensed under the MIT License.
+    ONNX-exported HT-Demucs weights, downloaded from the StemSplitio
+    organization on Hugging Face (https://huggingface.co/StemSplitio),
+    are likewise MIT-licensed, matching the original HT-Demucs terms.
+
+See LICENSE for the full text of the Apache License, Version 2.0 under
+which this project is distributed.
