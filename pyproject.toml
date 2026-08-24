@@ -1,0 +1,133 @@
+[project]
+name = "stemdeck"
+# Version is derived from the git tag by hatch-vcs (see [tool.hatch.version]),
+# so it is never hand-edited — `git tag vX.Y.Z` is the single source of truth.
+# Builds between tags report a dev version (e.g. 0.7.0a5.dev3+g<sha>). (#169)
+dynamic = ["version"]
+description = "Paste a YouTube URL, get audio stems split into a DAW-style player."
+requires-python = ">=3.10,<3.14"
+dependencies = [
+    "fastapi>=0.115,!=0.136.3",
+    "uvicorn[standard]>=0.30",
+    # Floor raised for CVE-2026-55404 (fixed in 2026.7.4). The lock pin alone is
+    # not enough: build/Dockerfile installs from these constraints, not uv.lock.
+    "yt-dlp>=2026.7.4",
+    # Pin below 4.1: demucs 4.1.0 (2026-07-11) added a dependency on `sphn`, a
+    # Rust/CMake native package with no Intel-macOS wheel, so the x64 macOS
+    # build compiles it from source and fails (CMake dropped <3.5 support).
+    # 4.0.1 is what every prior release shipped and what the torch/torchaudio
+    # pins below were written for.
+    "demucs>=4.0.1,<4.1",
+    # Pin torch/torchaudio to 2.6.x where available — torchaudio 2.7+ removed its built-in
+    # audio writer and now requires the separate `torchcodec` package, which
+    # has ABI issues with torch 2.11. Demucs 4.0.1 calls torchaudio.save() to
+    # write stems, so it breaks on 2.7+.
+    "torch>=2.6,<2.7; sys_platform != 'darwin' or platform_machine != 'x86_64'",
+    "torchaudio>=2.6,<2.7; sys_platform != 'darwin' or platform_machine != 'x86_64'",
+    # PyTorch does not publish macOS x86_64 wheels for 2.6.x. Keep Intel macOS
+    # on the last compatible line so the x64 runtime pack can still be built.
+    "torch>=2.2,<2.3; sys_platform == 'darwin' and platform_machine == 'x86_64'",
+    "torchaudio>=2.2,<2.3; sys_platform == 'darwin' and platform_machine == 'x86_64'",
+    # torchaudio 2.6 dispatches WAV writes through libsndfile via soundfile.
+    # Without this, demucs crashes on save with "Couldn't find appropriate
+    # backend to handle uri ... drums.wav".
+    "soundfile>=0.12",
+    # BPM + key analysis on the downloaded source. Pulls numpy/scipy/numba.
+    # librosa 1.0.0 dropped its audioread dependency; audio-separator (below)
+    # still imports audioread directly, so an unpinned upper bound lets a
+    # librosa upgrade silently break the vocal-split feature (#407). Pin
+    # <1 to match what audio-separator expects and what uv.lock resolves.
+    "librosa>=0.10,<1",
+    # Beat/downbeat tracker for the click track. MIT for both code and the
+    # published weights. librosa's tracker resolves fast music to half tempo
+    # (180 BPM punk -> 90) because of its 120 BPM lognormal prior, which is not
+    # tunable away and which no confidence metric detects. Weights (81 MB) are
+    # fetched on first use through torch.hub, so they land under TORCH_HOME
+    # alongside the demucs models; librosa remains the offline fallback.
+    "beat-this>=1.1",
+    # Current llvmlite releases no longer publish macOS x86_64 wheels, which
+    # makes Intel runtime builds require a full LLVM/CMake toolchain. Keep Intel
+    # macOS on a wheel-backed Numba line.
+    "numba>=0.61,<0.62; sys_platform == 'darwin' and platform_machine == 'x86_64'",
+    # Torch 2.2's Intel macOS wheel was built against NumPy 1.x.
+    "numpy<2; sys_platform == 'darwin' and platform_machine == 'x86_64'",
+    # ITU-R BS.1770 integrated-loudness (LUFS) measurement for the
+    # post-analysis loudness card. Pure Python, depends on scipy which
+    # librosa already pulls in.
+    "pyloudnorm>=0.1.1",
+    # FastAPI multipart/form-data (file uploads) unconditionally require
+    # python-multipart — it is not an optional extra.
+    "python-multipart>=0.0.9",
+    # CVE-2026-44431 / CVE-2026-44432: sensitive header forwarding and
+    # decompression-bomb bypass fixed in 2.7.0. urllib3 is a transitive
+    # dep via requests; pin floor to pull in the fix.
+    "urllib3>=2.7.0",
+    # Pure-Python QR code generator used by the /api/qr endpoint (server
+    # access QR codes in the desktop settings panel).
+    "segno>=1.6",
+    # On-demand lead/backing vocal split (#275). Ships with UVR-MDX-NET
+    # Karaoke 2 (ONNX) as the default model -- see docs/models.md for why the
+    # torch-native alternative (a community roformer checkpoint) was rejected
+    # on licensing grounds. Excludes Intel macOS: requires numpy>=2/torch>=2.3,
+    # which conflicts with the numpy<2/torch<2.3 pins that platform is stuck on
+    # above; the feature gates itself off there rather than fighting the pins.
+    # CPU-only onnxruntime for now -- onnxruntime-gpu is a separate, mutually
+    # exclusive package requiring the same kind of CPU/GPU build-time split
+    # torch already gets via make-portable.{sh,ps1} (see versioning.md); wiring
+    # that up for this occasional, best-effort action is a follow-up, not a
+    # blocker, since the main separation already gets full GPU accel via torch.
+    "audio-separator>=0.24; sys_platform != 'darwin' or platform_machine != 'x86_64'",
+    "onnxruntime>=1.19; sys_platform != 'darwin' or platform_machine != 'x86_64'",
+    # audio-separator imports this directly; librosa<1 pulls it in transitively
+    # today, but pin it explicitly so this survives an eventual librosa 1.x move
+    # (#407) -- same platform gate as audio-separator itself.
+    "audioread>=3.0; sys_platform != 'darwin' or platform_machine != 'x86_64'",
+]
+
+[project.optional-dependencies]
+dev = [
+    "ruff>=0.6",
+    "pytest>=8",
+    "pytest-asyncio>=0.24",
+    "httpx>=0.27",
+]
+
+[build-system]
+requires = ["hatchling", "hatch-vcs"]
+build-backend = "hatchling.build"
+
+# Derive the version from git tags. Writes app/_version.py at build time as a
+# runtime fallback for environments without installed package metadata.
+[tool.hatch.version]
+source = "vcs"
+# Used when the tag can't be reached (e.g. CI's shallow/tagless clone) so the
+# build never hard-fails. Real builds derive from the tag or the pinned
+# SETUPTOOLS_SCM_PRETEND_VERSION. (#169)
+fallback-version = "0.0.0"
+
+[tool.hatch.build.hooks.vcs]
+version-file = "app/_version.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+# app/_version.py is generated by hatch-vcs at build/sync time — don't lint it.
+exclude = ["jobs", ".run", "static/vendor", "app/_version.py"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM"]
+ignore = [
+    "E501",   # line too long -- format-check is the gate, not lint
+    "B008",   # FastAPI uses Depends(...) in defaults
+    "SIM105", # try/except/pass is fine; contextlib.suppress is heavier for one-shot warm-up imports
+]
+
+[tool.ruff.lint.isort]
+split-on-trailing-comma = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"

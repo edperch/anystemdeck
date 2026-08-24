@@ -1,0 +1,116 @@
+# Two-stage build:
+#   * builder  -- has gcc/build-essential/curl/unzip/pip etc.; produces
+#                 an isolated /opt/venv with all Python deps installed
+#                 and a fetched deno binary.
+#   * runner   -- only the runtime needs: Python (slim), ffmpeg,
+#                 ca-certificates, the venv copied from the builder,
+#                 and our app code. No compilers, no pip cache, no
+#                 download tooling -- shaves ~150-300 MB off the
+#                 single-stage image and reduces attack surface.
+
+# ─── Stage 1: builder ────────────────────────────────────────────
+FROM python:3.12-slim AS builder
+
+ENV PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+# Build deps for pip wheels that fall back to source compilation
+# (numpy/scipy ship manylinux wheels, but smaller deps occasionally
+# need a compiler). Plus curl/unzip to fetch deno.
+RUN apt-get update \
+    && apt-get upgrade -y \
+    && apt-get install -y --no-install-recommends \
+        build-essential \
+        curl \
+        ca-certificates \
+        unzip \
+    && rm -rf /var/lib/apt/lists/*
+
+# deno -- yt-dlp uses it as the JS runtime for YouTube format
+# extraction. Staged here so the runner doesn't need curl/unzip.
+ARG TARGETARCH
+RUN case "${TARGETARCH:-$(dpkg --print-architecture)}" in \
+        amd64) DENO_ARCH=x86_64-unknown-linux-gnu ;; \
+        arm64) DENO_ARCH=aarch64-unknown-linux-gnu ;; \
+        *) echo "Unsupported arch: ${TARGETARCH}" && exit 1 ;; \
+    esac \
+    && curl -fsSL -o /tmp/deno.zip "https://github.com/denoland/deno/releases/latest/download/deno-${DENO_ARCH}.zip" \
+    && unzip /tmp/deno.zip -d /usr/local/bin \
+    && rm /tmp/deno.zip \
+    && /usr/local/bin/deno --version
+
+# Isolated venv -- the runner stage copies /opt/venv wholesale,
+# inheriting all installed deps without dragging in pip caches,
+# /var/lib/apt state, or build tools.
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+WORKDIR /app
+COPY pyproject.toml ./
+COPY app/ ./app/
+COPY static/ ./static/
+# The version is git-derived (hatch-vcs), but the build context has no .git, so
+# pin it explicitly: `docker build --build-arg VERSION=0.7.0-alpha.4 ...`
+# (defaults to 0.0.0 for ad-hoc local builds). #169
+ARG VERSION=0.0.0
+RUN SETUPTOOLS_SCM_PRETEND_VERSION="${VERSION#v}" pip install . --timeout 300
+
+# ─── Stage 2: runner ─────────────────────────────────────────────
+FROM python:3.12-slim AS runner
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PATH="/opt/venv/bin:$PATH" \
+    TORCH_HOME=/cache/torch \
+    XDG_CACHE_HOME=/cache
+
+# Runtime-only OS deps. ffmpeg has many shared libs (libav*, libsw*,
+# libpostproc), so we install via apt rather than copy-pasting binaries
+# and chasing transitive .so dependencies. ca-certificates is needed
+# for HTTPS to YouTube.
+RUN apt-get update \
+    && apt-get upgrade -y \
+    && apt-get install -y --no-install-recommends \
+        ffmpeg \
+        ca-certificates \
+        gosu \
+    && rm -rf /var/lib/apt/lists/*
+
+# Deno binary fetched in stage 1 (single self-contained file).
+COPY --from=builder /usr/local/bin/deno /usr/local/bin/deno
+
+# Pre-built Python virtualenv with all our deps. The PATH env above
+# means `python`, `uvicorn`, `pip`, etc. resolve into the venv with
+# no further configuration.
+COPY --from=builder /opt/venv /opt/venv
+
+# Application code -- copied to /app rather than only relied-on via
+# site-packages because app/core/config.py derives STATIC_DIR from
+# __file__'s parent chain, and the cwd-rooted /app/app version sits
+# earlier on sys.path than the venv install of `app`. Without the
+# COPY, STATIC_DIR would resolve into site-packages where static/
+# wasn't included by hatchling's wheel target.
+WORKDIR /app
+COPY app/ ./app/
+COPY static/ ./static/
+
+# Create the app user and own all non-bind-mounted paths. /app/jobs is a
+# bind mount at runtime -- the entrypoint script re-chowns it to app:app
+# before dropping privileges, handling the case where Docker creates the
+# host directory as root on first run.
+RUN groupadd --system --gid 1001 app \
+    && useradd --system --uid 1001 --gid app --home /app --no-create-home app \
+    && mkdir -p /cache /jobs \
+    && chown -R app:app /app /cache /jobs
+
+COPY build/docker-entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+EXPOSE 8000
+ENTRYPOINT ["/entrypoint.sh"]
+# --timeout-graceful-shutdown bounds the wait for open connections. The queue
+# SSE stream stays open while a browser tab is on the app, and without this
+# `docker stop` would sit through its full 10s timeout and then SIGKILL --
+# which would skip the lifespan teardown that reaps the demucs worker.
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--timeout-graceful-shutdown", "5"]
