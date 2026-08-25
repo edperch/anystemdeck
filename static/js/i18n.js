@@ -28,11 +28,29 @@ export const LANGUAGES = [
   { code: "zh-Hans", flag: "🇨🇳", name: "简体中文" },
   { code: "de", flag: "🇩🇪", name: "Deutsch" },
   { code: "fr", flag: "🇫🇷", name: "Français" },
-  { code: "pt", flag: "🇧🇷", name: "Português" },
+  { code: "pt", flag: "🇧🇷", name: "Português (Brasil)" },
+  { code: "pt-PT", flag: "🇵🇹", name: "Português (Portugal)" },
   { code: "id", flag: "🇮🇩", name: "Bahasa Indonesia" },
 ];
 const SUPPORTED_CODES = new Set(LANGUAGES.map((l) => l.code));
 const DEFAULT_LANG = "en";
+
+// Regional variants resolve through their base language before English.
+//
+// European and Brazilian Portuguese share the overwhelming majority of 461
+// keys. Duplicating the whole table to change "ficheiro" and a few dozen
+// verb forms would mean every future key had to be written twice and would
+// drift the moment one was missed. A variant carries only what genuinely
+// differs, and falls through for the rest.
+const FALLBACK = { "pt-PT": "pt" };
+
+function _tables() {
+  const chain = [_lang];
+  const base = FALLBACK[_lang];
+  if (base) chain.push(base);
+  chain.push(DEFAULT_LANG);
+  return chain.map((code) => TRANSLATIONS[code]).filter(Boolean);
+}
 
 let _lang = DEFAULT_LANG;
 const _listeners = new Set();
@@ -46,8 +64,11 @@ function _detectDefault() {
   // unless it's explicitly a traditional-script region, which we don't ship).
   if (lower.startsWith("zh")) return "zh-Hans";
   if (lower.startsWith("de")) return "de";
-  // Portuguese: pt-BR, pt-PT, or bare "pt" all map to the single pt table
-  // (written in Brazilian Portuguese, the more widely used variant).
+  // Portuguese: an explicit Portugal locale gets the European variant, which
+  // overrides only the words that differ and falls through to pt for the rest.
+  // pt-BR and a bare "pt" both take the Brazilian table, which is the more
+  // widely used variant and so the sensible default for an unqualified tag.
+  if (lower.startsWith("pt-pt") || lower === "pt_pt") return "pt-PT";
   if (lower.startsWith("pt")) return "pt";
   if (lower.startsWith("id")) return "id";
   return "en";
@@ -94,8 +115,10 @@ function _interpolate(str, vars) {
 }
 
 export function t(key, vars) {
-  const table = TRANSLATIONS[_lang] || TRANSLATIONS[DEFAULT_LANG];
-  const str = table[key] ?? TRANSLATIONS[DEFAULT_LANG][key];
+  let str;
+  for (const table of _tables()) {
+    if (table[key] != null) { str = table[key]; break; }
+  }
   if (str == null) {
     console.warn(`[i18n] missing key "${key}"`);
     return key;
@@ -110,7 +133,6 @@ export function t(key, vars) {
 // and the fallback chain below finds it regardless of computed form). Polish
 // needs three (one / few / many) per its numeral rules.
 export function plural(key, count, vars) {
-  const table = TRANSLATIONS[_lang] || TRANSLATIONS[DEFAULT_LANG];
   let form;
   if (_lang === "pl") {
     const n = Math.abs(count);
@@ -127,11 +149,14 @@ export function plural(key, count, vars) {
   // English -- languages with no grammatical plural (Japanese, Chinese) only
   // define ".other", so a singular count must resolve there, not to an
   // English ".one" string mixed into otherwise-translated text.
-  const str =
-    table[fullKey] ??
-    table[`${key}.other`] ??
-    TRANSLATIONS[DEFAULT_LANG][fullKey] ??
-    TRANSLATIONS[DEFAULT_LANG][`${key}.other`];
+  // Walk the same chain as t(), trying each table's exact form before its
+  // "other" bucket, so a variant that does not override a plural falls through
+  // to its base language rather than to English.
+  let str;
+  for (const table of _tables()) {
+    str = table[fullKey] ?? table[`${key}.other`];
+    if (str != null) break;
+  }
   if (str == null) {
     console.warn(`[i18n] missing plural key "${fullKey}"`);
     return key;
@@ -184,7 +209,7 @@ function applyStemRowAriaLabels(scope) {
 const en = {
   "doc.title": "StemDeck — split any track into stems",
 
-  "topbar.urlPlaceholder": "Paste a YouTube or SoundCloud link, or drop an audio file…",
+  "topbar.urlPlaceholder": "Search, or paste a YouTube or SoundCloud link, or drop an audio file…",
   "topbar.removeFile": "Remove file",
   "topbar.uploadFile": "Upload audio file",
   "extract.label": "Extract",
@@ -235,6 +260,19 @@ const en = {
 
   "search.ariaLabel": "Search library",
   "search.placeholder": "Search or #tag…",
+  "search.tab.ytSongs": "YouTube songs",
+  "search.tab.ytPlaylists": "YouTube playlists",
+  "search.tab.scSongs": "SoundCloud songs",
+  "search.searching": "Searching…",
+  "search.noResults": "No results",
+  "search.failed": "Search failed. Check your connection.",
+  "search.tooLong": "Over {mins} min",
+  "search.tooLongHint": "Longer than your {mins} minute limit. Change it in Settings.",
+  "search.preview": "Preview",
+  "search.play": "Play",
+  "search.pause": "Pause",
+  "search.seek": "Seek",
+  "search.previewFailed": "Preview unavailable",
   "search.tagSuggestions": "Tag suggestions",
   "search.placeholderLibrary": "Search library…",
   "search.placeholderFavorites": "Search favorites…",
@@ -418,7 +456,7 @@ const en = {
   "settings.language.desc": "Display language for this app.",
 
   "settings.maxDuration.title": "Max track length",
-  "settings.maxDuration.desc": "Longest track accepted for processing, in minutes (max 20).",
+  "settings.maxDuration.desc": "Longest track accepted for processing, in minutes (max {max}).",
   "settings.playlistLimit.title": "Playlist import limit",
   "settings.playlistLimit.desc": "Most tracks one playlist import will queue (max 200).",
   "settings.cookies.title": "YouTube cookies",
@@ -695,7 +733,7 @@ const en = {
 const pl = {
   "doc.title": "StemDeck — rozdziel dowolny utwór na ścieżki",
 
-  "topbar.urlPlaceholder": "Wklej link YouTube lub SoundCloud albo upuść plik audio…",
+  "topbar.urlPlaceholder": "Szukaj albo wklej link YouTube lub SoundCloud, albo upuść plik audio…",
   "topbar.removeFile": "Usuń plik",
   "topbar.uploadFile": "Wgraj plik audio",
   "extract.label": "Wyodrębnij",
@@ -746,6 +784,19 @@ const pl = {
 
   "search.ariaLabel": "Szukaj w bibliotece",
   "search.placeholder": "Szukaj lub #tag…",
+  "search.tab.ytSongs": "Utwory YouTube",
+  "search.tab.ytPlaylists": "Playlisty YouTube",
+  "search.tab.scSongs": "Utwory SoundCloud",
+  "search.searching": "Szukanie…",
+  "search.noResults": "Brak wyników",
+  "search.failed": "Wyszukiwanie nie powiodło się. Sprawdź połączenie.",
+  "search.tooLong": "Ponad {mins} min",
+  "search.tooLongHint": "Dłuższy niż Twój limit {mins} minut. Zmień go w Ustawieniach.",
+  "search.preview": "Odsłuch",
+  "search.play": "Odtwórz",
+  "search.pause": "Pauza",
+  "search.seek": "Przewiń",
+  "search.previewFailed": "Odsłuch niedostępny",
   "search.tagSuggestions": "Podpowiedzi tagów",
   "search.placeholderLibrary": "Szukaj w bibliotece…",
   "search.placeholderFavorites": "Szukaj w ulubionych…",
@@ -926,7 +977,7 @@ const pl = {
   "settings.language.desc": "Język wyświetlania tej aplikacji.",
 
   "settings.maxDuration.title": "Maks. długość utworu",
-  "settings.maxDuration.desc": "Najdłuższy utwór akceptowany do przetworzenia, w minutach (maks. 20).",
+  "settings.maxDuration.desc": "Najdłuższy utwór akceptowany do przetworzenia, w minutach (maks. {max}).",
   "settings.playlistLimit.title": "Limit importu playlisty",
   "settings.playlistLimit.desc": "Ile utworów najwyżej zakolejkuje jeden import playlisty (maks. 200).",
   "settings.cookies.title": "Pliki cookie YouTube",
@@ -1196,7 +1247,7 @@ const pl = {
 const ja = {
   "doc.title": "StemDeck — トラックをパートごとに分離",
 
-  "topbar.urlPlaceholder": "YouTubeやSoundCloudのリンクを貼り付けるか、音声ファイルをドロップ…",
+  "topbar.urlPlaceholder": "検索するか、YouTube・SoundCloud のリンクを貼り付けるか、音声ファイルをドロップ…",
   "topbar.removeFile": "ファイルを削除",
   "topbar.uploadFile": "音声ファイルをアップロード",
   "extract.label": "抽出",
@@ -1247,6 +1298,19 @@ const ja = {
 
   "search.ariaLabel": "ライブラリを検索",
   "search.placeholder": "検索または#タグ…",
+  "search.tab.ytSongs": "YouTube の曲",
+  "search.tab.ytPlaylists": "YouTube のプレイリスト",
+  "search.tab.scSongs": "SoundCloud の曲",
+  "search.searching": "検索中…",
+  "search.noResults": "結果がありません",
+  "search.failed": "検索に失敗しました。接続を確認してください。",
+  "search.tooLong": "{mins} 分超",
+  "search.tooLongHint": "設定した {mins} 分の上限を超えています。設定で変更できます。",
+  "search.preview": "試聴",
+  "search.play": "再生",
+  "search.pause": "一時停止",
+  "search.seek": "シーク",
+  "search.previewFailed": "試聴できません",
   "search.tagSuggestions": "タグ候補",
   "search.placeholderLibrary": "ライブラリを検索…",
   "search.placeholderFavorites": "お気に入りを検索…",
@@ -1426,7 +1490,7 @@ const ja = {
   "settings.language.desc": "このアプリの表示言語。",
 
   "settings.maxDuration.title": "最大トラック長",
-  "settings.maxDuration.desc": "処理を受け付ける最長トラック長(分単位、最大20分)。",
+  "settings.maxDuration.desc": "処理を受け付ける最長トラック長(分単位、最大{max}分)。",
   "settings.playlistLimit.title": "プレイリストインポート上限",
   "settings.playlistLimit.desc": "プレイリストのインポート1回でキューされる最大トラック数(最大200)。",
   "settings.cookies.title": "YouTube の Cookie",
@@ -1672,7 +1736,7 @@ const ja = {
 const zhHans = {
   "doc.title": "StemDeck — 将任意曲目分离为音轨",
 
-  "topbar.urlPlaceholder": "粘贴 YouTube 或 SoundCloud 链接,或拖放音频文件…",
+  "topbar.urlPlaceholder": "搜索,或粘贴 YouTube 或 SoundCloud 链接,或拖放音频文件…",
   "topbar.removeFile": "移除文件",
   "topbar.uploadFile": "上传音频文件",
   "extract.label": "提取",
@@ -1723,6 +1787,19 @@ const zhHans = {
 
   "search.ariaLabel": "搜索资料库",
   "search.placeholder": "搜索或 #标签…",
+  "search.tab.ytSongs": "YouTube 歌曲",
+  "search.tab.ytPlaylists": "YouTube 播放列表",
+  "search.tab.scSongs": "SoundCloud 歌曲",
+  "search.searching": "搜索中…",
+  "search.noResults": "没有结果",
+  "search.failed": "搜索失败，请检查网络连接。",
+  "search.tooLong": "超过 {mins} 分钟",
+  "search.tooLongHint": "超过您设置的 {mins} 分钟上限。可在“设置”中修改。",
+  "search.preview": "试听",
+  "search.play": "播放",
+  "search.pause": "暂停",
+  "search.seek": "跳转",
+  "search.previewFailed": "无法试听",
   "search.tagSuggestions": "标签建议",
   "search.placeholderLibrary": "搜索资料库…",
   "search.placeholderFavorites": "搜索收藏…",
@@ -1902,7 +1979,7 @@ const zhHans = {
   "settings.language.desc": "此应用的显示语言。",
 
   "settings.maxDuration.title": "最长曲目时长",
-  "settings.maxDuration.desc": "可处理的最长曲目时长,单位为分钟(最长20分钟)。",
+  "settings.maxDuration.desc": "可处理的最长曲目时长,单位为分钟(最长{max}分钟)。",
   "settings.playlistLimit.title": "播放列表导入上限",
   "settings.playlistLimit.desc": "单次播放列表导入最多排队的曲目数(最多200首)。",
   "settings.cookies.title": "YouTube Cookie",
@@ -2148,7 +2225,7 @@ const zhHans = {
 const de = {
   "doc.title": "StemDeck — jeden Track in Stems zerlegen",
 
-  "topbar.urlPlaceholder": "YouTube- oder SoundCloud-Link einfügen oder Audiodatei ablegen…",
+  "topbar.urlPlaceholder": "Suchen, einen YouTube- oder SoundCloud-Link einfügen oder eine Audiodatei ablegen…",
   "topbar.removeFile": "Datei entfernen",
   "topbar.uploadFile": "Audiodatei hochladen",
   "extract.label": "Extrahieren",
@@ -2199,6 +2276,19 @@ const de = {
 
   "search.ariaLabel": "Bibliothek durchsuchen",
   "search.placeholder": "Suchen oder #Tag…",
+  "search.tab.ytSongs": "YouTube-Titel",
+  "search.tab.ytPlaylists": "YouTube-Playlists",
+  "search.tab.scSongs": "SoundCloud-Titel",
+  "search.searching": "Suche läuft…",
+  "search.noResults": "Keine Ergebnisse",
+  "search.failed": "Suche fehlgeschlagen. Verbindung prüfen.",
+  "search.tooLong": "Über {mins} Min.",
+  "search.tooLongHint": "Länger als Ihr Limit von {mins} Minuten. Änderbar in den Einstellungen.",
+  "search.preview": "Vorhören",
+  "search.play": "Abspielen",
+  "search.pause": "Pause",
+  "search.seek": "Springen",
+  "search.previewFailed": "Vorhören nicht möglich",
   "search.tagSuggestions": "Tag-Vorschläge",
   "search.placeholderLibrary": "Bibliothek durchsuchen…",
   "search.placeholderFavorites": "Favoriten durchsuchen…",
@@ -2379,7 +2469,7 @@ const de = {
   "settings.language.desc": "Anzeigesprache für diese App.",
 
   "settings.maxDuration.title": "Maximale Tracklänge",
-  "settings.maxDuration.desc": "Längster zur Verarbeitung akzeptierter Track, in Minuten (max. 20).",
+  "settings.maxDuration.desc": "Längster zur Verarbeitung akzeptierter Track, in Minuten (max. {max}).",
   "settings.playlistLimit.title": "Playlist-Import-Limit",
   "settings.playlistLimit.desc": "Höchste Anzahl Tracks, die ein Playlist-Import einreiht (max. 200).",
   "settings.cookies.title": "YouTube-Cookies",
@@ -2635,7 +2725,7 @@ const de = {
 const pt = {
   "doc.title": "StemDeck — separe qualquer faixa em stems",
 
-  "topbar.urlPlaceholder": "Cole um link do YouTube ou SoundCloud, ou solte um arquivo de áudio…",
+  "topbar.urlPlaceholder": "Pesquise, ou cole um link do YouTube ou SoundCloud, ou solte um arquivo de áudio…",
   "topbar.removeFile": "Remover arquivo",
   "topbar.uploadFile": "Enviar arquivo de áudio",
   "extract.label": "Extrair",
@@ -2686,6 +2776,19 @@ const pt = {
 
   "search.ariaLabel": "Pesquisar biblioteca",
   "search.placeholder": "Pesquisar ou #tag…",
+  "search.tab.ytSongs": "Músicas do YouTube",
+  "search.tab.ytPlaylists": "Playlists do YouTube",
+  "search.tab.scSongs": "Músicas do SoundCloud",
+  "search.searching": "Pesquisando…",
+  "search.noResults": "Nenhum resultado",
+  "search.failed": "A pesquisa falhou. Verifique sua conexão.",
+  "search.tooLong": "Mais de {mins} min",
+  "search.tooLongHint": "Maior que o seu limite de {mins} minutos. Altere nas Configurações.",
+  "search.preview": "Prévia",
+  "search.play": "Reproduzir",
+  "search.pause": "Pausar",
+  "search.seek": "Avançar",
+  "search.previewFailed": "Prévia indisponível",
   "search.tagSuggestions": "Sugestões de tags",
   "search.placeholderLibrary": "Pesquisar biblioteca…",
   "search.placeholderFavorites": "Pesquisar favoritos…",
@@ -2866,7 +2969,7 @@ const pt = {
   "settings.language.desc": "Idioma de exibição deste aplicativo.",
 
   "settings.maxDuration.title": "Duração máxima da faixa",
-  "settings.maxDuration.desc": "Faixa mais longa aceita para processamento, em minutos (máx. 20).",
+  "settings.maxDuration.desc": "Faixa mais longa aceita para processamento, em minutos (máx. {max}).",
   "settings.playlistLimit.title": "Limite de importação de playlist",
   "settings.playlistLimit.desc": "Máximo de faixas que uma importação de playlist enfileira (máx. 200).",
   "settings.cookies.title": "Cookies do YouTube",
@@ -3124,7 +3227,7 @@ const pt = {
 const id = {
   "doc.title": "StemDeck — pisahkan trek apa pun menjadi stem",
 
-  "topbar.urlPlaceholder": "Tempel tautan YouTube atau SoundCloud, atau seret file audio…",
+  "topbar.urlPlaceholder": "Cari, atau tempel tautan YouTube atau SoundCloud, atau seret file audio…",
   "topbar.removeFile": "Hapus file",
   "topbar.uploadFile": "Unggah file audio",
   "extract.label": "Ekstrak",
@@ -3175,6 +3278,19 @@ const id = {
 
   "search.ariaLabel": "Cari pustaka",
   "search.placeholder": "Cari atau #tag…",
+  "search.tab.ytSongs": "Lagu YouTube",
+  "search.tab.ytPlaylists": "Playlist YouTube",
+  "search.tab.scSongs": "Lagu SoundCloud",
+  "search.searching": "Mencari…",
+  "search.noResults": "Tidak ada hasil",
+  "search.failed": "Pencarian gagal. Periksa koneksi Anda.",
+  "search.tooLong": "Lebih {mins} mnt",
+  "search.tooLongHint": "Lebih panjang dari batas {mins} menit Anda. Ubah di Pengaturan.",
+  "search.preview": "Pratinjau",
+  "search.play": "Putar",
+  "search.pause": "Jeda",
+  "search.seek": "Geser",
+  "search.previewFailed": "Pratinjau tidak tersedia",
   "search.tagSuggestions": "Saran tag",
   "search.placeholderLibrary": "Cari pustaka…",
   "search.placeholderFavorites": "Cari favorit…",
@@ -3354,7 +3470,7 @@ const id = {
   "settings.language.desc": "Bahasa tampilan untuk aplikasi ini.",
 
   "settings.maxDuration.title": "Panjang trek maksimum",
-  "settings.maxDuration.desc": "Trek terpanjang yang diterima untuk diproses, dalam menit (maks. 20).",
+  "settings.maxDuration.desc": "Trek terpanjang yang diterima untuk diproses, dalam menit (maks. {max}).",
   "settings.playlistLimit.title": "Batas impor playlist",
   "settings.playlistLimit.desc": "Jumlah trek terbanyak yang akan diantrekan satu kali impor playlist (maks. 200).",
   "settings.cookies.title": "Cookie YouTube",
@@ -3600,7 +3716,7 @@ const id = {
 const fr = {
   "doc.title": "StemDeck — séparez n'importe quel morceau en pistes",
 
-  "topbar.urlPlaceholder": "Collez un lien YouTube ou SoundCloud, ou déposez un fichier audio…",
+  "topbar.urlPlaceholder": "Recherchez, ou collez un lien YouTube ou SoundCloud, ou déposez un fichier audio…",
   "topbar.removeFile": "Retirer le fichier",
   "topbar.uploadFile": "Importer un fichier audio",
   "extract.label": "Extraire",
@@ -3651,6 +3767,19 @@ const fr = {
 
   "search.ariaLabel": "Rechercher dans la bibliothèque",
   "search.placeholder": "Rechercher ou #tag…",
+  "search.tab.ytSongs": "Morceaux YouTube",
+  "search.tab.ytPlaylists": "Playlists YouTube",
+  "search.tab.scSongs": "Morceaux SoundCloud",
+  "search.searching": "Recherche…",
+  "search.noResults": "Aucun résultat",
+  "search.failed": "La recherche a échoué. Vérifiez votre connexion.",
+  "search.tooLong": "Plus de {mins} min",
+  "search.tooLongHint": "Plus long que votre limite de {mins} minutes. Modifiable dans les Réglages.",
+  "search.preview": "Écouter",
+  "search.play": "Lecture",
+  "search.pause": "Pause",
+  "search.seek": "Naviguer",
+  "search.previewFailed": "Écoute indisponible",
   "search.tagSuggestions": "Suggestions de tags",
   "search.placeholderLibrary": "Rechercher dans la bibliothèque…",
   "search.placeholderFavorites": "Rechercher dans les favoris…",
@@ -3832,7 +3961,7 @@ const fr = {
   "settings.language.desc": "Langue d'affichage de l'application.",
 
   "settings.maxDuration.title": "Durée maximale d'un morceau",
-  "settings.maxDuration.desc": "Durée maximale acceptée pour le traitement, en minutes (max. 20).",
+  "settings.maxDuration.desc": "Durée maximale acceptée pour le traitement, en minutes (max. {max}).",
   "settings.playlistLimit.title": "Limite d'import de playlist",
   "settings.playlistLimit.desc": "Nombre maximal de morceaux mis en file lors d'un import de playlist (max. 200).",
   "settings.cookies.title": "Cookies YouTube",
@@ -4086,4 +4215,97 @@ const fr = {
   "resetConfirm.failedConnection": "Échec de la réinitialisation — vérifiez votre connexion.",
 };
 
-export const TRANSLATIONS = { en, pl, ja, "zh-Hans": zhHans, de, fr, pt, id };
+// European Portuguese. Overrides only: anything not listed here resolves
+// through pt (see FALLBACK), so the two variants cannot drift and a key
+// added to pt later is picked up here rather than reverting to English.
+const ptPT = {
+  "metro.note.full": "Clique a {bpm} BPM, {conf}% das batidas coincidem com uma batida de bateria, acentuando a cada {accent} batidas. Use /2 ou x2 se o clique parecer metade ou o dobro da velocidade.",
+  "metro.note.noAccent": "Clique a {bpm} BPM, {conf}% das batidas coincidem com uma batida de bateria. Use /2 ou x2 se o clique parecer metade ou o dobro da velocidade.",
+  "metro.note.fallback": "Clique a {bpm} BPM do rastreador alternativo. Use /2 ou x2 se o clique parecer metade ou o dobro da velocidade.",
+  "export.mixing": "A exportar…",
+  "job.cancelling": "A cancelar…",
+  "job.processing": "A processar",
+  "job.working": "A processar…",
+  "library.syncing": "A sincronizar…",
+  "queue.starting": "A iniciar…",
+  "resetConfirm.resetting": "A repor…",
+  "search.searching": "A pesquisar…",
+  "sections.saving": "A guardar",
+  "settings.exportLogs.preparing": "A preparar…",
+  "settings.logs.loading": "A carregar…",
+  "settings.stemsLocation.resetting": "A repor…",
+  "settings.stemsLocation.syncing": "A sincronizar…",
+  "playlist.skippingPrefix": "A ignorar: {list}.",
+  "settings.tab.registry": "Registo",
+  "settings.registry.title": "Registo de tarefas",
+  "settings.registry.aria": "Registo de tarefas (só de leitura)",
+  "settings.registry.desc": "Vista só de leitura de <code>registry.json</code>, a lista persistida de tarefas concluídas no disco.",
+  "settings.language.desc": "Idioma de apresentação desta aplicação.",
+  "settings.logs.application.title": "Log da aplicação",
+  "settings.logs.applicationTab": "Log da aplicação",
+  "settings.logs.applicationAria": "Log da aplicação (só de leitura)",
+  "settings.logs.application.desc": "A última hora de <code>stemdeck.log</code>, atividade de pipeline, API e tarefas. Só de leitura.",
+  "settings.logs.backendAria": "Log do backend (só de leitura)",
+  "settings.logs.backend.desc": "A última hora de <code>backend.log</code>, saída bruta do processo Python incorporado, incluindo qualquer coisa que o tenha bloqueado antes de o log da aplicação conseguir registar. Apenas app desktop. Só de leitura.",
+  "library.syncFailed": "Falha na sincronização, verifique a sua ligação.",
+  "resetConfirm.failedConnection": "Falha ao repor, verifique a sua ligação.",
+  "search.failed": "A pesquisa falhou. Verifique a sua ligação.",
+  "settings.network.noConnection": "Nenhuma ligação de rede local detetada.",
+  "settings.stemsLocation.resetFailed": "Falha ao repor, verifique a sua ligação.",
+  "settings.stemsLocation.syncFailed": "Falha na sincronização, verifique a sua ligação.",
+  "beatgrid.resetTitle": "Descartar todas as edições e restaurar a grelha detetada",
+  "click.auto": "Auto (detetado)",
+  "click.detected": "Tempo detetado",
+  "metro.note.detectedMultiBar": "Clique a {bpm} BPM, {conf}% das batidas coincidem com uma batida de bateria, acentuando {count} regiões métricas detetadas. Use /2 ou x2 se o clique parecer metade ou o dobro da velocidade.",
+  "metro.note.detectedSingleBar": "Clique a {bpm} BPM, {conf}% das batidas coincidem com uma batida de bateria, acentuando {beats}/4 a partir do tempo forte detetado. Use /2 ou x2 se o clique parecer metade ou o dobro da velocidade.",
+  "beatgrid.barLineTitle": "Clique numa batida para a marcar como tempo forte",
+  "beatgrid.deleteTitle": "Clique numa batida para a remover",
+  "playlist.confirmBody.one": "Coloca em fila <strong>{count}</strong> faixa, uma de cada vez, numa pasta com o mesmo nome.{skipped}",
+  "playlist.confirmBody.other": "Coloca em fila <strong>{count}</strong> faixas, uma de cada vez, numa pasta com o mesmo nome.{skipped}",
+  "favorites.empty": "Ainda sem favoritos, clique no ♥ de uma faixa para a guardar",
+  "topbar.urlPlaceholder": "Pesquise, ou cole um link do YouTube ou SoundCloud, ou largue um ficheiro de áudio…",
+  "topbar.removeFile": "Remover ficheiro",
+  "topbar.uploadFile": "Carregar ficheiro de áudio",
+  "library.importedFile": "Ficheiro importado",
+  "track.localFile": "Ficheiro local",
+  "settings.cookies.invalid": "Ficheiro não encontrado ou ilegível.",
+  "upload.unsupportedFormat": "Apenas ficheiros MP3, WAV, FLAC, MP4, M4A, OGG e Opus são compatíveis.",
+  "upload.fileTooLarge": "O ficheiro é demasiado grande ({size}). O máximo é {max}.",
+  "upload.skippedFiles.one": "{count} ficheiro ignorado ({reason}).",
+  "upload.skippedFiles.other": "{count} ficheiros ignorados ({reason}).",
+  "settings.logs.noFilesYet": "Ainda não há ficheiros de log{folderNote}. O registo começa na primeira mensagem após o arranque.",
+  "settings.logs.location.desc": "Onde o StemDeck grava os logs nesta máquina. Só de leitura, abra-os num gestor de ficheiros ou use Exportar logs.",
+  "nav.settings": "Definições",
+  "settings.title": "Definições",
+  "settings.closeAria": "Fechar definições",
+  "settings.readOnlyServer": "Estas definições são só de leitura no modo servidor. Para as alterar, atualize a configuração do servidor (ex.: docker-compose.yml) e reinicie.",
+  "search.tooLongHint": "Maior que o seu limite de {mins} minutos. Altere nas Definições.",
+  "settings.folder.save": "Guardar",
+  "folderEditor.save": "Guardar",
+  "sections.savingAria": "A guardar secções",
+  "aria.download": "Transferir {name}",
+  "release.download": "Transferir",
+  "release.downloading": "A transferir atualização…",
+  "release.pullImage": "Transfira a nova imagem e reinicie o contentor:",
+  "settings.exportLogs.desc": "Transfira todos os ficheiros de log num único zip, o que anexar a um relatório de erro. Veja o separador Logs para saber onde ficam.",
+  "wave.loadingAria": "A carregar forma de onda",
+  "player.stillLoadingWaveform": "Ainda a carregar a forma de onda…",
+  "release.applying": "A aplicar atualização…",
+  "failure.collecting": "A recolher detalhes…",
+  "failure.fetchingLogs": "A obter logs…",
+  "job.processingTrackTitle": "A processar faixa",
+  "settings.stemsLocation.moving": "A mover stems, isto pode demorar numa biblioteca grande.",
+  "settings.cookies.desc": "Opcional. Caminho para um ficheiro cookies.txt, usado apenas quando o YouTube pede ao StemDeck para confirmar que não é um robô. Deixe vazio a menos que as importações estejam a falhar.",
+  "search.preview": "Pré-escuta",
+  "search.previewFailed": "Pré-escuta indisponível",
+  "export.includeClickTitle": "Misturar o clique de referência no ficheiro exportado",
+  "settings.network.allowDesc": "Permite que outros dispositivos (como o seu telemóvel) abram o StemDeck no endereço abaixo.",
+  "settings.network.lockNote": "Só de leitura quando o StemDeck é iniciado em modo servidor, o acesso à rede é então definido pela configuração do seu servidor.",
+  "settings.logs.setupAria": "Log de configuração (só de leitura)",
+  "settings.logs.setup.desc": "A última hora de <code>setup.log</code>, configuração inicial e instalação do runtime de GPU. Apenas app desktop. Só de leitura.",
+  "settings.stemsLocation.movedPersistFailed.one": "{count} item movido, mas o StemDeck não conseguiu guardar isto como o novo local (verifique se a pasta é gravável). Reiniciar agora reverteria para o local antigo. Tente definir novamente.",
+  "settings.stemsLocation.movedPersistFailed.other": "{count} itens movidos, mas o StemDeck não conseguiu guardar isto como o novo local (verifique se a pasta é gravável). Reiniciar agora reverteria para o local antigo. Tente definir novamente.",
+  "failure.hint": "Estes detalhes vão para o relatório. O título da faixa e o link de origem não são incluídos, adicione-os se ajudar. Clicar num botão abaixo copia isto para a área de transferência.",
+};
+
+export const TRANSLATIONS = { en, pl, ja, "zh-Hans": zhHans, de, fr, pt, "pt-PT": ptPT, id };
