@@ -1,6 +1,7 @@
 import json
 import os
 import re
+import shutil
 import sys
 from pathlib import Path
 
@@ -127,6 +128,50 @@ FFPROBE_BIN = _env_path(
     "STEMDECK_FFPROBE",
     FFMPEG_DIR / ("ffprobe.exe" if sys.platform.startswith("win") else "ffprobe"),
 )
+# JavaScript runtime for yt-dlp's YouTube challenge solver (#432). Portable
+# builds drop a binary here because nothing is on PATH in a portable install;
+# Docker ships deno on PATH and source checkouts have whatever the developer
+# installed, so both leave this directory absent and yt-dlp resolves its own.
+JS_RUNTIME_DIR = _env_path("STEMDECK_JS_RUNTIME_DIR", DATA_DIR / "jsruntime")
+
+# Ordered by yt-dlp's own JS challenge provider preference (deno 1000 >
+# node 900 > quickjs 850), so a build that ships more than one still gets the
+# solver yt-dlp would have picked itself.
+_JS_RUNTIME_BINARIES = (("deno", "deno"), ("node", "node"), ("quickjs", "qjs"))
+
+
+def bundled_js_runtime() -> tuple[str, Path] | None:
+    """The JS runtime shipped with this install, as (yt-dlp name, path).
+
+    None when nothing is bundled, which is the normal case outside a portable
+    build -- yt-dlp then falls back to its own PATH lookup. Never raises: a
+    missing or unreadable directory just means "not bundled".
+    """
+    try:
+        if not JS_RUNTIME_DIR.is_dir():
+            return None
+        suffix = ".exe" if sys.platform.startswith("win") else ""
+        for name, stem in _JS_RUNTIME_BINARIES:
+            exe = JS_RUNTIME_DIR / f"{stem}{suffix}"
+            if exe.is_file():
+                return name, exe
+    except OSError:
+        return None
+    return None
+
+
+def js_solver_available() -> bool:
+    """Whether anything on this machine could run YouTube's challenge solver.
+
+    Used to explain a failure, never to gate one: yt-dlp does its own runtime
+    discovery and this is only a best-effort mirror of it. A false positive
+    just means the user gets the generic error instead of the specific one.
+    """
+    if bundled_js_runtime() is not None:
+        return True
+    return any(shutil.which(exe) for _, exe in _JS_RUNTIME_BINARIES)
+
+
 DEMUCS_MODEL = os.environ.get("STEMDECK_DEMUCS_MODEL", "htdemucs_6s").strip() or "htdemucs_6s"
 MAX_DURATION_SEC = max(60, _env_int("STEMDECK_MAX_DURATION_SEC", 1200))  # 20 min default
 JOB_TTL_SECONDS = max(300, _env_int("STEMDECK_JOB_TTL_SECONDS", 24 * 3600))  # 24 h default
