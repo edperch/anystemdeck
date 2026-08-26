@@ -3028,11 +3028,24 @@ async function wireGeneralSettings(overlay) {
   const qualitySel = overlay.querySelector(".set-separation-quality");
   const cookiesInput = overlay.querySelector(".set-cookies-file");
   const cookiesMsg = overlay.querySelector(".cookies-file-msg");
-  if (!durInput && !playlistInput && !heightSel && !sampleRateSel && !portInput && !deviceSel && !qualitySel && !cookiesInput) return;
+  const autoDeleteInput = overlay.querySelector(".auto-delete-input");
+  const autoDeleteDaysRow = overlay.querySelector(".auto-delete-days-row");
+  const autoDeleteDays = overlay.querySelector(".set-auto-delete-days");
+  const autoDeleteDaysDesc = overlay.querySelector(".auto-delete-days-desc");
+  if (!durInput && !playlistInput && !heightSel && !sampleRateSel && !portInput && !deviceSel && !qualitySel && !cookiesInput && !autoDeleteInput) return;
 
   // Last server-confirmed device choice, to revert the select when the server
   // rejects a forced device (e.g. CUDA not available on this machine).
   let lastDevice = "auto";
+
+  // "Delete after" only means anything while automatic deletion is on. Dim it
+  // and take it out of the tab order rather than removing it, so the number is
+  // still readable: deciding whether to switch deletion on is easier when you
+  // can already see how long tracks would be kept.
+  const setDaysEnabled = (on) => {
+    autoDeleteDaysRow?.classList.toggle("disabled", !on);
+    if (autoDeleteDays) autoDeleteDays.disabled = !on;
+  };
 
   const apply = (d) => {
     if (durInput && d.max_duration_sec) durInput.value = String(Math.round(d.max_duration_sec / 60));
@@ -3051,6 +3064,26 @@ async function wireGeneralSettings(overlay) {
     // Unset is the normal case, so read the key rather than truthiness --
     // clearing the field must survive the round trip and not be repopulated.
     if (cookiesInput && "cookies_file" in d) cookiesInput.value = d.cookies_file || "";
+    // Read the key, not truthiness: false is the normal value here and the
+    // whole point of the setting, so `d.auto_delete_jobs &&` would leave the
+    // switch showing whatever it showed last.
+    if (autoDeleteInput && "auto_delete_jobs" in d) {
+      autoDeleteInput.checked = d.auto_delete_jobs === true;
+      setDaysEnabled(autoDeleteInput.checked);
+    }
+    // Never overwrite a field the user is currently in. Flipping the switch
+    // POSTs, and that response used to land on top of whatever they had just
+    // started typing into the field the switch had only just enabled. The
+    // days handler below writes its own result back explicitly, so the
+    // server still owns the ceiling.
+    if (autoDeleteDays && d.auto_delete_days && document.activeElement !== autoDeleteDays) {
+      autoDeleteDays.value = String(d.auto_delete_days);
+    }
+    if (autoDeleteDaysDesc && d.auto_delete_days_max) {
+      autoDeleteDaysDesc.textContent = i18nT("settings.autoDelete.daysDesc", {
+        max: d.auto_delete_days_max,
+      });
+    }
     if (deviceSel) {
       // Gray out devices this machine can't use (Auto and CPU are always
       // available). Label disabled options so it's clear WHY they're greyed.
@@ -3087,6 +3120,7 @@ async function wireGeneralSettings(overlay) {
   digitsOnly(durInput);
   digitsOnly(playlistInput);
   digitsOnly(portInput);
+  digitsOnly(autoDeleteDays);
 
   try {
     const r = await fetch("/api/settings", { cache: "no-store" });
@@ -3100,8 +3134,13 @@ async function wireGeneralSettings(overlay) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(patch),
       });
-      if (r.ok) apply(await r.json()); // reflect the server's clamped value
+      if (r.ok) {
+        const data = await r.json();
+        apply(data); // reflect the server's clamped value
+        return data;
+      }
     } catch { /* ignore */ }
+    return null;
   };
 
   durInput?.addEventListener("change", () => {
@@ -3149,6 +3188,23 @@ async function wireGeneralSettings(overlay) {
   });
   qualitySel?.addEventListener("change", () => {
     post({ separation_quality: qualitySel.value });
+  });
+  autoDeleteInput?.addEventListener("change", () => {
+    // Enable the days field immediately rather than waiting for the round
+    // trip, so the switch does not appear to do nothing on a slow response.
+    // apply() sets it again from the server's answer either way.
+    setDaysEnabled(autoDeleteInput.checked);
+    post({ auto_delete_jobs: autoDeleteInput.checked });
+  });
+  autoDeleteDays?.addEventListener("change", async () => {
+    // Floor of 1 only. The server owns the ceiling and returns what it kept,
+    // the same arrangement as max track length, so the two cannot drift.
+    const days = Math.max(1, parseInt(autoDeleteDays.value, 10) || 30);
+    const data = await post({ auto_delete_days: days });
+    // Written back here rather than left to apply(), which skips a focused
+    // field: committing with Enter keeps focus, and the user still has to see
+    // the number the server actually kept.
+    if (data?.auto_delete_days) autoDeleteDays.value = String(data.auto_delete_days);
   });
   // Compute device needs its own POST path: unlike the clamped numeric
   // settings, the server can REJECT a forced device (422 with a reason, e.g.
@@ -3526,6 +3582,23 @@ function openLibraryEditor() {
               <button class="settings-btn set-stems-location" type="button" data-i18n="settings.stemsLocation.change">Change…</button>
             </div>
             <div class="stems-location-msg" role="status" aria-live="polite"></div>
+          </div>
+          <div class="settings-row">
+            <div class="settings-row-text">
+              <div class="settings-row-title" data-i18n="settings.autoDelete.title">Automatically delete finished tracks</div>
+              <div class="settings-row-desc" data-i18n="settings.autoDelete.desc">Off unless you turn it on. Separated tracks are kept forever by default. Deleting them cannot be undone.</div>
+            </div>
+            <label class="settings-switch">
+              <input type="checkbox" class="auto-delete-input" />
+              <span class="settings-switch-track"><span class="settings-switch-thumb"></span></span>
+            </label>
+          </div>
+          <div class="settings-row auto-delete-days-row disabled">
+            <div class="settings-row-text">
+              <div class="settings-row-title" data-i18n="settings.autoDelete.daysTitle">Delete after</div>
+              <div class="settings-row-desc auto-delete-days-desc">Days a finished track is kept before it is deleted.</div>
+            </div>
+            <input type="text" class="settings-num-input set-auto-delete-days" inputmode="numeric" maxlength="3" aria-label="Days a track is kept" data-i18n-aria-label="settings.autoDelete.daysTitle" />
           </div>
         </div>
         <div class="settings-section">
