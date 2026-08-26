@@ -604,13 +604,13 @@ def test_mixdown_cache_hit_skips_second_render(client, tmp_path, monkeypatch):
     from app.api import stems as stems_mod
 
     calls = {"n": 0}
-    original = stems_mod._stream_ffmpeg
+    original = stems_mod._render_to_file  # WAV renders via the seekable-output path
 
-    def counting_stream_ffmpeg(*args, **kwargs):
+    def counting_render(*args, **kwargs):
         calls["n"] += 1
         return original(*args, **kwargs)
 
-    monkeypatch.setattr(stems_mod, "_stream_ffmpeg", counting_stream_ffmpeg)
+    monkeypatch.setattr(stems_mod, "_render_to_file", counting_render)
 
     job = _done_job_with_stems(tmp_path, "abcdef000020", ["vocals", "drums"])
     url = f"/api/jobs/{job.id}/mixdown.wav?stems=vocals,drums&gains=1,0.5"
@@ -652,8 +652,11 @@ def test_mixdown_failed_render_leaves_no_cache_entry(client, tmp_path):
     (tmp_path / job.id / "stems" / "vocals.wav").write_bytes(b"not audio data at all")
 
     r = client.get(f"/api/jobs/{job.id}/mixdown.wav?stems=vocals&gains=1")
-    assert r.status_code == 200  # HTTP status is already committed mid-stream (#280)
-    assert r.content == b""  # ffmpeg produced nothing before failing
+    # A rendered format knows ffmpeg's exit code before a byte is sent, so the
+    # failure is an honest status rather than the empty 200 a streamed render
+    # was stuck with once its headers had gone out (#458, and the limitation
+    # #280 documented).
+    assert r.status_code == 500
 
     cache_dir = tmp_path / "cache" / "mixdown"
     leftover = list(cache_dir.glob("*")) if cache_dir.is_dir() else []
@@ -826,3 +829,147 @@ def test_video_mux_happy(client, tmp_path):
     assert r.headers["content-type"] == "video/mp4"
     # ISO-BMFF: bytes 4-8 of the first box are the "ftyp" type.
     assert r.content[4:8] == b"ftyp"
+
+
+# ─── WAV/FLAC headers must be finalised (seekable output, not pipe:1) ─────
+
+
+def _assert_wav_header_sizes_match(content: bytes) -> None:
+    """ffmpeg's WAV muxer can only patch the RIFF and data sizes on a seekable
+    output; streamed via pipe:1 both stay 0xFFFFFFFF and strict hardware
+    players (samplers, drum machines) reject the file."""
+    assert content[:4] == b"RIFF" and content[8:12] == b"WAVE"
+    riff_size = int.from_bytes(content[4:8], "little")
+    assert riff_size == len(content) - 8, f"RIFF size {riff_size:#x} vs file {len(content)}"
+    pos = 12
+    while pos + 8 <= len(content):
+        cid = content[pos : pos + 4]
+        clen = int.from_bytes(content[pos + 4 : pos + 8], "little")
+        if cid == b"data":
+            assert clen != 0xFFFFFFFF, "data chunk size left as placeholder"
+            assert pos + 8 + clen == len(content), "data chunk does not end at EOF"
+            return
+        pos += 8 + clen + (clen & 1)
+    raise AssertionError("no data chunk found")
+
+
+def test_mixdown_wav_header_sizes_are_finalised(client, tmp_path):
+    _skip_without_ffmpeg()
+    job = _done_job_with_stems(tmp_path, "abcdef000030", ["vocals", "drums"])
+    r = client.get(f"/api/jobs/{job.id}/mixdown.wav?stems=vocals,drums&gains=1,0.5")
+    assert r.status_code == 200
+    _assert_wav_header_sizes_match(r.content)
+    # The cached copy is the same finalised file.
+    (cached,) = (tmp_path / "cache" / "mixdown").glob("*.wav")
+    assert cached.read_bytes() == r.content
+    r2 = client.get(f"/api/jobs/{job.id}/mixdown.wav?stems=vocals,drums&gains=1,0.5")
+    _assert_wav_header_sizes_match(r2.content)
+
+
+def test_stem_region_wav_header_sizes_are_finalised(client, tmp_path):
+    _skip_without_ffmpeg()
+    job = _done_job_with_stems(tmp_path, "abcdef000031", ["vocals"])
+    r = client.get(f"/api/jobs/{job.id}/stems/vocals.wav?start=0&end=0.05")
+    assert r.status_code == 200
+    _assert_wav_header_sizes_match(r.content)
+    # No temp file left behind for the uncached region render.
+    cache_dir = tmp_path / "cache" / "mixdown"
+    assert not [p for p in cache_dir.glob(".*") if cache_dir.is_dir()]
+
+
+def test_mixdown_flac_streaminfo_has_total_samples(client, tmp_path):
+    _skip_without_ffmpeg()
+    job = _done_job_with_stems(tmp_path, "abcdef000032", ["vocals"])
+    r = client.get(f"/api/jobs/{job.id}/mixdown.flac?stems=vocals&gains=1")
+    assert r.status_code == 200
+    assert r.content[:4] == b"fLaC"
+    # STREAMINFO block: 4-byte header, then 34 bytes; total_samples is the low
+    # 36 bits of bytes 13..21 of the block body.
+    body = r.content[8 : 8 + 34]
+    total_samples = int.from_bytes(body[13:21], "big") & ((1 << 36) - 1)
+    assert total_samples > 0, "STREAMINFO total_samples left at 0 (unseekable output)"
+
+
+def _assert_has_xing_header(content: bytes) -> None:
+    """A VBR MP3 carries its duration and seek table in a Xing (or Info) frame
+    near the start. ffmpeg writes that frame by seeking back once the encode
+    ends, and on a pipe it simply omits it rather than writing a wrong one --
+    so the file plays but reports an estimated duration and seeks badly."""
+    assert content[:3] == b"ID3" or content[:2] == b"\xff\xfb", "not an MP3 stream"
+    head = content[:8192]
+    assert b"Xing" in head or b"Info" in head, "no Xing/Info frame (unseekable output)"
+
+
+def test_mixdown_mp3_has_a_xing_header(client, tmp_path):
+    _skip_without_ffmpeg()
+    job = _done_job_with_stems(tmp_path, "abcdef000033", ["vocals"])
+    r = client.get(f"/api/jobs/{job.id}/mixdown.mp3?stems=vocals&gains=1")
+    assert r.status_code == 200
+    _assert_has_xing_header(r.content)
+
+
+def test_stem_region_mp3_has_a_xing_header(client, tmp_path):
+    """The MP3 region export goes through its own endpoint, which the original
+    fix left on pipe:1 while the WAV one beside it was corrected."""
+    _skip_without_ffmpeg()
+    job = _done_job_with_stems(tmp_path, "abcdef000034", ["vocals"])
+    r = client.get(f"/api/jobs/{job.id}/stems/vocals.mp3?start=0&end=0.05")
+    assert r.status_code == 200
+    _assert_has_xing_header(r.content)
+    # Uncached render: the temp file must not survive the response.
+    cache_dir = tmp_path / "cache" / "mixdown"
+    assert not (list(cache_dir.glob(".*")) if cache_dir.is_dir() else [])
+
+
+def test_rendered_exports_declare_their_length(client, tmp_path):
+    """The point of answering with a file rather than a chunked stream: the
+    client is told how big the download is, so a progress bar and a range
+    request are both possible."""
+    _skip_without_ffmpeg()
+    job = _done_job_with_stems(tmp_path, "abcdef000035", ["vocals"])
+    for url in (
+        f"/api/jobs/{job.id}/mixdown.wav?stems=vocals&gains=1",
+        f"/api/jobs/{job.id}/mixdown.flac?stems=vocals&gains=1",
+        f"/api/jobs/{job.id}/mixdown.mp3?stems=vocals&gains=1",
+        f"/api/jobs/{job.id}/stems/vocals.wav?start=0&end=0.05",
+    ):
+        r = client.get(url)
+        assert r.status_code == 200, url
+        assert int(r.headers["content-length"]) == len(r.content), url
+
+
+def test_ogg_is_still_streamed(client, tmp_path):
+    """Ogg keeps a granule position on every page and patches nothing
+    afterwards, so it has no reason to pay for a full render first."""
+    _skip_without_ffmpeg()
+    job = _done_job_with_stems(tmp_path, "abcdef000036", ["vocals"])
+    r = client.get(f"/api/jobs/{job.id}/mixdown.ogg?stems=vocals&gains=1")
+    assert r.status_code == 200
+    assert r.content[:4] == b"OggS"
+    assert "content-length" not in r.headers, "ogg should still be chunked"
+
+
+def test_bumping_the_render_version_invalidates_the_cache(monkeypatch):
+    """Every entry written before #458 holds an unpatched container header, and
+    the key that produced it is still reachable. Without a version in the key
+    those files stay serveable forever, because the cache evicts by age rather
+    than by validity."""
+    from app.api import stems as stems_mod
+
+    args = ("abcdef000037", "wav", ["vocals"], [1.0], None, None, None)
+    before = stems_mod._mixdown_cache_key(*args)
+    monkeypatch.setattr(stems_mod, "_RENDER_CACHE_VERSION", "999")
+    assert stems_mod._mixdown_cache_key(*args) != before
+
+
+def test_cached_render_survives_its_response(client, tmp_path):
+    """The cleanup task is only ever attached to an uncached render. Attaching
+    it to a cached one would delete the entry the cache exists to keep, turning
+    every request into a fresh render."""
+    _skip_without_ffmpeg()
+    job = _done_job_with_stems(tmp_path, "abcdef000038", ["vocals"])
+    url = f"/api/jobs/{job.id}/mixdown.wav?stems=vocals&gains=1"
+    assert client.get(url).status_code == 200
+    (cached,) = (tmp_path / "cache" / "mixdown").glob("*.wav")
+    assert cached.is_file(), "the cache entry was deleted with the response"
+    assert client.get(url).content == cached.read_bytes()
