@@ -35,8 +35,13 @@ _worker: dict[str, object] = {}
 def _spawn_worker_cmd(device: str) -> list[str]:
     """Build the persistent-worker invocation. Module-level seam so tests can
     swap in a stub executable without touching the process-management
-    machinery (mirrors the old _demucs_cmd seam)."""
-    return [sys.executable, "-m", "app.pipeline.demucs_worker", device]
+    machinery (mirrors the old _demucs_cmd seam).
+
+    "dml" (AnyStemDeck addition) runs through app.pipeline.demucs_onnx_worker
+    -- ONNX Runtime + DirectML -- instead of the PyTorch worker every other
+    device uses. See docs/plan.md Phase 1."""
+    module = "app.pipeline.demucs_onnx_worker" if device == "dml" else "app.pipeline.demucs_worker"
+    return [sys.executable, "-m", module, device]
 
 
 def _kill_worker() -> None:
@@ -99,6 +104,14 @@ def _run_demucs(job: Job, source: Path, job_dir: Path, device: str) -> tuple[int
     set_proc(job.id, proc)
 
     shifts = 2 if get_separation_quality() == "best" else 1
+    if device == "dml" and shifts > 1:
+        # "Best" (2x shift-averaging) has no demucs-onnx equivalent yet
+        # (docs/plan.md backlog) -- the Settings UI is meant to grey this
+        # combination out, but enforce it here too rather than trust that
+        # every caller does. The worker would otherwise just ignore the
+        # extra shift silently; capping it here keeps that decision in one
+        # place instead of duplicated across both workers.
+        shifts = 1
     req = json.dumps({"source": str(source), "job_dir": str(job_dir), "shifts": shifts}) + "\n"
     try:
         proc.stdin.write(req)

@@ -9,8 +9,9 @@ at startup), so the Settings UI can change them without a restart:
 - `playlist_max_items` — how many tracks one playlist import may queue.
 - `video_max_height`  — max video resolution for MP4 export / YouTube pulls.
 - `export_sample_rate` — sample rate for exported mixes/regions (WAV/FLAC/MP3).
-- `demucs_device`     — compute device for separation: auto | cuda | mps | cpu.
+- `demucs_device`     — compute device for separation: auto | cuda | mps | dml | cpu.
 - `separation_quality` — demucs shift-averaging: standard | best (2x slower).
+  Not yet supported on the "dml" device -- see set_separation_quality below.
 
 Defaults fall back to the config.py constants (which honor their env vars), so
 nothing changes until the user overrides a value.
@@ -29,8 +30,9 @@ from app.core.config import (
     MAX_DURATION_SEC,
     PLAYLIST_MAX_ITEMS,
     VIDEO_MAX_HEIGHT,
+    available_onnx_providers,
     available_torch_devices,
-    detect_torch_device,
+    detect_compute_device,
 )
 
 _log = logging.getLogger("stemdeck.settings")
@@ -291,21 +293,26 @@ def set_export_sample_rate(value: int) -> int:
 
 # ── demucs_device ──
 # Compute device for stem separation. "auto" (default) resolves to the best
-# available device via a hardware probe at job time; "cuda"/"mps"/"cpu" force
-# it. Read live per job (app/pipeline/separate.py), so changes apply to the
-# NEXT separation without a restart. STEMDECK_DEMUCS_DEVICE seeds the default
-# so existing env-based deployments keep their forced device.
-_DEVICE_CHOICES = ("auto", "cuda", "mps", "cpu")
+# available device via a hardware probe at job time; "cuda"/"mps"/"dml"/"cpu"
+# force it. Read live per job (app/pipeline/separate.py), so changes apply to
+# the NEXT separation without a restart. STEMDECK_DEMUCS_DEVICE seeds the
+# default so existing env-based deployments keep their forced device.
+#
+# "dml" (AnyStemDeck addition, see docs/plan.md) runs separation through
+# ONNX Runtime's DirectML execution provider instead of PyTorch -- the path
+# that actually accelerates AMD and Intel GPUs on Windows, which PyTorch's
+# CUDA/MPS-only acceleration cannot reach at all.
+_DEVICE_CHOICES = ("auto", "cuda", "mps", "dml", "cpu")
 
 
 def _default_demucs_device() -> str:
     env = os.environ.get("STEMDECK_DEMUCS_DEVICE", "").strip().lower()
-    return env if env in ("cuda", "mps", "cpu") else "auto"
+    return env if env in ("cuda", "mps", "dml", "cpu") else "auto"
 
 
 def get_demucs_device_choice() -> str:
-    """The persisted user choice ("auto" | "cuda" | "mps" | "cpu") -- what the
-    Settings UI displays, as opposed to what jobs run on (see below)."""
+    """The persisted user choice ("auto" | "cuda" | "mps" | "dml" | "cpu") --
+    what the Settings UI displays, as opposed to what jobs run on (see below)."""
     with _LOCK:
         v = _ensure().get("demucs_device")
         return v if isinstance(v, str) and v in _DEVICE_CHOICES else _default_demucs_device()
@@ -313,20 +320,23 @@ def get_demucs_device_choice() -> str:
 
 def get_demucs_device() -> str:
     """The device the next separation job will actually use: the forced choice,
-    or a fresh hardware probe when the choice is "auto"."""
+    or a fresh hardware probe when the choice is "auto" (cuda > mps > dml > cpu;
+    see detect_compute_device)."""
     choice = get_demucs_device_choice()
-    return detect_torch_device() if choice == "auto" else choice
+    return detect_compute_device() if choice == "auto" else choice
 
 
 def set_demucs_device(value: str) -> str:
-    """Persist a device choice. Forcing "cuda"/"mps" verifies the device is
-    actually available first and raises ValueError if not -- rejecting the
+    """Persist a device choice. Forcing "cuda"/"mps"/"dml" verifies the device
+    is actually available first and raises ValueError if not -- rejecting the
     write loudly beats persisting a device that would silently fall back or
     crash the next job (the #247 lesson, applied to the server path)."""
     choice = (value or "").strip().lower()
     if choice not in _DEVICE_CHOICES:
         raise ValueError("demucs_device must be one of: " + ", ".join(_DEVICE_CHOICES))
     if choice in ("cuda", "mps") and choice not in available_torch_devices():
+        raise ValueError(f"{choice} is not available on this machine")
+    if choice == "dml" and choice not in available_onnx_providers():
         raise ValueError(f"{choice} is not available on this machine")
     with _LOCK:
         _ensure()["demucs_device"] = choice

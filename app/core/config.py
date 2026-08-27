@@ -49,6 +49,41 @@ def detect_torch_device() -> str:
     return available_torch_devices()[0]
 
 
+def available_onnx_providers() -> list[str]:
+    """ONNX Runtime execution providers this machine can actually use, for the
+    DirectML-accelerated separation path (AnyStemDeck addition -- see
+    docs/plan.md). Only ever returns "dml", and only when both onnxruntime is
+    importable AND DmlExecutionProvider is actually registered: plain
+    onnxruntime (CPU-only, already a StemDeck dependency for the karaoke
+    feature) and onnxruntime-directml share the same "onnxruntime" import
+    name, so a successful import alone does not tell you which one is
+    installed -- checking get_available_providers() does."""
+    providers: list[str] = []
+    try:
+        import onnxruntime as ort
+
+        if "DmlExecutionProvider" in ort.get_available_providers():
+            providers.append("dml")
+    except ImportError:
+        pass
+    return providers
+
+
+def detect_compute_device() -> str:
+    """Best available compute device for separation, torch or ONNX combined:
+    cuda > mps > dml > cpu. cuda/mps win over dml deliberately -- a machine
+    with a real NVIDIA or Apple GPU already gets full, well-tested PyTorch
+    acceleration and should not be downgraded to the newer DirectML path.
+    dml only matters on the hardware PyTorch can't accelerate at all: AMD and
+    Intel GPUs on Windows."""
+    torch_device = detect_torch_device()
+    if torch_device != "cpu":
+        return torch_device
+    if "dml" in available_onnx_providers():
+        return "dml"
+    return "cpu"
+
+
 ROOT = Path(__file__).resolve().parent.parent.parent
 STATIC_DIR = ROOT / "static"
 STEM_NAMES: tuple[str, ...] = ("vocals", "drums", "bass", "guitar", "piano", "other")
@@ -128,6 +163,12 @@ FFPROBE_BIN = _env_path(
     FFMPEG_DIR / ("ffprobe.exe" if sys.platform.startswith("win") else "ffprobe"),
 )
 DEMUCS_MODEL = os.environ.get("STEMDECK_DEMUCS_MODEL", "htdemucs_6s").strip() or "htdemucs_6s"
+# Weight precision for the ONNX/DirectML path only (AnyStemDeck addition; the
+# PyTorch path is unaffected). "fp16weights" downloads a ~2x smaller file and
+# computes identically to fp32 at runtime -- same RAM, same latency, ~6e-5 max
+# abs diff -- so there is no real tradeoff for defaulting to it. See
+# docs/plan.md Phase 4.
+DEMUCS_ONNX_PRECISION = os.environ.get("STEMDECK_DEMUCS_ONNX_PRECISION", "fp16weights").strip() or "fp16weights"
 MAX_DURATION_SEC = max(60, _env_int("STEMDECK_MAX_DURATION_SEC", 1200))  # 20 min default
 JOB_TTL_SECONDS = max(300, _env_int("STEMDECK_JOB_TTL_SECONDS", 24 * 3600))  # 24 h default
 # TTL for quarantined failed-job dirs (jobs/failed/<id>, kept for diagnostics).
