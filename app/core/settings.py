@@ -12,6 +12,9 @@ at startup), so the Settings UI can change them without a restart:
 - `demucs_device`     — compute device for separation: auto | cuda | mps | dml | cpu.
 - `separation_quality` — demucs shift-averaging: standard | best (2x slower).
   Not yet supported on the "dml" device -- see set_separation_quality below.
+- `cookies_file`      — optional cookies.txt handed to yt-dlp for YouTube.
+- `auto_delete_jobs`  — whether finished jobs are deleted after a while (off).
+- `auto_delete_days`  — how long they are kept when that is on.
 
 Defaults fall back to the config.py constants (which honor their env vars), so
 nothing changes until the user overrides a value.
@@ -43,6 +46,9 @@ _state: dict | None = None  # whole settings dict, loaded lazily
 
 # Clamp bounds. Max track length is capped at 60 min (the product ceiling).
 _DURATION_MIN, _DURATION_MAX = 60, 3600  # 1 min .. 60 min
+# Published through /api/settings so the UI reads the ceiling rather than
+# keeping its own copy of it.
+DURATION_MIN_SEC, DURATION_MAX_SEC = _DURATION_MIN, _DURATION_MAX
 _HEIGHT_MIN, _HEIGHT_MAX = 144, 2160
 _PLAYLIST_MIN, _PLAYLIST_MAX = 1, 200
 _PORT_MIN, _PORT_MAX = 1024, 65535
@@ -164,6 +170,84 @@ def set_allow_network(value: bool) -> bool:
         return bool(value)
 
 
+# ── auto_delete_jobs / auto_delete_days ──
+#
+# Whether finished jobs are deleted after a while, and after how long.
+#
+# Off unless the user says otherwise, and that direction is the whole point.
+# Deleting a finished separation destroys work that cannot be recovered, so the
+# behaviour of an install nobody has configured has to be "keep it". It used to
+# be the reverse: the sweep ran unless an environment variable switched it off,
+# which meant every documented way of starting StemDeck set that variable and
+# anyone who started the backend directly silently lost their library within a
+# day (#459).
+#
+# The stored setting wins over the environment, unlike jobs_dir where the env
+# pin wins. A mounted volume is not the user's to relocate; how long their own
+# work is kept is exactly their call, and StemDeck is single-user with no
+# separate operator to protect.
+_AUTO_DELETE_DAYS_MIN, _AUTO_DELETE_DAYS_MAX = 1, 365
+AUTO_DELETE_DAYS_MIN, AUTO_DELETE_DAYS_MAX = _AUTO_DELETE_DAYS_MIN, _AUTO_DELETE_DAYS_MAX
+DEFAULT_AUTO_DELETE_DAYS = 30
+
+
+def _default_auto_delete_jobs() -> bool:
+    """Only an explicit STEMDECK_PERSIST_LIBRARY=0 asks for deletion.
+
+    The variable reads as "persist the library", so 0 means "do not", which is
+    the one env-based way left to opt in. Unset, malformed, or 1 all mean keep,
+    so a deployment that forgets it loses nothing.
+    """
+    return os.environ.get("STEMDECK_PERSIST_LIBRARY", "").strip() == "0"
+
+
+def get_auto_delete_jobs() -> bool:
+    with _LOCK:
+        v = _ensure().get("auto_delete_jobs")
+        return v if isinstance(v, bool) else _default_auto_delete_jobs()
+
+
+def set_auto_delete_jobs(value: bool) -> bool:
+    with _LOCK:
+        _ensure()["auto_delete_jobs"] = bool(value)
+        _save()
+        return bool(value)
+
+
+def _default_auto_delete_days() -> int:
+    """Honour a STEMDECK_JOB_TTL_SECONDS somebody already tuned.
+
+    That knob predates this setting and is in seconds, so it is converted and
+    clamped. A TTL shorter than a day becomes one day rather than none: the
+    control is in days now, and rounding someone's one-hour sweep down to zero
+    would turn a deliberately aggressive setting into a much slower one.
+    """
+    raw = os.environ.get("STEMDECK_JOB_TTL_SECONDS", "").strip()
+    if raw:
+        try:
+            days = round(int(raw) / 86400) or _AUTO_DELETE_DAYS_MIN
+        except ValueError:
+            return DEFAULT_AUTO_DELETE_DAYS
+        return max(_AUTO_DELETE_DAYS_MIN, min(_AUTO_DELETE_DAYS_MAX, days))
+    return DEFAULT_AUTO_DELETE_DAYS
+
+
+def get_auto_delete_days() -> int:
+    with _LOCK:
+        v = _num(_ensure().get("auto_delete_days"))
+        if v is None:
+            return _default_auto_delete_days()
+        return max(_AUTO_DELETE_DAYS_MIN, min(_AUTO_DELETE_DAYS_MAX, v))
+
+
+def set_auto_delete_days(value: int) -> int:
+    clamped = max(_AUTO_DELETE_DAYS_MIN, min(_AUTO_DELETE_DAYS_MAX, int(value)))
+    with _LOCK:
+        _ensure()["auto_delete_days"] = clamped
+        _save()
+        return clamped
+
+
 # ── max_duration_sec ──
 def get_max_duration_sec() -> int:
     with _LOCK:
@@ -208,6 +292,53 @@ def set_jobs_dir(value: str | None) -> tuple[str | None, bool]:
         resolved = str(Path(str(value)).expanduser().resolve())
         _ensure()["jobs_dir"] = resolved
         return resolved, _save()
+
+
+# ── cookies_file ──
+# Path to a Netscape-format cookies.txt handed to yt-dlp as `cookiefile`.
+#
+# This exists because YouTube's bot check ("Sign in to confirm you're not a
+# bot") has no other remedy: yt-dlp ships no PO token generator, so an IP that
+# YouTube has flagged cannot import anything without credentials (#432).
+#
+# Deliberately a file path and not `cookiesfrombrowser`: reading a live browser
+# profile means touching the user's logged-in session on disk, and yt-dlp can
+# only do it reliably while that browser is closed. Exporting a cookies.txt is
+# an explicit, revocable act the user controls.
+#
+# Empty by default, and that matters. Supplying cookies makes yt-dlp skip every
+# client that does not support them, which removes the unauthenticated fallback
+# clients that work for most people today. Turning this on when you do not need
+# it makes imports worse, not better.
+def get_cookies_file() -> str | None:
+    with _LOCK:
+        value = _ensure().get("cookies_file")
+        return value if isinstance(value, str) and value.strip() else None
+
+
+def set_cookies_file(value: str | None) -> str | None:
+    """Persist the cookies.txt path, or clear it when given empty/None.
+
+    Raises ValueError when the path does not point at a readable file, so the
+    Settings UI can say so immediately rather than the user discovering it as a
+    failed import an hour later.
+    """
+    with _LOCK:
+        if value is None or not str(value).strip():
+            _ensure().pop("cookies_file", None)
+            _save()
+            return None
+        resolved = Path(str(value)).expanduser().resolve()
+        if not resolved.is_file():
+            raise ValueError("cookies file not found")
+        try:
+            with resolved.open("rb") as fh:
+                fh.read(1)
+        except OSError as e:
+            raise ValueError("cookies file is not readable") from e
+        _ensure()["cookies_file"] = str(resolved)
+        _save()
+        return str(resolved)
 
 
 # ── playlist_max_items ──

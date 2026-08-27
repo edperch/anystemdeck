@@ -1,6 +1,7 @@
 import json
 import os
 import re
+import shutil
 import sys
 from pathlib import Path
 
@@ -95,12 +96,38 @@ STEM_NAMES: tuple[str, ...] = ("vocals", "drums", "bass", "guitar", "piano", "ot
 EXTRA_STEM_NAMES: tuple[str, ...] = ("lead_vocals", "backing_vocals")
 JOB_ID_RE = re.compile(r"^[a-f0-9]{12}$")
 
+
+def _packaged_data_dir() -> Path | None:
+    """The data folder of a desktop package, found without being told.
+
+    The desktop shell always passes STEMDECK_DATA_DIR, so this only matters
+    when the backend is started some other way: by hand, from a terminal, out
+    of the package the shell would normally launch. That used to resolve
+    DATA_DIR to `backend/` itself, so the backend read a settings.json that did
+    not exist and ignored every choice the user had made in the app. Silent,
+    and it made a directly-run backend a different application with the same
+    files (#459).
+
+    Keyed on the layout every package shares -- `<package>/backend/app` here,
+    `<package>/data` beside it -- rather than on a marker file, because only
+    the Windows package writes one. A source checkout has ROOT named for the
+    repo and Docker has WORKDIR /app, so neither matches and neither changes.
+    """
+    if ROOT.name != "backend":
+        return None
+    candidate = ROOT.parent / "data"
+    return candidate if candidate.is_dir() else None
+
+
 # Runtime knobs -- env-backed so Docker / desktop packaging / local dev can
 # tune without a code edit. STEMDECK_DATA_DIR is the portable app root for
-# mutable runtime data; when unset, dev behavior remains the repo-local jobs/
-# folder.
-PORTABLE_DATA_DIR_ENABLED = bool(os.environ.get("STEMDECK_DATA_DIR", "").strip())
-DATA_DIR = _env_path("STEMDECK_DATA_DIR", ROOT)
+# mutable runtime data; when unset, a package finds its own (above) and a plain
+# dev checkout stays on the repo-local jobs/ folder.
+_PACKAGED_DATA_DIR = _packaged_data_dir()
+PORTABLE_DATA_DIR_ENABLED = bool(
+    os.environ.get("STEMDECK_DATA_DIR", "").strip() or _PACKAGED_DATA_DIR
+)
+DATA_DIR = _env_path("STEMDECK_DATA_DIR", _PACKAGED_DATA_DIR or ROOT)
 
 
 def _stored_jobs_dir() -> Path | None:
@@ -162,6 +189,74 @@ FFPROBE_BIN = _env_path(
     "STEMDECK_FFPROBE",
     FFMPEG_DIR / ("ffprobe.exe" if sys.platform.startswith("win") else "ffprobe"),
 )
+# JavaScript runtime for yt-dlp's YouTube challenge solver (#432). Portable
+# builds drop a binary here because nothing is on PATH in a portable install;
+# Docker ships deno on PATH and source checkouts have whatever the developer
+# installed, so both leave this directory absent and yt-dlp resolves its own.
+JS_RUNTIME_DIR = _env_path("STEMDECK_JS_RUNTIME_DIR", DATA_DIR / "jsruntime")
+
+# Ordered by yt-dlp's own JS challenge provider preference (deno 1000 >
+# node 900 > quickjs 850), so a build that ships more than one still gets the
+# solver yt-dlp would have picked itself.
+_JS_RUNTIME_BINARIES = (("deno", "deno"), ("node", "node"), ("quickjs", "qjs"))
+
+
+def _js_runtime_dirs() -> tuple[Path, ...]:
+    """Where a bundled JS runtime can live, in priority order.
+
+    Two layouts, because the packages are not built the same way. Windows and
+    Linux stage a whole tree and put the binary in `data/jsruntime`, which is
+    JS_RUNTIME_DIR's default. macOS downloads a runtime pack and keeps its own
+    data directory in ~/Library/Application Support, so the binary rides in the
+    pack next to `backend/` instead.
+
+    Checking both here rather than setting an env var from the desktop shell
+    keeps this a Python-side fact that can be tested, instead of a contract
+    split across two languages that only breaks on one platform.
+    """
+    dirs = [JS_RUNTIME_DIR]
+    # app/core/config.py -> app/core -> app -> backend/ (or the repo root).
+    backend_root = Path(__file__).resolve().parents[2]
+    dirs.append(backend_root / "jsruntime")
+    dirs.append(backend_root.parent / "jsruntime")
+    seen: set[Path] = set()
+    return tuple(d for d in dirs if not (d in seen or seen.add(d)))  # type: ignore[func-returns-value]
+
+
+def bundled_js_runtime() -> tuple[str, Path] | None:
+    """The JS runtime shipped with this install, as (yt-dlp name, path).
+
+    None when nothing is bundled, which is the normal case outside a packaged
+    build -- yt-dlp then falls back to its own PATH lookup, which is how Docker
+    finds the deno it ships. Never raises: a missing or unreadable directory
+    just means "not bundled".
+    """
+    suffix = ".exe" if sys.platform.startswith("win") else ""
+    for directory in _js_runtime_dirs():
+        try:
+            if not directory.is_dir():
+                continue
+            for name, stem in _JS_RUNTIME_BINARIES:
+                exe = directory / f"{stem}{suffix}"
+                if exe.is_file():
+                    return name, exe
+        except OSError:
+            continue
+    return None
+
+
+def js_solver_available() -> bool:
+    """Whether anything on this machine could run YouTube's challenge solver.
+
+    Used to explain a failure, never to gate one: yt-dlp does its own runtime
+    discovery and this is only a best-effort mirror of it. A false positive
+    just means the user gets the generic error instead of the specific one.
+    """
+    if bundled_js_runtime() is not None:
+        return True
+    return any(shutil.which(exe) for _, exe in _JS_RUNTIME_BINARIES)
+
+
 DEMUCS_MODEL = os.environ.get("STEMDECK_DEMUCS_MODEL", "htdemucs_6s").strip() or "htdemucs_6s"
 # Weight precision for the ONNX/DirectML path only (AnyStemDeck addition; the
 # PyTorch path is unaffected). "fp16weights" downloads a ~2x smaller file and

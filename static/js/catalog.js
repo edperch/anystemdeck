@@ -381,6 +381,7 @@ function stateMetadataToTrack(state, fallbackTrack) {
     sourceUrl: state.source_url || fallbackTrack.sourceUrl,
     mixUrl: state.mix_url ?? fallbackTrack.mixUrl ?? null,
     hasVideo: state.has_video ?? fallbackTrack.hasVideo ?? false,
+    videoStatus: state.video_status ?? fallbackTrack.videoStatus ?? null,
     createdAt: fallbackTrack.createdAt ?? state.created_at,
     favorite: fallbackTrack.favorite ?? false,
   };
@@ -652,7 +653,7 @@ async function loadTrackIntoStudio(trackId) {
   }
 
   applyTrackInfoToPanel(track);
-  wireUpAudio(trackId, track.audioStems, track.duration || 0, track.thumb, track.mixUrl ?? null, track.title || "", peaksPromise, track.hasVideo ?? false);
+  wireUpAudio(trackId, track.audioStems, track.duration || 0, track.thumb, track.mixUrl ?? null, track.title || "", peaksPromise, track.hasVideo ?? false, track.videoStatus ?? null);
   initSections(trackId, track.sections, track.duration || 0);
 }
 
@@ -3017,6 +3018,7 @@ function wireLanguageSetting(overlay) {
 // and POSTed on change to /api/settings (same runtime store as the toggle).
 async function wireGeneralSettings(overlay) {
   const durInput = overlay.querySelector(".set-max-duration");
+  const durDesc = overlay.querySelector(".set-max-duration-desc");
   const playlistInput = overlay.querySelector(".set-playlist-max");
   const heightSel = overlay.querySelector(".set-video-height");
   const sampleRateSel = overlay.querySelector(".set-export-samplerate");
@@ -3024,19 +3026,64 @@ async function wireGeneralSettings(overlay) {
   const deviceSel = overlay.querySelector(".set-demucs-device");
   const deviceDesc = overlay.querySelector(".set-demucs-desc");
   const qualitySel = overlay.querySelector(".set-separation-quality");
-  if (!durInput && !playlistInput && !heightSel && !sampleRateSel && !portInput && !deviceSel && !qualitySel) return;
+  const cookiesInput = overlay.querySelector(".set-cookies-file");
+  const cookiesMsg = overlay.querySelector(".cookies-file-msg");
+  const autoDeleteInput = overlay.querySelector(".auto-delete-input");
+  const autoDeleteDaysRow = overlay.querySelector(".auto-delete-days-row");
+  const autoDeleteDays = overlay.querySelector(".set-auto-delete-days");
+  const autoDeleteDaysDesc = overlay.querySelector(".auto-delete-days-desc");
+  if (!durInput && !playlistInput && !heightSel && !sampleRateSel && !portInput && !deviceSel && !qualitySel && !cookiesInput && !autoDeleteInput) return;
 
   // Last server-confirmed device choice, to revert the select when the server
   // rejects a forced device (e.g. CUDA not available on this machine).
   let lastDevice = "auto";
 
+  // "Delete after" only means anything while automatic deletion is on. Dim it
+  // and take it out of the tab order rather than removing it, so the number is
+  // still readable: deciding whether to switch deletion on is easier when you
+  // can already see how long tracks would be kept.
+  const setDaysEnabled = (on) => {
+    autoDeleteDaysRow?.classList.toggle("disabled", !on);
+    if (autoDeleteDays) autoDeleteDays.disabled = !on;
+  };
+
   const apply = (d) => {
     if (durInput && d.max_duration_sec) durInput.value = String(Math.round(d.max_duration_sec / 60));
+    // Same reason: the copy in the description text went stale alongside the
+    // clamp, telling the user "max 20" for a limit that was really 60.
+    if (durDesc && d.max_duration_max_sec) {
+      durDesc.textContent = i18nT("settings.maxDuration.desc", {
+        max: Math.round(d.max_duration_max_sec / 60),
+      });
+    }
     if (playlistInput && d.playlist_max_items) playlistInput.value = String(d.playlist_max_items);
     if (heightSel && d.video_max_height) heightSel.value = String(d.video_max_height);
     if (sampleRateSel && d.export_sample_rate) sampleRateSel.value = String(d.export_sample_rate);
     if (portInput && d.port) portInput.value = String(d.port);
     if (qualitySel && d.separation_quality) qualitySel.value = d.separation_quality;
+    // Unset is the normal case, so read the key rather than truthiness --
+    // clearing the field must survive the round trip and not be repopulated.
+    if (cookiesInput && "cookies_file" in d) cookiesInput.value = d.cookies_file || "";
+    // Read the key, not truthiness: false is the normal value here and the
+    // whole point of the setting, so `d.auto_delete_jobs &&` would leave the
+    // switch showing whatever it showed last.
+    if (autoDeleteInput && "auto_delete_jobs" in d) {
+      autoDeleteInput.checked = d.auto_delete_jobs === true;
+      setDaysEnabled(autoDeleteInput.checked);
+    }
+    // Never overwrite a field the user is currently in. Flipping the switch
+    // POSTs, and that response used to land on top of whatever they had just
+    // started typing into the field the switch had only just enabled. The
+    // days handler below writes its own result back explicitly, so the
+    // server still owns the ceiling.
+    if (autoDeleteDays && d.auto_delete_days && document.activeElement !== autoDeleteDays) {
+      autoDeleteDays.value = String(d.auto_delete_days);
+    }
+    if (autoDeleteDaysDesc && d.auto_delete_days_max) {
+      autoDeleteDaysDesc.textContent = i18nT("settings.autoDelete.daysDesc", {
+        max: d.auto_delete_days_max,
+      });
+    }
     if (deviceSel) {
       // Gray out devices this machine can't use (Auto and CPU are always
       // available). Label disabled options so it's clear WHY they're greyed.
@@ -3073,6 +3120,7 @@ async function wireGeneralSettings(overlay) {
   digitsOnly(durInput);
   digitsOnly(playlistInput);
   digitsOnly(portInput);
+  digitsOnly(autoDeleteDays);
 
   try {
     const r = await fetch("/api/settings", { cache: "no-store" });
@@ -3086,17 +3134,47 @@ async function wireGeneralSettings(overlay) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(patch),
       });
-      if (r.ok) apply(await r.json()); // reflect the server's clamped value
+      if (r.ok) {
+        const data = await r.json();
+        apply(data); // reflect the server's clamped value
+        return data;
+      }
     } catch { /* ignore */ }
+    return null;
   };
 
   durInput?.addEventListener("change", () => {
-    const mins = Math.max(1, Math.min(20, parseInt(durInput.value, 10) || 20));
+    // No ceiling of its own. This used to clamp to 20 while the backend
+    // allowed 60, so typing 60 silently posted 20 and the field snapped back
+    // with no explanation. The server clamps and returns the value it kept,
+    // and apply() writes that back, so it stays the single authority.
+    const mins = Math.max(1, parseInt(durInput.value, 10) || 20);
     post({ max_duration_sec: mins * 60 });
   });
   playlistInput?.addEventListener("change", () => {
     const items = Math.max(1, Math.min(200, parseInt(playlistInput.value, 10) || 50));
     post({ playlist_max_items: items });
+  });
+  // Not routed through post(): that helper drops a non-ok response silently,
+  // which is exactly the wrong behaviour for a path the user typed. A bad path
+  // has to say so, or the user retypes it and never learns why nothing
+  // happened.
+  cookiesInput?.addEventListener("change", async () => {
+    if (cookiesMsg) cookiesMsg.textContent = "";
+    try {
+      const r = await fetch("/api/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cookies_file: cookiesInput.value.trim() }),
+      });
+      if (r.ok) {
+        apply(await r.json());
+      } else if (cookiesMsg) {
+        // The server's detail is an English string; show the translated key
+        // instead so this reads correctly in every locale.
+        cookiesMsg.textContent = i18nT("settings.cookies.invalid");
+      }
+    } catch { /* offline: leave the field as typed */ }
   });
   heightSel?.addEventListener("change", () => {
     post({ video_max_height: parseInt(heightSel.value, 10) });
@@ -3110,6 +3188,23 @@ async function wireGeneralSettings(overlay) {
   });
   qualitySel?.addEventListener("change", () => {
     post({ separation_quality: qualitySel.value });
+  });
+  autoDeleteInput?.addEventListener("change", () => {
+    // Enable the days field immediately rather than waiting for the round
+    // trip, so the switch does not appear to do nothing on a slow response.
+    // apply() sets it again from the server's answer either way.
+    setDaysEnabled(autoDeleteInput.checked);
+    post({ auto_delete_jobs: autoDeleteInput.checked });
+  });
+  autoDeleteDays?.addEventListener("change", async () => {
+    // Floor of 1 only. The server owns the ceiling and returns what it kept,
+    // the same arrangement as max track length, so the two cannot drift.
+    const days = Math.max(1, parseInt(autoDeleteDays.value, 10) || 30);
+    const data = await post({ auto_delete_days: days });
+    // Written back here rather than left to apply(), which skips a focused
+    // field: committing with Enter keeps focus, and the user still has to see
+    // the number the server actually kept.
+    if (data?.auto_delete_days) autoDeleteDays.value = String(data.auto_delete_days);
   });
   // Compute device needs its own POST path: unlike the clamped numeric
   // settings, the server can REJECT a forced device (422 with a reason, e.g.
@@ -3458,7 +3553,7 @@ function openLibraryEditor() {
           <div class="settings-row">
             <div class="settings-row-text">
               <div class="settings-row-title" data-i18n="settings.maxDuration.title">Max track length</div>
-              <div class="settings-row-desc" data-i18n="settings.maxDuration.desc">Longest track accepted for processing, in minutes (max 20).</div>
+              <div class="settings-row-desc set-max-duration-desc">Longest track accepted for processing, in minutes (max 60).</div>
             </div>
             <input type="text" class="settings-num-input set-max-duration" inputmode="numeric" maxlength="2" aria-label="Max track length in minutes" data-i18n-aria-label="settings.maxDuration.title" />
           </div>
@@ -3471,6 +3566,14 @@ function openLibraryEditor() {
           </div>
           <div class="settings-row settings-row-stack">
             <div class="settings-row-text">
+              <div class="settings-row-title" data-i18n="settings.cookies.title">YouTube cookies</div>
+              <div class="settings-row-desc" data-i18n="settings.cookies.desc">Optional. Path to a cookies.txt file, used only when YouTube asks StemDeck to confirm it is not a bot. Leave this empty unless imports are failing.</div>
+            </div>
+            <input type="text" class="settings-text-input set-cookies-file" spellcheck="false" autocomplete="off" placeholder="Path to cookies.txt" data-i18n-placeholder="settings.cookies.placeholder" aria-label="YouTube cookies" data-i18n-aria-label="settings.cookies.title" />
+            <div class="cookies-file-msg" role="status" aria-live="polite"></div>
+          </div>
+          <div class="settings-row settings-row-stack">
+            <div class="settings-row-text">
               <div class="settings-row-title" data-i18n="settings.stemsLocation.title">StemData location</div>
             </div>
             <div class="stems-location">
@@ -3479,6 +3582,23 @@ function openLibraryEditor() {
               <button class="settings-btn set-stems-location" type="button" data-i18n="settings.stemsLocation.change">Change…</button>
             </div>
             <div class="stems-location-msg" role="status" aria-live="polite"></div>
+          </div>
+          <div class="settings-row">
+            <div class="settings-row-text">
+              <div class="settings-row-title" data-i18n="settings.autoDelete.title">Automatically delete finished tracks</div>
+              <div class="settings-row-desc" data-i18n="settings.autoDelete.desc">Off unless you turn it on. Separated tracks are kept forever by default. Deleting them cannot be undone.</div>
+            </div>
+            <label class="settings-switch">
+              <input type="checkbox" class="auto-delete-input" />
+              <span class="settings-switch-track"><span class="settings-switch-thumb"></span></span>
+            </label>
+          </div>
+          <div class="settings-row auto-delete-days-row disabled">
+            <div class="settings-row-text">
+              <div class="settings-row-title" data-i18n="settings.autoDelete.daysTitle">Delete after</div>
+              <div class="settings-row-desc auto-delete-days-desc">Days a finished track is kept before it is deleted.</div>
+            </div>
+            <input type="text" class="settings-num-input set-auto-delete-days" inputmode="numeric" maxlength="3" aria-label="Days a track is kept" data-i18n-aria-label="settings.autoDelete.daysTitle" />
           </div>
         </div>
         <div class="settings-section">

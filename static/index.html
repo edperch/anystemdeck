@@ -36,10 +36,15 @@
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--muted)" stroke-width="1.8" style="flex-shrink:0" aria-hidden="true">
               <path d="M10 14a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1 M14 10a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/>
             </svg>
+            <!-- type="text", not "url": this box takes a search query as well as a
+                 link, and type="url" marks a query invalid, which blocks form
+                 submission. A pasted link is validated server-side either way
+                 (validate_youtube_url). The topbar styling keys off #url, not
+                 the type, so it survives this. -->
             <input
               id="url"
-              type="url"
-              placeholder="Paste a YouTube or SoundCloud link, or drop an audio file…"
+              type="text"
+              placeholder="Search, or paste a YouTube or SoundCloud link, or drop an audio file…"
               data-i18n-placeholder="topbar.urlPlaceholder"
               spellcheck="false"
               autocomplete="off"
@@ -633,6 +638,7 @@
                   <button class="export-fmt" id="t-fmt-ogg" type="button" role="radio" aria-checked="false">OGG</button>
                   <button class="export-fmt export-fmt-video" id="t-fmt-mp4" type="button" role="radio" aria-checked="false">MP4</button>
                 </div>
+                <div class="export-video-failed" role="status" data-i18n="export.videoFailed">MP4 export is unavailable: the video could not be fetched for this track. The audio stems are unaffected.</div>
                 <label class="export-click-opt" id="t-export-click-wrap" title="Mix the click track into the exported file" data-i18n-title="export.includeClickTitle">
                   <input type="checkbox" id="t-export-click">
                   <span data-i18n="export.includeClick">Include click track</span>
@@ -728,8 +734,7 @@
             <span class="footer-group-label" data-i18n="speed.group">Speed</span>
             <div class="footer-group-body">
               <div class="footer-seg speed-group" id="t-speed-wrap" role="radiogroup" aria-label="Playback speed" data-i18n-aria-label="speed.ariaLabel">
-                <button class="speed-btn" id="t-speed-025" type="button" role="radio" aria-checked="false" data-speed="0.25">0.25x</button>
-                <button class="speed-btn" id="t-speed-05" type="button" role="radio" aria-checked="false" data-speed="0.5">0.5x</button>
+                <button class="speed-btn" id="t-speed-075" type="button" role="radio" aria-checked="false" data-speed="0.75">0.75x</button>
                 <button class="speed-btn active" id="t-speed-1" type="button" role="radio" aria-checked="true" data-speed="1">1x</button>
               </div>
             </div>
@@ -844,7 +849,7 @@
         <div class="about-divider"></div>
 
         <div class="about-socials">
-          <a class="about-social-btn" href="https://discord.gg/JGk7FdZb9N" target="_blank" rel="noopener noreferrer" title="Discord" aria-label="Discord">
+          <a class="about-social-btn" href="https://discord.gg/YhCKsjhcwB" target="_blank" rel="noopener noreferrer" title="Discord" aria-label="Discord">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M20.317 4.37a19.791 19.791 0 0 0-4.885-1.515.074.074 0 0 0-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 0 0-5.487 0 12.64 12.64 0 0 0-.617-1.25.077.077 0 0 0-.079-.037A19.736 19.736 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 0 0 .031.057 19.9 19.9 0 0 0 5.993 3.03.078.078 0 0 0 .084-.028 14.09 14.09 0 0 0 1.226-1.994.076.076 0 0 0-.041-.106 13.107 13.107 0 0 1-1.872-.892.077.077 0 0 1-.008-.128 10.2 10.2 0 0 0 .372-.292.074.074 0 0 1 .077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 0 1 .078.01c.12.098.246.198.373.292a.077.077 0 0 1-.006.127 12.299 12.299 0 0 1-1.873.892.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.028 19.839 19.839 0 0 0 6.002-3.03.077.077 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 0 0-.031-.03z"/></svg>
           </a>
           <a class="about-social-btn" href="https://www.reddit.com/r/StemDeckApp/" target="_blank" rel="noopener noreferrer" title="Reddit" aria-label="Reddit">

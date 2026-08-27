@@ -74,12 +74,22 @@ def _extract_video_track(job: Job, source: Path, job_dir: Path) -> None:
         "-y",
         str(dest),
     ]
-    result = subprocess.run(cmd, capture_output=True, timeout=TIMEOUT_FFMPEG)
+    try:
+        result = subprocess.run(cmd, capture_output=True, timeout=TIMEOUT_FFMPEG)
+    except (OSError, subprocess.SubprocessError) as e:
+        # ffmpeg missing or timed out. Distinct from an .mp4 that simply has no
+        # video stream, and the only one of the two worth surfacing (#436).
+        dest.unlink(missing_ok=True)
+        job.video_status = "failed"
+        logger.warning("video extract failed for job %s: %s", job.id, e)
+        return
     if result.returncode != 0 or not dest.is_file() or dest.stat().st_size == 0:
         dest.unlink(missing_ok=True)
+        job.video_status = "unavailable"
         logger.info("no video track preserved for job %s (source has no video stream?)", job.id)
         return
     job.has_video = True
+    job.video_status = "ok"
 
 
 def _prepare_local_source(job: Job, source: Path, job_dir: Path) -> Path:
@@ -238,6 +248,7 @@ def _write_metadata(job: Job, job_dir: Path) -> None:
         "stem_presence": job.stem_presence,
         "tags": job.tags,
         "has_video": job.has_video,
+        "video_status": job.video_status,
         "compute_device": job.compute_device,
         "gpu_fallback": job.gpu_fallback,
         "stage_timings": job.stage_timings,
@@ -265,12 +276,17 @@ def _quarantine_failed_job(job: Job, job_dir: Path, jobs_dir: Path, exc: Excepti
     tail: list[str] = getattr(exc, "tail", None) or []
     cause = classify_failure("\n".join([*tail, repr(exc)]))
     detail = cause
-    if tail:
-        # error_detail reaches the client directly (job state, notification
-        # card, and the report URL's "what" field) -- redact before the [:200]
-        # truncation, not after, so a redaction placeholder never gets cut in
-        # half.
-        detail += f" — {redact(tail[-1])[:200]}"
+    # error_detail reaches the client directly (job state, notification card,
+    # and the report URL's "what" field) -- redact before the [:200] truncation,
+    # not after, so a redaction placeholder never gets cut in half.
+    #
+    # Prefer the stderr tail, which only SeparationError carries. Without the
+    # fallback, every yt-dlp failure arrived as the bare word "unknown" with no
+    # message at all, and the only way to find out what happened was to read
+    # data/logs/ (#434).
+    message = redact(tail[-1]) if tail else redact(str(exc))
+    if message.strip():
+        detail += f" — {message[:200]}"
     job.error_detail = detail
 
     try:
