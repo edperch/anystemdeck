@@ -89,3 +89,9 @@ Thumbs.db
 
 # Imported design references (kept local, not shipped)
 design/
+
+# Smoke-test scratch output (not for commit -- these produced the
+# 690MB history-bloat cleanup documented in docs/plan.md)
+smoke_out/
+smoke_test_tone.wav
+tmp_split.onnx
