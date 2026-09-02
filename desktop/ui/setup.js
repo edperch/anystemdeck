@@ -235,7 +235,19 @@ async function runSetup() {
     // An unknown installedVersion (a runtime from a build that never recorded
     // one) also counts, so an upgrade still refreshes it. Self-heals: after one
     // refresh the install records the version and subsequent launches match.
-    const versionMismatch = Boolean(expectedVersion) && installedVersion !== expectedVersion;
+    //
+    // Also requires a real runtimeUrl: a dev/source checkout ships a
+    // placeholder runtime-manifest.json (empty runtimeUrl, non-empty version)
+    // with no runtime pack to download at all. Without this guard, every fresh
+    // checkout is permanently "mismatched" (expected version is always truthy,
+    // installedVersion is always undefined) and gets routed into
+    // installRuntimePack(), which has nothing to fetch and fails. A packaged
+    // release always has a populated runtimeUrl, so this doesn't change
+    // real-upgrade behavior.
+    const versionMismatch =
+      Boolean(expectedVersion) &&
+      installedVersion !== expectedVersion &&
+      Boolean(runtimeStatus.manifest?.runtimeUrl);
 
     // A persisted torch device only counts as settled when it is a positive
     // result ("cuda"/"mps") or the package itself is CPU-only. A CPU device

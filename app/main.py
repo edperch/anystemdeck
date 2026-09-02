@@ -7,6 +7,7 @@ import json
 import logging
 import os
 import re
+import secrets
 import signal
 import socket
 import time
@@ -103,6 +104,12 @@ except ImportError:
 
 _log = logging.getLogger("stemdeck")
 
+# Last time /api/desktop/heartbeat was called, per time.monotonic() -- read and
+# written across tasks/requests, so it lives at module scope rather than as a
+# lifespan-local like _background_tasks. None until a WSL2-launched shell's
+# first heartbeat arrives; see _desktop_heartbeat_watchdog.
+_desktop_heartbeat_at: float | None = None
+
 
 def app_version() -> str:
     # Version is git-tag-derived via hatch-vcs (#169).
@@ -175,6 +182,36 @@ async def _desktop_parent_watchdog(parent_pid: int) -> None:
         await asyncio.sleep(1)
 
 
+async def _desktop_heartbeat_watchdog(timeout_seconds: float) -> None:
+    """Self-terminates if the desktop shell stops pinging /api/desktop/heartbeat
+    for `timeout_seconds`.
+
+    The WSL2-launch counterpart to _desktop_parent_watchdog above. That watchdog
+    checks whether the shell's PID still exists -- which only works when the
+    backend and the shell share a PID namespace. A backend launched inside WSL2
+    by the Windows-side shell does not: WSL2 is a separate kernel, so a Windows
+    PID is meaningless to check from here (worse than useless -- checking a
+    foreign namespace's PID number would raise ProcessLookupError immediately,
+    which would make this watchdog fire the instant it started). So for a WSL2
+    launch, the shell instead pings this process on an interval, and this
+    watches for that stopping instead of watching a PID.
+    """
+    global _desktop_heartbeat_at
+    _desktop_heartbeat_at = time.monotonic()
+    while True:
+        await asyncio.sleep(5)
+        assert _desktop_heartbeat_at is not None  # set immediately above
+        if time.monotonic() - _desktop_heartbeat_at > timeout_seconds:
+            _log.info(
+                "no desktop heartbeat for over %.0fs; stopping backend",
+                timeout_seconds,
+            )
+            # See _desktop_parent_watchdog above: raised in-process so uvicorn's
+            # own shutdown handler runs, rather than an external kill.
+            signal.raise_signal(signal.SIGTERM)
+            return
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     _background_tasks = set()
@@ -205,17 +242,25 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
             len(resumed),
         )
     if os.environ.get("STEMDECK_DESKTOP") == "1":
-        parent_pid = os.environ.get("STEMDECK_PARENT_PID")
-        if parent_pid:
-            try:
-                parent_pid_int = int(parent_pid)
-            except ValueError:
-                _log.warning("invalid STEMDECK_PARENT_PID=%r", parent_pid)
-            else:
-                if parent_pid_int > 0 and parent_pid_int != os.getpid():
-                    wt = asyncio.create_task(_desktop_parent_watchdog(parent_pid_int))
-                    _background_tasks.add(wt)
-                    wt.add_done_callback(_background_tasks.discard)
+        if os.environ.get("STEMDECK_DESKTOP_HEARTBEAT") == "1":
+            # WSL2 launch: STEMDECK_PARENT_PID (if set at all) names a Windows
+            # process, which does not exist in this PID namespace -- see
+            # _desktop_heartbeat_watchdog's docstring. Heartbeat instead.
+            wt = asyncio.create_task(_desktop_heartbeat_watchdog(30.0))
+            _background_tasks.add(wt)
+            wt.add_done_callback(_background_tasks.discard)
+        else:
+            parent_pid = os.environ.get("STEMDECK_PARENT_PID")
+            if parent_pid:
+                try:
+                    parent_pid_int = int(parent_pid)
+                except ValueError:
+                    _log.warning("invalid STEMDECK_PARENT_PID=%r", parent_pid)
+                else:
+                    if parent_pid_int > 0 and parent_pid_int != os.getpid():
+                        wt = asyncio.create_task(_desktop_parent_watchdog(parent_pid_int))
+                        _background_tasks.add(wt)
+                        wt.add_done_callback(_background_tasks.discard)
     yield
     # Stop taking new work. Deliberately not cancelling the in-flight job: it is
     # blocked in asyncio.to_thread, which cannot be cancelled, so it dies with
@@ -302,6 +347,54 @@ def health() -> dict[str, object]:
         "pid": os.getpid(),
         "instance": os.environ.get("STEMDECK_INSTANCE_TOKEN", ""),
     }
+
+
+def _check_instance_token(request: Request) -> None:
+    """Defense in depth for the two endpoints below. The network_gate
+    middleware already blocks other devices when network sharing is off, but
+    when a user has turned sharing on, anything on the LAN can otherwise reach
+    them -- and unlike every other route here, these two can stop the backend.
+    A request for either one has to prove it's the shell that this exact
+    instance handed its token to, the same value /api/health echoes back.
+
+    Absence of a configured token (e.g. this process wasn't desktop-launched
+    at all) fails closed: there is nothing valid to match, so every request is
+    rejected rather than silently accepted.
+    """
+    expected = os.environ.get("STEMDECK_INSTANCE_TOKEN", "")
+    provided = request.headers.get("x-stemdeck-token", "")
+    if not expected or not secrets.compare_digest(provided, expected):
+        raise HTTPException(status_code=403, detail="invalid or missing instance token")
+
+
+@app.post("/api/desktop/heartbeat", tags=["health"], include_in_schema=False)
+def desktop_heartbeat(request: Request) -> dict[str, object]:
+    """Called on an interval (~10s) by a WSL2-launched shell in place of the
+    PID watchdog it can't use across the kernel boundary -- see
+    _desktop_heartbeat_watchdog. A no-op, 404-free response for any other
+    launch mode: the watchdog task only runs when STEMDECK_DESKTOP_HEARTBEAT is
+    set, so calling this on a native launch just records a timestamp nothing
+    reads.
+    """
+    _check_instance_token(request)
+    global _desktop_heartbeat_at
+    _desktop_heartbeat_at = time.monotonic()
+    return {"status": "ok"}
+
+
+@app.post("/api/desktop/shutdown", tags=["health"], include_in_schema=False)
+def desktop_shutdown(request: Request) -> dict[str, object]:
+    """Graceful-shutdown request from a WSL2-launched shell on app close. The
+    shell has no OS-level handle to this process (it was started detached via
+    `wsl.exe`, not tracked as a Child -- see the Rust-side start_backend), so
+    it asks over HTTP instead of signaling. Reuses the exact same in-process
+    SIGTERM trick as the two watchdogs above, so shutdown behaves identically
+    to every other path uvicorn already knows how to drain.
+    """
+    _check_instance_token(request)
+    _log.info("desktop shutdown requested")
+    signal.raise_signal(signal.SIGTERM)
+    return {"status": "ok"}
 
 
 def _is_lan_ipv4(ip: str) -> bool:

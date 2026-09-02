@@ -131,6 +131,18 @@ def main() -> None:
     device = sys.argv[1] if len(sys.argv) > 1 else "cpu"
     _arm_parent_watchdog()
 
+    # Must run before the first save_audio() call, not necessarily before
+    # demucs is imported -- see torchaudio_save_shim's own docstring for why
+    # that distinction doesn't matter here. Needed on any torchaudio >= 2.9
+    # (torchaudio.save() becomes an alias for save_with_torchcodec() there,
+    # which doesn't accept the encoding=/bits_per_sample= kwargs save_audio()
+    # calls it with -- AnyStemDeck addition, see docs/plan.md's WSL2/ROCm
+    # thread); harmless on older torchaudio too, so it's installed
+    # unconditionally rather than version-sniffed.
+    from app.pipeline.torchaudio_save_shim import install as _install_torchaudio_save_shim
+
+    _install_torchaudio_save_shim()
+
     from demucs.pretrained import get_model
 
     model = get_model(DEMUCS_MODEL)

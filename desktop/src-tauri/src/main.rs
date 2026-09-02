@@ -112,9 +112,50 @@ const SHAKA_FFPROBE_SHA256_X64: &str =
 const DEFAULT_LINUX_FFMPEG_URL: &str =
     "https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz";
 
+/// How the currently-running backend was started, and therefore how we watch
+/// it and stop it. Native holds the OS process handle StemDeck spawned
+/// directly, exactly as before AMD-GPU/WSL2 support existed.
+///
+/// Wsl2 *also* holds a Child now -- this is a revision of the original
+/// Decision #8 design, which fired a one-shot, detached `wsl.exe` invocation
+/// (`nohup ... & disown` on the Linux side) that exited immediately, leaving
+/// no Windows-side handle at all. That design turned out not to work in
+/// practice: on real hardware, a backgrounded/disowned Linux process started
+/// by a one-shot `wsl.exe -- bash -lc "... & disown"` from Windows did not
+/// survive -- not with `nohup`, `disown`, or `setsid`, in any combination --
+/// while the identical command typed into an already-open interactive
+/// `wsl -d <distro>` shell always worked. A second, otherwise-idle WSL2
+/// window running concurrently did not help either, which rules out "the VM
+/// needs to be kept warm" as the explanation. What isolated it: launching
+/// `wsl.exe` itself as a detached-but-*alive* Windows background process
+/// (via PowerShell's `Start-Process -NoNewWindow`, no Linux-side
+/// backgrounding at all) reliably worked. So it is `wsl.exe`'s own process
+/// staying alive on the Windows side -- not anything about Linux job
+/// control -- that keeps its Linux-side child alive. We now spawn `wsl.exe`
+/// with the uvicorn command as its direct, non-backgrounded child (`cd ... &&
+/// exec python -m uvicorn ...`) and hold the Child handle for the backend's
+/// whole lifetime instead of letting `wsl.exe` exit. Liveness and health
+/// still go over HTTP (see wait_for_health_headless, spawn_wsl2_heartbeat),
+/// but stop_backend_wsl2 can now fall back to killing this Child directly if
+/// a graceful HTTP shutdown is ignored, the same escalation the Native path
+/// has always had.
+enum BackendProcess {
+    Native(Child),
+    Wsl2(Child),
+}
+
 struct BackendHandles {
-    child: Child,
+    process: BackendProcess,
     url: String,
+    /// Needed by the Wsl2 case for health/heartbeat/shutdown HTTP calls, which
+    /// have no Child to ask "what port did you bind" -- so it goes here.
+    /// Read for both variants for simplicity, though only Wsl2 code uses it.
+    port: u16,
+    /// Same reasoning as `port`: the Wsl2 case needs it for
+    /// /api/desktop/heartbeat and /api/desktop/shutdown auth. The Native case
+    /// already has it in the child's environment; kept here too so both
+    /// variants read it the same way.
+    instance_token: String,
 }
 
 #[derive(Default)]
@@ -1084,38 +1125,68 @@ fn stop_backend_and_wait(state: &BackendState, timeout: Duration) -> Result<(), 
         Ok(mut guard) => guard.handles.take(),
         Err(_) => return Err("backend state is unavailable".to_string()),
     };
-    let Some(mut handles) = handles else {
+    let Some(handles) = handles else {
         return Ok(());
     };
-    // Give uvicorn a chance to drain in-flight requests before escalating,
-    // matching what stop_backend does on window close.
-    #[cfg(unix)]
-    {
-        // SAFETY: the child was spawned by us and has not been waited on, so
-        // its pid is still valid.
-        unsafe { libc::kill(handles.child.id() as libc::pid_t, libc::SIGTERM) };
-        let grace = Instant::now() + Duration::from_secs(3);
-        while Instant::now() < grace {
-            if handles.child.try_wait().ok().flatten().is_some() {
-                return Ok(());
+    match handles.process {
+        BackendProcess::Native(mut child) => {
+            // Give uvicorn a chance to drain in-flight requests before
+            // escalating, matching what stop_backend does on window close.
+            #[cfg(unix)]
+            {
+                // SAFETY: the child was spawned by us and has not been waited
+                // on, so its pid is still valid.
+                unsafe { libc::kill(child.id() as libc::pid_t, libc::SIGTERM) };
+                let grace = Instant::now() + Duration::from_secs(3);
+                while Instant::now() < grace {
+                    if child.try_wait().ok().flatten().is_some() {
+                        return Ok(());
+                    }
+                    thread::sleep(Duration::from_millis(100));
+                }
             }
-            thread::sleep(Duration::from_millis(100));
+            let _ = child.kill();
+            let deadline = Instant::now() + timeout;
+            loop {
+                match child.try_wait() {
+                    Ok(Some(_)) => return Ok(()),
+                    Ok(None) => {
+                        if Instant::now() >= deadline {
+                            return Err(
+                                "the audio backend did not shut down in time; update cancelled"
+                                    .to_string(),
+                            );
+                        }
+                        thread::sleep(Duration::from_millis(100));
+                    }
+                    Err(e) => {
+                        return Err(format!("failed to wait for the audio backend to exit: {e}"))
+                    }
+                }
+            }
         }
-    }
-    let _ = handles.child.kill();
-    let deadline = Instant::now() + timeout;
-    loop {
-        match handles.child.try_wait() {
-            Ok(Some(_)) => return Ok(()),
-            Ok(None) => {
+        // Ask over HTTP first, then poll health the same way
+        // stop_backend_wsl2 does, since "stopped" here can only mean "no
+        // longer answers its own health check". Unlike before, there is now
+        // a wsl.exe Child to fall back to killing directly if the deadline
+        // passes -- see BackendProcess's doc comment.
+        BackendProcess::Wsl2(mut child) => {
+            if let Err(e) = post_desktop_shutdown(handles.port, &handles.instance_token) {
+                eprintln!("[stemdeck] WSL2 backend shutdown request failed: {e}");
+            }
+            let deadline = Instant::now() + timeout;
+            loop {
+                if health_once(handles.port).is_err() {
+                    let _ = child.try_wait();
+                    return Ok(());
+                }
                 if Instant::now() >= deadline {
-                    return Err(
-                        "the audio backend did not shut down in time; update cancelled".to_string(),
-                    );
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return Ok(());
                 }
                 thread::sleep(Duration::from_millis(100));
             }
-            Err(e) => return Err(format!("failed to wait for the audio backend to exit: {e}")),
         }
     }
 }
@@ -1457,6 +1528,299 @@ fn warmup_models(state: tauri::State<BackendState>) -> Result<ModelWarmupStatus,
     Ok(status)
 }
 
+/// Whether this launch should start the backend inside WSL2 (AMD-GPU/ROCm)
+/// rather than as a native OS process.
+///
+/// Persisted by the guided WSL2/ROCm setup flow once it has verified
+/// `torch.cuda.is_available()` against the user's AMD GPU -- start_backend
+/// never probes for a working WSL2/ROCm install itself. Probing on every
+/// launch (spawn a wsl.exe, see what answers) would add real startup latency
+/// to the common case, and would silently change launch modes if the user's
+/// WSL setup changed underneath them; a persisted flag makes "why did this
+/// change" answerable from Settings instead of a launch-time race. This is
+/// the one genuinely new decision the WSL2 path needs at the Rust level --
+/// there is no new `device` value anywhere else (settings.py / config.py /
+/// separate.py / the Settings dropdown all stay exactly as they are): once a
+/// backend is actually running inside WSL2 with ROCm+PyTorch installed, it
+/// reports `demucs_device: cuda` like any NVIDIA machine, because ROCm
+/// presents to that Python process as plain `torch.cuda`.
+fn wsl2_backend_enabled(app_handle: &tauri::AppHandle) -> bool {
+    match store_get(app_handle.clone(), "wsl2BackendEnabled".to_string()) {
+        Ok(Some(v)) => v.as_bool().unwrap_or(false),
+        _ => false,
+    }
+}
+
+/// Optional WSL distro name (Settings, set by the guided setup flow). `None`
+/// means "let wsl.exe use whatever distro is configured as default" -- most
+/// users only ever have the one the guided setup installed, and hardcoding a
+/// name here (Ed's manual testing used "Ubuntu-24.04") would break for anyone
+/// who named or picked a different one.
+fn wsl2_distro(app_handle: &tauri::AppHandle) -> Option<String> {
+    match store_get(app_handle.clone(), "wsl2Distro".to_string()) {
+        Ok(Some(v)) => v
+            .as_str()
+            .map(str::to_string)
+            .filter(|s| !s.trim().is_empty()),
+        _ => None,
+    }
+}
+
+/// WSL2-side Python interpreter to run uvicorn with -- the one the guided
+/// setup flow installed ROCm PyTorch into (Ed's manual Stage 4 verification
+/// used a plain `python3` on PATH after a `pip install --user`). Overridable
+/// in Settings for anyone whose setup put it somewhere else (a venv, etc.).
+fn wsl2_python(app_handle: &tauri::AppHandle) -> String {
+    match store_get(app_handle.clone(), "wsl2Python".to_string()) {
+        Ok(Some(v)) => v
+            .as_str()
+            .map(str::to_string)
+            .filter(|s| !s.trim().is_empty())
+            .unwrap_or_else(|| "python3".to_string()),
+        _ => "python3".to_string(),
+    }
+}
+
+fn wsl_command(distro: Option<&str>) -> Command {
+    let mut cmd = Command::new("wsl.exe");
+    if let Some(d) = distro {
+        cmd.args(["-d", d]);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    cmd
+}
+
+/// Translate a Windows path to its WSL2-side `/mnt/<drive>/...` equivalent via
+/// `wslpath`, rather than hand-rolling the drive-letter/backslash translation
+/// here. wslpath already handles the edge cases (drive letter casing, UNC
+/// paths) that a quick string replace would get wrong for someone's actual
+/// folder layout.
+///
+/// One real gotcha, found on actual hardware: `wsl.exe`'s own forwarding of
+/// arguments after `--` to the Linux side treats a bare backslash as a shell
+/// escape character and silently drops it -- `C:\Users\ed\AppData\...` arrives
+/// at `wslpath` as `C:UsersedAppData...` (every backslash eaten, whatever
+/// followed it left bare), which is nothing like a valid path and fails
+/// immediately. This is `wsl.exe`'s own interop quirk, not a `wslpath` bug --
+/// so this still lets `wslpath` do the real translation work (per the
+/// reasoning above), just handed a form of the path that survives `wsl.exe`'s
+/// argument forwarding intact: Windows path parsing (and `wslpath` itself)
+/// treats `/` and `\` as equivalent separators, so swapping to `/` first
+/// sidesteps the mangling entirely without reimplementing any of wslpath's
+/// own edge-case handling.
+fn wsl_path(distro: Option<&str>, windows_path: &Path) -> Result<String, String> {
+    let forward_slash_path = windows_path.to_string_lossy().replace('\\', "/");
+    let output = wsl_command(distro)
+        .args(["--", "wslpath", "-a"])
+        .arg(&forward_slash_path)
+        .output()
+        .map_err(|e| format!("failed to run wslpath: {e}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "wslpath failed for {}: {}",
+            windows_path.display(),
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+    String::from_utf8(output.stdout)
+        .map(|s| s.trim().to_string())
+        .map_err(|e| format!("wslpath output was not valid UTF-8: {e}"))
+}
+
+/// Single-quote a value for embedding in the `bash -lc "..."` command line
+/// built below -- paths and the instance token are the only untrusted-ish
+/// inputs (a token we generated, and paths derived from install locations),
+/// but quoting them properly costs nothing and avoids a class of bugs if any
+/// of them ever contain a space.
+fn shell_quote(s: &str) -> String {
+    format!("'{}'", s.replace('\'', "'\\''"))
+}
+
+/// Spawn `wsl.exe` running uvicorn as its direct foreground child and return
+/// the Child handle -- see BackendProcess's doc comment for why this
+/// supersedes the original one-shot-detached-launch design (Decision #8).
+/// The caller is responsible for keeping this Child alive (not calling
+/// `.wait()`/dropping it) for as long as the backend should keep running,
+/// and for killing it as a last-resort stop path.
+///
+/// Every path uvicorn needs is translated to its WSL2-side equivalent via
+/// wsl_path first: STEMDECK_DATA_DIR and friends have to be paths the Linux
+/// side can actually open, and a raw `C:\...` string means nothing there.
+/// Note this routes the backend's file I/O (job data, model cache, and every
+/// separated stem) through the DrvFs bridge (`/mnt/c/...`), which is slower
+/// than a native ext4 path -- a known cost of keeping the user's data on the
+/// Windows filesystem rather than duplicating it inside the WSL2 disk image.
+///
+/// One DrvFs quirk found while diagnosing this, noted here so it isn't
+/// mistaken for a bug later: while uvicorn is still running and holding
+/// backend.log open, the file can be briefly invisible from the Windows
+/// side (`Get-Content` reporting "does not exist") even though it exists
+/// and has correct content on the Linux side -- it shows up once Windows'
+/// own metadata cache catches up. Nothing here works around it; the health
+/// poll below doesn't depend on the log being visible, only on the backend,
+/// and log_hint() is only ever consulted after a failure, by which point the
+/// window has long since passed.
+struct Wsl2LaunchParams<'a> {
+    backend_dir: &'a Path,
+    data_dir: &'a Path,
+    jobs_dir: &'a Path,
+    bind_host: &'a str,
+    port: u16,
+    instance_token: &'a str,
+    log_path: &'a Path,
+}
+
+fn start_backend_wsl2(app_handle: &tauri::AppHandle, p: Wsl2LaunchParams) -> Result<Child, String> {
+    let distro = wsl2_distro(app_handle);
+    let distro_ref = distro.as_deref();
+    let python = wsl2_python(app_handle);
+
+    let wsl_backend_dir = wsl_path(distro_ref, p.backend_dir)?;
+    let wsl_data_dir = wsl_path(distro_ref, p.data_dir)?;
+    let wsl_jobs_dir = wsl_path(distro_ref, p.jobs_dir)?;
+    let wsl_log_path = wsl_path(distro_ref, p.log_path)?;
+    let wsl_settings_mirror = shared_settings_dir()
+        .map(|dir| wsl_path(distro_ref, &dir.join("settings.json")))
+        .transpose()?;
+
+    let mut env_prefix = format!(
+        "STEMDECK_DATA_DIR={data} \
+         STEMDECK_DEFAULT_JOBS_DIR={jobs} \
+         STEMDECK_DESKTOP=1 \
+         STEMDECK_DESKTOP_HEARTBEAT=1 \
+         STEMDECK_INSTANCE_TOKEN={token} \
+         PYTHONUNBUFFERED=1 \
+         XDG_CACHE_HOME={data}/cache \
+         TORCH_HOME={data}/models/torch",
+        data = shell_quote(&wsl_data_dir),
+        jobs = shell_quote(&wsl_jobs_dir),
+        token = shell_quote(p.instance_token),
+    );
+    if let Some(mirror) = wsl_settings_mirror {
+        env_prefix.push_str(&format!(
+            " STEMDECK_SETTINGS_MIRROR={}",
+            shell_quote(&mirror)
+        ));
+    }
+
+    // `-lc` runs a login shell so PATH/venv activation from .bashrc/.profile
+    // is in effect -- matching how Ed ran `python3` by hand during the Stage 4
+    // verification. `< /dev/null` detaches stdin so nothing here can ever
+    // block on it; stdout/stderr are redirected to the same backend.log the
+    // native path writes to (rotated on the Windows side just below, before
+    // this runs), so log_hint() finds WSL2-launched failures the same way.
+    // No `nohup`/`disown`/`setsid`: those were the old (Decision #8)
+    // detached-launch design and are unnecessary now that we keep `wsl.exe`
+    // itself alive (see this function's doc comment) -- uvicorn runs as the
+    // direct, non-backgrounded child of this shell. `exec` replaces the
+    // shell with uvicorn once `cd` succeeds, so there's one less process
+    // between `wsl.exe` and uvicorn for the stop path to reason about.
+    let inner_cmd = format!(
+        "cd {backend} && {env} exec {python} -m uvicorn app.main:app --host {host} --port {port} \
+         --timeout-graceful-shutdown 2 > {log} 2>&1 < /dev/null",
+        backend = shell_quote(&wsl_backend_dir),
+        env = env_prefix,
+        python = shell_quote(&python),
+        host = p.bind_host,
+        port = p.port,
+        log = shell_quote(&wsl_log_path),
+    );
+
+    wsl_command(distro_ref)
+        .args(["--", "bash", "-lc", &inner_cmd])
+        .spawn()
+        .map_err(|e| format!("failed to start wsl.exe: {e}"))
+}
+
+/// The Wsl2-path counterpart to wait_for_health. Now that start_backend_wsl2
+/// keeps `wsl.exe` alive and hands back its Child (see BackendProcess's doc
+/// comment), an early exit -- wrong distro name, `cd` failing, the venv
+/// missing -- is caught the same way the Native path catches it, via
+/// `try_wait()`, rather than only ever surfacing as a 90-second timeout.
+/// There is deliberately no PID-based identity fallback here the way
+/// wait_for_health has for the Native path: `child.id()` is `wsl.exe`'s own
+/// Windows PID, which has no relationship to the Linux-side `pid` uvicorn
+/// reports over `/api/health` -- different kernels, different PID
+/// namespaces -- so only the instance-token match below can ever confirm
+/// identity for this path.
+fn wait_for_health_headless(
+    child: &mut Child,
+    port: u16,
+    token: &str,
+    timeout: Duration,
+    log_path: &Path,
+) -> Result<(), String> {
+    let deadline = Instant::now() + timeout;
+    let mut interval = Duration::from_millis(250);
+    loop {
+        // Checked before the deadline so a wsl.exe that exited early is
+        // always reported as that, rather than as a plain timeout.
+        if let Ok(Some(status)) = child.try_wait() {
+            return Err(format!(
+                "wsl.exe exited during startup ({status}).\n\n{}",
+                log_hint(log_path)
+            ));
+        }
+        if Instant::now() >= deadline {
+            return Err(format!(
+                "backend did not become healthy within {} seconds.\n\n{}",
+                timeout.as_secs(),
+                log_hint(log_path)
+            ));
+        }
+        match health_once(port) {
+            Ok(id) if id.instance.as_deref() == Some(token) => return Ok(()),
+            // Anything else -- no response yet, or a stale/foreign process
+            // already on this port from an earlier run -- just keeps waiting;
+            // a bad launch here is only ever caught by the timeout above.
+            _ => {}
+        }
+        thread::sleep(interval);
+        interval = (interval * 2).min(Duration::from_secs(2));
+    }
+}
+
+/// Starts (and self-terminates) the background thread that pings
+/// /api/desktop/heartbeat roughly every 10s for as long as this exact WSL2
+/// launch is the active backend (Decision #11). Matched by instance_token
+/// rather than just "handles still present" so this thread can never keep
+/// ponging a *different* backend alive after a stop/restart reused the slot.
+fn spawn_wsl2_heartbeat(app_handle: tauri::AppHandle, port: u16, instance_token: String) {
+    thread::spawn(move || {
+        let Ok(client) = reqwest::blocking::Client::builder()
+            .timeout(Duration::from_secs(5))
+            .build()
+        else {
+            return;
+        };
+        let url = format!("http://127.0.0.1:{port}/api/desktop/heartbeat");
+        loop {
+            thread::sleep(Duration::from_secs(10));
+            let state = app_handle.state::<BackendState>();
+            let still_current = match state.inner.lock() {
+                Ok(inner) => inner
+                    .handles
+                    .as_ref()
+                    .map(|h| h.instance_token == instance_token)
+                    .unwrap_or(false),
+                Err(_) => false,
+            };
+            if !still_current {
+                return;
+            }
+            let _ = client
+                .post(&url)
+                .header("X-Stemdeck-Token", &instance_token)
+                .send();
+        }
+    });
+}
+
 /// Spawns the Python/uvicorn backend, waits for it to become healthy, and returns its URL.
 #[tauri::command]
 fn start_backend(
@@ -1480,134 +1844,201 @@ fn start_backend(
         inner.starting = true;
     }
 
+    let use_wsl2 = wsl2_backend_enabled(&app_handle);
+
     // Spawn and wait for health outside the lock; update state atomically on completion.
     let spawn_result = (|| {
         let root = app_root()?;
         let backend_dir = backend_dir(&root)?;
         let data_dir = local_data_dir()?;
-        let python = python_path(&root).filter(|p| p.is_file()).ok_or_else(|| {
-            "Python runtime not found. Expected python/ or .venv/ under StemDeck.".to_string()
-        })?;
-        patch_pyvenv_cfg(&python);
-        let (port, port_guard) = reserve_port(bind_host, configured_port())?;
-        let url = format!("http://127.0.0.1:{port}");
-        let log_path = data_dir.join("logs").join("backend.log");
-        let (stdout, stderr) = prepare_backend_stdio(&log_path).unwrap_or_else(|_| {
-            // Logging should help diagnose startup; it should not prevent startup.
-            (Stdio::null(), Stdio::null())
-        });
-
-        // On macOS and Linux, python-build-standalone detects its own prefix by
-        // walking up from bin/ — PYTHONHOME is not needed and actively breaks
-        // startup when mis-computed (it would point at python/bin, whose
-        // lib/python3.X has no stdlib, so even `encodings` fails to import).
-        // Only Windows, whose portable venv keeps the stdlib under base/Lib,
-        // needs PYTHONHOME to locate the bundled stdlib.
-        // Compute before moving python into Command::new.
-        #[cfg(windows)]
-        let pythonhome = python
-            .parent()
-            .and_then(|bin_dir| bin_dir.parent().map(|venv| (venv, bin_dir)))
-            .and_then(|(venv, bin_dir)| bundled_python_home(venv, bin_dir).map(|(home, _)| home));
-
-        let instance_token = new_instance_token();
-        let mut cmd = Command::new(python);
-        cmd.args([
-            "-m",
-            "uvicorn",
-            "app.main:app",
-            "--host",
-            bind_host,
-            "--port",
-            &port.to_string(),
-            // Bound how long uvicorn waits for open connections on shutdown.
-            // The import queue's SSE stream stays open for as long as the app
-            // window is on screen, and uvicorn drains connections before it
-            // runs the lifespan teardown -- so without this the backend never
-            // finishes draining, we escalate to SIGKILL below, and the teardown
-            // that reaps the demucs worker never runs. Kept under the 3 s
-            // SIGKILL deadline so the clean path wins.
-            "--timeout-graceful-shutdown",
-            "2",
-        ]);
-        #[cfg(windows)]
-        if let Some(ref pythonhome) = pythonhome {
-            cmd.env("PYTHONHOME", pythonhome);
-        }
-
         // Jobs (stem audio files) live in ~/Documents/StemDeck/jobs/ so the user's
         // library is visible in Finder, backed up by iCloud, and survives app reinstalls.
         let jobs_dir = documents_dir_for_jobs(&app_handle);
+        let log_path = data_dir.join("logs").join("backend.log");
+        let instance_token = new_instance_token();
 
-        cmd.current_dir(&backend_dir)
-            .env("STEMDECK_DATA_DIR", &data_dir)
-            .env("STEMDECK_DEFAULT_JOBS_DIR", &jobs_dir)
-            .env("STEMDECK_DESKTOP", "1")
-            // Where the backend keeps the per-user copy of settings.json that
-            // survives extracting a new package into a fresh folder. Computed
-            // here so the write half and ensure_workspace's restore half can
-            // never point at different places.
-            .envs(
-                shared_settings_dir()
-                    .map(|dir| ("STEMDECK_SETTINGS_MIRROR", dir.join("settings.json"))),
-            )
-            .env("STEMDECK_PARENT_PID", std::process::id().to_string())
-            // How the backend proves it is ours when it answers /api/health.
-            // The environment is the only channel that survives the Windows
-            // venv launcher re-execing into python/base (#457), which is why
-            // this exists rather than a PID comparison. See wait_for_health.
-            .env("STEMDECK_INSTANCE_TOKEN", &instance_token)
-            .env("PYTHONUNBUFFERED", "1")
-            .env("XDG_CACHE_HOME", data_dir.join("cache"))
-            .env("TORCH_HOME", data_dir.join("models").join("torch"))
-            .stdout(stdout)
-            .stderr(stderr);
+        if use_wsl2 {
+            // Nothing native to locate or launch here -- no venv, no
+            // PYTHONHOME, no Stdio pipes (the WSL2-side shell redirects its
+            // own log; see start_backend_wsl2). What prepare_backend_stdio
+            // does for the native path (create the log dir, rotate old logs)
+            // still has to happen here, on the Windows side, before the
+            // WSL2-side shell tries to redirect into it.
+            if let Some(parent) = log_path.parent() {
+                fs::create_dir_all(parent)
+                    .map_err(|e| format!("failed to create backend log directory: {e}"))?;
+            }
+            rotate_log(&log_path, 3);
 
-        if let Some(ffmpeg_dir) = ffmpeg_dir_if_present(&data_dir) {
-            let existing = env::var_os("PATH").unwrap_or_default();
-            let mut paths = vec![ffmpeg_dir];
-            paths.extend(env::split_paths(&existing));
-            let joined = env::join_paths(paths).map_err(|e| e.to_string())?;
-            cmd.env("PATH", joined);
+            let (port, port_guard) = reserve_port(bind_host, configured_port())?;
+            let url = format!("http://127.0.0.1:{port}");
+            // Released before the launch, same as the native path: this only
+            // ever avoided racing another *Windows* process for the port
+            // number, and the WSL2-side uvicorn binding that same number
+            // inside its own kernel isn't affected by a Windows-side socket
+            // either way.
+            drop(port_guard);
+
+            let mut child = start_backend_wsl2(
+                &app_handle,
+                Wsl2LaunchParams {
+                    backend_dir: &backend_dir,
+                    data_dir: &data_dir,
+                    jobs_dir: &jobs_dir,
+                    bind_host,
+                    port,
+                    instance_token: &instance_token,
+                    log_path: &log_path,
+                },
+            )?;
+
+            if let Err(err) = wait_for_health_headless(
+                &mut child,
+                port,
+                &instance_token,
+                Duration::from_secs(90),
+                &log_path,
+            ) {
+                // Whatever came up (or half came up) inside WSL2 didn't pass
+                // health: ask it to stop gracefully over HTTP first (uvicorn
+                // may still be able to answer even though it never reported
+                // our token), then fall back to killing wsl.exe directly so
+                // a failed launch never leaves a backend running unmanaged.
+                let _ = post_desktop_shutdown(port, &instance_token);
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(err);
+            }
+
+            Ok((BackendProcess::Wsl2(child), url, port, instance_token))
+        } else {
+            let python = python_path(&root).filter(|p| p.is_file()).ok_or_else(|| {
+                "Python runtime not found. Expected python/ or .venv/ under StemDeck.".to_string()
+            })?;
+            patch_pyvenv_cfg(&python);
+            let (port, port_guard) = reserve_port(bind_host, configured_port())?;
+            let url = format!("http://127.0.0.1:{port}");
+            let (stdout, stderr) = prepare_backend_stdio(&log_path).unwrap_or_else(|_| {
+                // Logging should help diagnose startup; it should not prevent startup.
+                (Stdio::null(), Stdio::null())
+            });
+
+            // On macOS and Linux, python-build-standalone detects its own prefix by
+            // walking up from bin/ — PYTHONHOME is not needed and actively breaks
+            // startup when mis-computed (it would point at python/bin, whose
+            // lib/python3.X has no stdlib, so even `encodings` fails to import).
+            // Only Windows, whose portable venv keeps the stdlib under base/Lib,
+            // needs PYTHONHOME to locate the bundled stdlib.
+            // Compute before moving python into Command::new.
+            #[cfg(windows)]
+            let pythonhome = python
+                .parent()
+                .and_then(|bin_dir| bin_dir.parent().map(|venv| (venv, bin_dir)))
+                .and_then(|(venv, bin_dir)| {
+                    bundled_python_home(venv, bin_dir).map(|(home, _)| home)
+                });
+
+            let mut cmd = Command::new(python);
+            cmd.args([
+                "-m",
+                "uvicorn",
+                "app.main:app",
+                "--host",
+                bind_host,
+                "--port",
+                &port.to_string(),
+                // Bound how long uvicorn waits for open connections on shutdown.
+                // The import queue's SSE stream stays open for as long as the app
+                // window is on screen, and uvicorn drains connections before it
+                // runs the lifespan teardown -- so without this the backend never
+                // finishes draining, we escalate to SIGKILL below, and the teardown
+                // that reaps the demucs worker never runs. Kept under the 3 s
+                // SIGKILL deadline so the clean path wins.
+                "--timeout-graceful-shutdown",
+                "2",
+            ]);
+            #[cfg(windows)]
+            if let Some(ref pythonhome) = pythonhome {
+                cmd.env("PYTHONHOME", pythonhome);
+            }
+
+            cmd.current_dir(&backend_dir)
+                .env("STEMDECK_DATA_DIR", &data_dir)
+                .env("STEMDECK_DEFAULT_JOBS_DIR", &jobs_dir)
+                .env("STEMDECK_DESKTOP", "1")
+                // Where the backend keeps the per-user copy of settings.json that
+                // survives extracting a new package into a fresh folder. Computed
+                // here so the write half and ensure_workspace's restore half can
+                // never point at different places.
+                .envs(
+                    shared_settings_dir()
+                        .map(|dir| ("STEMDECK_SETTINGS_MIRROR", dir.join("settings.json"))),
+                )
+                .env("STEMDECK_PARENT_PID", std::process::id().to_string())
+                // How the backend proves it is ours when it answers /api/health.
+                // The environment is the only channel that survives the Windows
+                // venv launcher re-execing into python/base (#457), which is why
+                // this exists rather than a PID comparison. See wait_for_health.
+                .env("STEMDECK_INSTANCE_TOKEN", &instance_token)
+                .env("PYTHONUNBUFFERED", "1")
+                .env("XDG_CACHE_HOME", data_dir.join("cache"))
+                .env("TORCH_HOME", data_dir.join("models").join("torch"))
+                .stdout(stdout)
+                .stderr(stderr);
+
+            if let Some(ffmpeg_dir) = ffmpeg_dir_if_present(&data_dir) {
+                let existing = env::var_os("PATH").unwrap_or_default();
+                let mut paths = vec![ffmpeg_dir];
+                paths.extend(env::split_paths(&existing));
+                let joined = env::join_paths(paths).map_err(|e| e.to_string())?;
+                cmd.env("PATH", joined);
+            }
+
+            #[cfg(windows)]
+            {
+                use std::os::windows::process::CommandExt;
+                const CREATE_NO_WINDOW: u32 = 0x08000000;
+                cmd.creation_flags(CREATE_NO_WINDOW);
+            }
+
+            let mut child = cmd
+                .spawn()
+                .map_err(|e| format!("failed to start backend: {e}"))?;
+            // Release the reserved port immediately after spawn so uvicorn can bind it.
+            drop(port_guard);
+
+            if let Err(err) = wait_for_health(
+                &mut child,
+                port,
+                &instance_token,
+                Duration::from_secs(90),
+                &log_path,
+            ) {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(err);
+            }
+
+            Ok((BackendProcess::Native(child), url, port, instance_token))
         }
-
-        #[cfg(windows)]
-        {
-            use std::os::windows::process::CommandExt;
-            const CREATE_NO_WINDOW: u32 = 0x08000000;
-            cmd.creation_flags(CREATE_NO_WINDOW);
-        }
-
-        let mut child = cmd
-            .spawn()
-            .map_err(|e| format!("failed to start backend: {e}"))?;
-        // Release the reserved port immediately after spawn so uvicorn can bind it.
-        drop(port_guard);
-
-        if let Err(err) = wait_for_health(
-            &mut child,
-            port,
-            &instance_token,
-            Duration::from_secs(90),
-            &log_path,
-        ) {
-            let _ = child.kill();
-            let _ = child.wait();
-            return Err(err);
-        }
-
-        Ok((child, url))
     })();
 
     // Atomically update state: clear starting flag whether spawn succeeded or failed.
     let mut inner = state.inner.lock().map_err(|e| e.to_string())?;
     inner.starting = false;
     match spawn_result {
-        Ok((child, url)) => {
+        Ok((process, url, port, instance_token)) => {
+            let is_wsl2 = matches!(process, BackendProcess::Wsl2(_));
             inner.handles = Some(BackendHandles {
-                child,
+                process,
                 url: url.clone(),
+                port,
+                instance_token: instance_token.clone(),
             });
+            drop(inner);
+            if is_wsl2 {
+                spawn_wsl2_heartbeat(app_handle, port, instance_token);
+            }
             Ok(BackendStarted { url })
         }
         Err(e) => Err(e),
@@ -2168,18 +2599,28 @@ fn python_stdlib_ok(python: &Path) -> bool {
     // base/Lib. macOS and Linux use python-build-standalone, which auto-detects
     // its prefix from bin/ — setting PYTHONHOME there points at the wrong dir
     // and breaks the import (parity with start_backend).
+    //
+    // Reuses bundled_python_home() rather than a separate inline computation
+    // (which this used to have): that version unconditionally fell back to
+    // PYTHONHOME=<venv root> even when nothing under it actually held a
+    // stdlib copy -- true for StemDeck's own bundled portable runtime
+    // (python/base/Lib/...) and the legacy layout it also checks for, but
+    // false for a plain `python -m venv .venv` dev checkout, which has no
+    // bundled stdlib at all and relies on its own pyvenv.cfg to find the
+    // system interpreter's. Forcing PYTHONHOME there pointed Python at a
+    // directory with no `encodings` module, so `import encodings` failed,
+    // python_stdlib_ok() reported false, and probe_runtime() never let a
+    // plain dev venv satisfy pythonReady -- the setup wizard would retry the
+    // (for a source checkout, nonexistent) runtime-pack download forever
+    // instead. bundled_python_home() already gets this right by returning
+    // None when there's nothing to point PYTHONHOME at; start_backend's own
+    // PYTHONHOME computation already goes through it for the same reason.
     #[cfg(windows)]
-    {
-        let venv_root = python.parent().and_then(|b| b.parent());
-        let pythonhome = venv_root.map(|venv| {
-            let base = venv.join("base");
-            if base.join("Lib").join("os.py").is_file() {
-                return base;
+    if let Some(bin_dir) = python.parent() {
+        if let Some(venv_root) = bin_dir.parent() {
+            if let Some((home, _)) = bundled_python_home(venv_root, bin_dir) {
+                cmd.env("PYTHONHOME", home);
             }
-            venv.to_path_buf()
-        });
-        if let Some(ref home) = pythonhome {
-            cmd.env("PYTHONHOME", home);
         }
     }
     cmd.stdout(Stdio::null()).stderr(Stdio::null());
@@ -2639,29 +3080,101 @@ fn stop_backend(state: &BackendState) {
         unsafe { libc::kill(pid as libc::pid_t, libc::SIGTERM) };
     }
 
-    let Some(mut handles) = handles else { return };
+    let Some(handles) = handles else { return };
 
-    // Drain the backend on a background thread so we don't block the Tauri
-    // RunEvent main thread for up to 3 seconds (#144).
-    thread::spawn(move || {
-        // Send SIGTERM first so uvicorn can drain in-progress requests
-        // before we escalate to SIGKILL.
-        #[cfg(unix)]
-        {
-            // SAFETY: child was spawned by us and has not yet been waited on;
-            // its PID is valid for the lifetime of the Child handle.
-            unsafe { libc::kill(handles.child.id() as libc::pid_t, libc::SIGTERM) };
-            let deadline = Instant::now() + Duration::from_secs(3);
-            while Instant::now() < deadline {
-                if handles.child.try_wait().ok().flatten().is_some() {
-                    return;
+    match handles.process {
+        BackendProcess::Native(mut child) => {
+            // Drain the backend on a background thread so we don't block the
+            // Tauri RunEvent main thread for up to 3 seconds (#144).
+            thread::spawn(move || {
+                // Send SIGTERM first so uvicorn can drain in-progress requests
+                // before we escalate to SIGKILL.
+                #[cfg(unix)]
+                {
+                    // SAFETY: child was spawned by us and has not yet been
+                    // waited on; its PID is valid for the lifetime of the
+                    // Child handle.
+                    unsafe { libc::kill(child.id() as libc::pid_t, libc::SIGTERM) };
+                    let deadline = Instant::now() + Duration::from_secs(3);
+                    while Instant::now() < deadline {
+                        if child.try_wait().ok().flatten().is_some() {
+                            return;
+                        }
+                        thread::sleep(Duration::from_millis(100));
+                    }
                 }
-                thread::sleep(Duration::from_millis(100));
-            }
+                let _ = child.kill();
+                let _ = child.wait();
+            });
         }
-        let _ = handles.child.kill();
-        let _ = handles.child.wait();
-    });
+        BackendProcess::Wsl2(mut child) => {
+            let port = handles.port;
+            let token = handles.instance_token;
+            // Same 3 s drain budget as the native path, same reason: don't
+            // block the Tauri RunEvent main thread on window close (#144).
+            thread::spawn(move || {
+                stop_backend_wsl2(&mut child, port, &token, Duration::from_secs(3));
+            });
+        }
+    }
+}
+
+/// Ask a WSL2-launched backend to shut down, then wait for it to actually stop
+/// answering /api/health -- the HTTP equivalent of the native path's
+/// SIGTERM-then-try_wait drain above.
+///
+/// Escalates to killing the `wsl.exe` Child directly if the deadline passes,
+/// now that there is one to kill (see BackendProcess's doc comment for why
+/// this wasn't possible under the original one-shot-detached-launch design).
+/// This is safe in a way a name/port-based kill across the WSL2/Windows
+/// boundary would not have been: `child` is the exact `wsl.exe` process this
+/// launch spawned, running uvicorn as its direct (non-backgrounded, `exec`'d)
+/// child, so killing it cannot take down some unrelated process that happens
+/// to match by name or port. The heartbeat watchdog on the Python side
+/// remains the second line of defense for the case this function never runs
+/// at all (a hard crash of the desktop app itself).
+fn stop_backend_wsl2(child: &mut Child, port: u16, token: &str, timeout: Duration) {
+    if let Err(e) = post_desktop_shutdown(port, token) {
+        // The backend may already be gone -- crashed, or its own heartbeat
+        // watchdog beat us to it -- so log and still check below rather than
+        // assuming this failure means it's stuck.
+        eprintln!("[stemdeck] WSL2 backend shutdown request failed: {e}");
+    }
+    let deadline = Instant::now() + timeout;
+    while Instant::now() < deadline {
+        if health_once(port).is_err() {
+            let _ = child.try_wait();
+            return;
+        }
+        thread::sleep(Duration::from_millis(100));
+    }
+    eprintln!(
+        "[stemdeck] WSL2 backend on port {port} did not stop within {}s of the shutdown \
+         request; killing wsl.exe directly.",
+        timeout.as_secs()
+    );
+    let _ = child.kill();
+    let _ = child.wait();
+}
+
+/// POST /api/desktop/shutdown -- the graceful-shutdown counterpart to
+/// health_once's GET, and the one HTTP call every WSL2 stop path makes before
+/// it starts polling for the backend to actually go away.
+fn post_desktop_shutdown(port: u16, token: &str) -> Result<(), String> {
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(5))
+        .build()
+        .map_err(|e| e.to_string())?;
+    let response = client
+        .post(format!("http://127.0.0.1:{port}/api/desktop/shutdown"))
+        .header("X-Stemdeck-Token", token)
+        .send()
+        .map_err(|e| e.to_string())?;
+    if response.status().is_success() {
+        Ok(())
+    } else {
+        Err(format!("HTTP {}", response.status()))
+    }
 }
 
 /// Returns the persistent user data directory for StemDeck.
