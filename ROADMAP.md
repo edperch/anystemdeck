@@ -70,6 +70,31 @@ the brand already used for emphasis; "StemDeck" stays the near-white (`#F4F6F8`)
 rest of the wordmark always was. Canvases grew slightly (728/1230/780px wide, up from
 820/1200/720) to fit the three extra letters without shrinking the type.
 
+### Settings UI · 2026-09 · DirectML is a real, selectable device now
+
+Added a "DirectML (AMD/Intel/NVIDIA)" option to the compute device dropdown,
+greyed out the same way CUDA/MPS already were when unavailable, and greyed out
+"Best" separation quality specifically when DirectML is the resolved device
+(no shift-averaging equivalent on that path yet — `app/pipeline/separate.py`
+already enforced this server-side and said as much in a comment). Also fixed
+a real gap this surfaced: the API endpoint the UI reads device availability
+from only ever reported PyTorch devices, so DirectML could never have shown
+up as available even on a machine where it genuinely works.
+
+### Packaging · 2026-09 · the onnxruntime/onnxruntime-directml conflict is resolved
+
+`scripts/windows/make-portable.ps1` now force-reinstalls `onnxruntime-directml`
+after the main dependency install, for every Windows package (not just one
+variant) — plain `onnxruntime` and `onnxruntime-directml` are separate PyPI
+distributions that install into the identical import path, so without this
+override, whichever installed last would win unpredictably. Also raised
+`pyproject.toml`'s Python floor from 3.10 to 3.11: `demucs-onnx` already
+needed 3.11 as a hard dependency, so 3.10 was never really supported, and
+nothing else in the project (CI, CONTRIBUTING.md, this same packaging script)
+exercises anything below 3.12 anyway. Caught and fixed a second, unrelated
+drift in the same script while in there: its CPU-only torch pin was still
+2.6.0, left behind when `pyproject.toml`'s own torch floor moved to 2.9.
+
 ## In flight / next
 
 No formal issue tracker yet for fork-specific work (unlike StemDeck's own
@@ -80,13 +105,6 @@ were AnyStemDeck's). Current list, roughly in the order it's likely to matter:
   terminal steps ([README](README.md#amd-gpu-on-windows-via-wsl2--rocm)).
   Decision #6 and its follow-ups in `docs/plan.md`'s Decisions section settle
   the shape of the script that will replace them.
-- **Settings UI.** Add the DirectML device option to the device dropdown and
-  its seven-locale translation key; grey out "Best" quality when DirectML is
-  selected, since no shift-averaging equivalent exists on that path yet.
-- **Packaging.** A real dependency conflict between `onnxruntime` and
-  `onnxruntime-directml` needs a forced-reinstall step added to the Windows
-  packaging script — not yet written. Also unresolved: `demucs-onnx` needs
-  Python ≥3.11, while `pyproject.toml`'s floor is still 3.10.
 - **DirectML parity testing.** Numerical and speed parity against the
   CPU/CUDA path on the same input hasn't been verified on real hardware yet.
 

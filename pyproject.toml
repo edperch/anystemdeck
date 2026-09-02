@@ -5,12 +5,18 @@ name = "anystemdeck"
 # Builds between tags report a dev version (e.g. 0.7.0a5.dev3+g<sha>). (#169)
 dynamic = ["version"]
 description = "Paste a YouTube URL, get audio stems split into a DAW-style player."
-# demucs-onnx (added below) requires >=3.11; the floor here stays at 3.10 as
-# a statement of intent rather than a real option -- pip will simply fail to
-# resolve on 3.10 once demucs-onnx is a hard dependency. Worth either raising
-# this floor to 3.11 outright or making demucs-onnx conditional on Python
-# version if 3.10 support still matters to this project; see docs/plan.md.
-requires-python = ">=3.10,<3.14"
+# Floor is 3.11, not 3.10: demucs-onnx (below) is a hard, unconditional
+# dependency (gated by platform, not Python version) and needs >=3.11, so
+# `>=3.10` was never a real option -- pip would just fail to resolve on 3.10
+# once demucs-onnx landed. Confirmed nothing else in the project actually
+# exercises 3.10 either: CI only ever runs 3.12 (.github/workflows/ci.yml),
+# CONTRIBUTING.md tells developers to use 3.12, and
+# scripts/windows/make-portable.ps1 hardcodes `py -3.12`. Raising the floor
+# outright (rather than making demucs-onnx conditional on Python version) was
+# the low-risk choice: gating it would mean a second, untested code path
+# where "dml" can never be offered, to preserve support for a version nothing
+# else here already supports. See docs/plan.md.
+requires-python = ">=3.11,<3.14"
 dependencies = [
     "fastapi>=0.115,!=0.136.3",
     "uvicorn[standard]>=0.30",

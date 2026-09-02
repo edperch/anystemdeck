@@ -465,3 +465,111 @@ editing a file something else depends on.
 
 Also updated: `ROADMAP.md`'s wordmark/logo redesign backlog item, moved from
 "In flight / next" to "Shipped" now that it's done.
+### Settings UI: DirectML device option, and the availability gap it surfaced
+
+Phase 3 of the DirectML work, finally wired into the UI Ed actually sees.
+Added a "DirectML (AMD/Intel/NVIDIA)" `<option>` to the compute device select
+in `static/js/catalog.js` -- the existing greying-out logic (keyed off a
+`demucs_devices_available` list from the server) picked it up with no new
+client logic needed. Also greyed out "Best" separation quality specifically
+when the *resolved* device is `dml` (not the raw select value -- "auto" can
+resolve to `dml` too), reusing the same "not available" suffix pattern the
+device select already used. `app/pipeline/separate.py` already caps shifts
+back to 1 for `dml` at job time, with a comment saying "the Settings UI is
+meant to grey this combination out" -- this is that.
+
+While wiring the device select, found and fixed a real, live gap in
+`app/main.py`: `demucs_devices_available` (the field the greying-out logic
+reads) was built from `available_torch_devices()` alone, so "dml" could never
+appear there even on a machine where `available_onnx_providers()` genuinely
+reports it -- DirectML would have been unselectable forever, on any hardware,
+once the UI shipped. Fixed by including both. Added a regression test
+(`tests/test_network_gate.py`) pinning it. Also noticed the existing
+cuda/mps/cpu `<option>` tags had no `data-i18n` attribute, despite
+`static/js/i18n.js` carrying translated strings for all three in every
+locale the whole time -- they were just never applied. Wired those up too
+(and added the new `settings.device.dml` key to all 9 locale blocks) while
+already in that exact markup.
+
+Verified against a clean clone with the patch applied: full suite (839/839,
+including the new test), `ruff check`/`format --check` clean on every file
+touched, both edited JS files pass `node --check`, and the JS i18n-detect
+test still passes (42/42).
+
+### Packaging: the onnxruntime/onnxruntime-directml conflict, and the Python floor
+
+The other two of the three items Ed asked to tackle together. Both land in
+`scripts/windows/make-portable.ps1` and `pyproject.toml`.
+
+**The onnxruntime conflict** was already fully diagnosed in a comment above
+`demucs-onnx` in `pyproject.toml` (from the original DirectML work) --
+`onnxruntime` and `onnxruntime-directml` are separate PyPI distributions that
+both install into the exact same `onnxruntime` import path, so declaring both
+as dependencies would leave pip to silently pick whichever installed last.
+That comment named the fix and where it belonged: "a forced post-install
+override in scripts/windows/make-portable.ps1, not a pyproject.toml
+dependency." Implemented exactly that: `pip install onnxruntime-directml==X
+--force-reinstall --no-deps`, run unconditionally for every Windows package
+(both `-CpuOnly` and the default NVIDIA build) since DirectML is a
+torch-independent path, not part of that variant split. `--no-deps` because
+onnxruntime-directml needs the same numpy/flatbuffers/etc. the plain
+onnxruntime install (and uv.lock) already pinned; letting it reinstall those
+too would risk a different resolution winning against those pins for
+nothing.
+
+The version pin needed its own decision: uv.lock resolves plain `onnxruntime`
+to 1.29.0, but `onnxruntime-directml`'s own latest release on PyPI is 1.24.4
+(checked directly, not assumed) -- the DirectML build is a slower-moving,
+separate distribution and the two are not expected to track each other.
+Pinned the override to onnxruntime-directml's own latest (1.24.4) rather than
+trying to force version parity with plain onnxruntime, which isn't available
+regardless. This is a real, recurring maintenance cost, the same shape as the
+ROCm wheel pins already called out for the setup script (Decision #16) --
+noted in the script's own comment so it isn't rediscovered from scratch.
+
+**The Python floor** (`requires-python`): raised from `>=3.10` to `>=3.11`.
+`demucs-onnx` already needed 3.11 as a hard, unconditional dependency (gated
+by platform, not Python version), so `>=3.10` was a statement of intent that
+`uv lock`/`pip install` would simply refuse to honor -- not a real, working
+option today. Checked whether 3.10 support was worth preserving via the
+alternative (gating `demucs-onnx` behind a Python-version marker) before
+deciding: nothing else in the project exercises 3.10 either. CI only ever
+runs Python 3.12 (`.github/workflows/ci.yml`'s container image),
+`CONTRIBUTING.md` tells developers to use 3.12, and this same packaging
+script hardcodes `py -3.12`. Gating `demucs-onnx` instead would have added a
+second, permanently-untested code path (Python 3.10, `dml` never offered) to
+preserve support nothing else here already provides -- raising the floor
+outright was the lower-risk choice.
+
+`uv lock` regenerated after the floor change (confirmed deterministic: ran it
+independently in two different environments -- once directly on the floor
+change, once again against a fresh clone in a verification sandbox -- and
+got byte-identical package removals both times). It dropped three
+now-unnecessary backport packages that only existed for pre-3.11 stdlib gaps:
+`backports-asyncio-runner`, `exceptiongroup`, and `tomli` (`tomllib` is
+stdlib from 3.11 on) -- a small, concrete confirmation the floor bump was
+real, not just a version-string change.
+
+**Found and fixed a second, unrelated bug while in this file**: the
+`-CpuOnly` branch's forced torch reinstall was still pinned to `torch==2.6.0+cpu
+torchaudio==2.6.0+cpu` -- stale since `pyproject.toml`'s own torch floor
+moved to `>=2.9,<2.10` during the ROCm work earlier in this project's life,
+and nobody had updated this script's independent pin to match. Building the
+CPU-only Windows package today would have force-installed a torch version
+below the project's own declared floor. Repinned to `torch==2.9.1+cpu` (uv.lock's
+resolved version) and left a comment explaining *why* this has to be a
+separate hand-maintained pin at all -- the CPU wheel lives on a different
+index (`download.pytorch.org/whl/cpu`) than the one `pip install "$Root"`
+resolves against, so it can't just inherit the project's own constraint.
+
+Both verified against a clean clone with the diff applied (not just eyeballed
+on Ed's machine): `uv lock` reproduced the same removals independently,
+`uv sync --frozen --all-extras` resolved cleanly on the new 3.11 floor, the
+full suite passed (838/838), `ruff check`/`format --check` stayed clean, and
+the whole `make-portable.ps1` script still parses as valid PowerShell
+(checked with a real `pwsh` parser, not just read by eye -- installed
+PowerShell 7.4.6 fresh for this, since nothing here normally needs it). Not
+verified: an actual Windows build run, since nothing in this environment can
+do that -- worth a real smoke test next time a Windows package is built for
+real, particularly the CPU torch wheel's exact filename on
+`download.pytorch.org` (unreachable from this sandbox to check directly).

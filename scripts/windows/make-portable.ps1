@@ -246,10 +246,47 @@ if ($CpuOnly) {
   # already CPU-only, but this also downgrades a build host that resolved a CUDA
   # wheel (e.g. via a cuXXX index in the runner's pip config), so the CPU package
   # is deterministic regardless of the host.
-  & $PythonExe -m pip install torch==2.6.0+cpu torchaudio==2.6.0+cpu `
+  #
+  # This version must track pyproject.toml's torch/torchaudio pin (currently
+  # >=2.9,<2.10) by hand -- pip install "$Root" above already installed a
+  # matching version from the default index, but the CPU-only wheel lives on a
+  # separate index (download.pytorch.org/whl/cpu) that this --index-url points
+  # at instead, so it has to be requested by exact version rather than by the
+  # project's own constraint. Drifted out of sync with that floor once already
+  # (was still pinned to 2.6.0 after the floor moved to 2.9); if `pip install
+  # "$Root"` above ever starts failing this pin's own resolution, that is the
+  # signal this fell behind again.
+  & $PythonExe -m pip install torch==2.9.1+cpu torchaudio==2.9.1+cpu `
       --index-url https://download.pytorch.org/whl/cpu `
       --force-reinstall --no-deps
 }
+
+# onnxruntime-directml: the DirectML separation path (AMD/Intel/NVIDIA GPUs via
+# DirectX 12 -- app/pipeline/demucs_onnx_worker.py), Windows-only and specific
+# to this script. Not a pyproject.toml dependency: onnxruntime-directml and the
+# plain `onnxruntime` pip install "$Root" already installed (for the karaoke
+# vocal-split feature, and as demucs-onnx's own hard dependency) are different
+# PyPI distributions that both install into the exact same "onnxruntime"
+# import path -- declaring both would leave pip to silently pick whichever
+# installed last, unpredictably. See the NOTE above `demucs-onnx` in
+# pyproject.toml's dependencies list for the full reasoning; this is that
+# override, run for every Windows package (CpuOnly and NVIDIA alike) since
+# DirectML is a torch-independent path, not a variant split.
+#
+# --no-deps: onnxruntime-directml needs the exact same numpy/flatbuffers/etc.
+# as the plain onnxruntime that "$Root" already installed and uv.lock already
+# pinned; reinstalling those too would risk a different resolution winning
+# against those pins for no benefit.
+#
+# Version pinned to onnxruntime-directml's own latest release, NOT
+# uv.lock's plain-onnxruntime version (1.29.0 as of this writing) -- the
+# DirectML build is a slower-moving, separate distribution and the two
+# versions are not expected to match. Recurring maintenance, the same shape
+# as the ROCm wheel pins in README.md/docs/plan.md: bump by hand when
+# onnxruntime-directml ships a new release, don't expect it to track plain
+# onnxruntime automatically.
+& $PythonExe -m pip install onnxruntime-directml==1.24.4 --force-reinstall --no-deps
+
 # Do NOT bundle CUDA torch into the NVIDIA (non-CpuOnly) package. It ships base
 # torch and the desktop app installs the CUDA build on first run via
 # ensure_torch_device, which picks the cuXXX index matching the detected GPU's
