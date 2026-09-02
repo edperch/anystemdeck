@@ -24,6 +24,7 @@ regression check: it compares this path's output against the ordinary
 (un-split) demucs-onnx ONNX graph running the ISTFT itself on CPU, and
 fails loudly on any drift.
 """
+
 from __future__ import annotations
 
 import math
@@ -56,9 +57,9 @@ def make_istft_kernels_numpy(n_fft: int = N_FFT) -> tuple[np.ndarray, np.ndarray
 
     inv_cos = 2.0 * (window * np.cos(angles)) * norm
     inv_sin = -2.0 * (window * np.sin(angles)) * norm
-    inv_cos[0] *= 0.5   # DC: appears once, not twice (see RealISTFT docstring)
+    inv_cos[0] *= 0.5  # DC: appears once, not twice (see RealISTFT docstring)
     inv_cos[-1] *= 0.5  # Nyquist: same
-    inv_sin[0] *= 0.0   # imag part of DC/Nyquist is zero by construction
+    inv_sin[0] *= 0.0  # imag part of DC/Nyquist is zero by construction
     inv_sin[-1] *= 0.0
     return inv_cos.astype(np.float32), inv_sin.astype(np.float32)
 
@@ -78,18 +79,24 @@ def _envelope(n_frames: int, length: int, n_fft: int, hop_length: int) -> np.nda
     env = np.zeros(length + n_fft, dtype=np.float64)
     for i in range(n_frames):
         start = i * hop_length
-        env[start:start + n_fft] += win_sq
+        env[start : start + n_fft] += win_sq
     pad = n_fft // 2
-    env = env[pad: pad + length]
+    env = env[pad : pad + length]
     env = np.clip(env, 1e-11, None)
     env = env.astype(np.float32)
     _ENVELOPE_CACHE[key] = env
     return env
 
 
-def _real_istft_numpy(z: np.ndarray, *, n_fft: int, hop_length: int,
-                       inv_cos: np.ndarray, inv_sin: np.ndarray,
-                       length: int) -> np.ndarray:
+def _real_istft_numpy(
+    z: np.ndarray,
+    *,
+    n_fft: int,
+    hop_length: int,
+    inv_cos: np.ndarray,
+    inv_sin: np.ndarray,
+    length: int,
+) -> np.ndarray:
     """numpy transcription of `RealISTFT.forward`. `z`: `(..., 2, F, T)`
     float32. Returns `(..., length)` float32.
 
@@ -122,7 +129,7 @@ def _real_istft_numpy(z: np.ndarray, *, n_fft: int, hop_length: int,
     # bottleneck -- the einsums above dominate and are already vectorized.
     for t in range(frames):
         start = t * hop_length
-        out[:, start:start + n_fft] += frame_sig[:, t, :]
+        out[:, start : start + n_fft] += frame_sig[:, t, :]
 
     pad = n_fft // 2
     end = pad + length
@@ -132,9 +139,15 @@ def _real_istft_numpy(z: np.ndarray, *, n_fft: int, hop_length: int,
     return x.reshape(*other, x.shape[-1])
 
 
-def ispec_numpy(zspec: np.ndarray, xt: np.ndarray, length: int, *,
-                 n_fft: int = N_FFT, hop_length: int = HOP_LENGTH,
-                 kernels: tuple[np.ndarray, np.ndarray] | None = None) -> np.ndarray:
+def ispec_numpy(
+    zspec: np.ndarray,
+    xt: np.ndarray,
+    length: int,
+    *,
+    n_fft: int = N_FFT,
+    hop_length: int = HOP_LENGTH,
+    kernels: tuple[np.ndarray, np.ndarray] | None = None,
+) -> np.ndarray:
     """Finish what the split ONNX graph didn't: run ISTFT on `zspec` (the
     masked spectrogram output, shape `(B, S, C, 2, F, T)`) and add the
     time-branch waveform `xt` (shape `(B, S, C, length)`) to get the final
@@ -168,8 +181,9 @@ def ispec_numpy(zspec: np.ndarray, xt: np.ndarray, length: int, *,
 
     outer_pad = hl // 2 * 3
     le = hl * math.ceil(length / hl) + 2 * outer_pad
-    x = _real_istft_numpy(z, n_fft=n_fft, hop_length=hl,
-                           inv_cos=inv_cos, inv_sin=inv_sin, length=le)
-    x = x[..., outer_pad: outer_pad + length]  # (B, S, C, length)
+    x = _real_istft_numpy(
+        z, n_fft=n_fft, hop_length=hl, inv_cos=inv_cos, inv_sin=inv_sin, length=le
+    )
+    x = x[..., outer_pad : outer_pad + length]  # (B, S, C, length)
 
     return (xt + x).astype(np.float32)

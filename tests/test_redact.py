@@ -65,7 +65,9 @@ def test_does_not_mistake_a_timestamp_for_anything():
 
 def test_composes_all_three_kinds_in_one_pass():
     home = str(Path.home())
-    text = f"{home}\\anystemdeck  192.168.1.14 requested https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+    text = (
+        f"{home}\\anystemdeck  192.168.1.14 requested https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+    )
     result = redact(text)
     assert home not in result
     assert "192.168.1.14" not in result

@@ -20,6 +20,7 @@ This whole package requires `torch`+`demucs` (export side) or just `numpy`
 lazy-import discipline so importing this package doesn't require torch on
 the inference-only path.
 """
+
 from __future__ import annotations
 
 from importlib import import_module
@@ -30,7 +31,10 @@ __all__ = ["export_split_to_onnx", "ispec_numpy", "make_istft_kernels_numpy"]
 _LAZY_MAP: dict[str, tuple[str, str]] = {
     "export_split_to_onnx": ("app.pipeline.onnx_export.export_split", "export_split_to_onnx"),
     "ispec_numpy": ("app.pipeline.onnx_export.split_istft", "ispec_numpy"),
-    "make_istft_kernels_numpy": ("app.pipeline.onnx_export.split_istft", "make_istft_kernels_numpy"),
+    "make_istft_kernels_numpy": (
+        "app.pipeline.onnx_export.split_istft",
+        "make_istft_kernels_numpy",
+    ),
 }
 
 

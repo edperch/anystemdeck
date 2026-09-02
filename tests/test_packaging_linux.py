@@ -33,7 +33,9 @@ def test_exec_is_quoted_so_a_path_with_spaces_still_launches():
     called ".../My". Quoting is the whole fix, and it is invisible until
     someone picks a custom path.
     """
-    exec_line = _entries()["Exec"].replace("@EXEC@", "/home/u/My Apps/AnyStemDeck-Linux-x64/AnyStemDeck")
+    exec_line = _entries()["Exec"].replace(
+        "@EXEC@", "/home/u/My Apps/AnyStemDeck-Linux-x64/AnyStemDeck"
+    )
     assert shlex.split(exec_line) == ["/home/u/My Apps/AnyStemDeck-Linux-x64/AnyStemDeck"]
 
 

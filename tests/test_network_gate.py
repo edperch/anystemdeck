@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
+from app.core import config as config_mod
 from app.core import settings as settings_mod
 from app.main import _is_host_request, _is_loopback, app
 
@@ -115,11 +116,15 @@ def _isolated_settings(monkeypatch, tmp_path):
 
 
 def test_demucs_device_defaults_to_auto_and_resolves(monkeypatch, _isolated_settings):
-    monkeypatch.setattr(settings_mod, "detect_torch_device", lambda: "cpu")
+    # detect_torch_device() (app.core.config) resolves via available_torch_devices()[0]
+    # -- it's never imported into app.core.settings, so patch it where it actually
+    # lives. (settings_mod.detect_torch_device isn't a real attribute at all --
+    # monkeypatch.setattr used to raise AttributeError trying to patch it there.)
+    monkeypatch.setattr(config_mod, "available_torch_devices", lambda: ["cpu"])
     assert settings_mod.get_demucs_device_choice() == "auto"
     assert settings_mod.get_demucs_device() == "cpu"  # auto -> hardware probe
     # A different probe result flows through without any persisted change.
-    monkeypatch.setattr(settings_mod, "detect_torch_device", lambda: "cuda")
+    monkeypatch.setattr(config_mod, "available_torch_devices", lambda: ["cuda"])
     assert settings_mod.get_demucs_device() == "cuda"
 
 
@@ -150,7 +155,7 @@ def test_demucs_device_rejects_unknown_choice(_isolated_settings):
 
 
 def test_demucs_device_api_round_trip_and_422(monkeypatch, _isolated_settings):
-    monkeypatch.setattr(settings_mod, "detect_torch_device", lambda: "cpu")
+    monkeypatch.setattr(config_mod, "available_torch_devices", lambda: ["cpu"])
     monkeypatch.setattr(settings_mod, "available_torch_devices", lambda: ["cpu"])
     monkeypatch.setattr("app.main.available_torch_devices", lambda: ["cpu"])
     with TestClient(app) as c:

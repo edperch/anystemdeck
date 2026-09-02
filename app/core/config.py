@@ -263,7 +263,9 @@ DEMUCS_MODEL = os.environ.get("STEMDECK_DEMUCS_MODEL", "htdemucs_6s").strip() or
 # computes identically to fp32 at runtime -- same RAM, same latency, ~6e-5 max
 # abs diff -- so there is no real tradeoff for defaulting to it. See
 # docs/plan.md Phase 4.
-DEMUCS_ONNX_PRECISION = os.environ.get("STEMDECK_DEMUCS_ONNX_PRECISION", "fp16weights").strip() or "fp16weights"
+DEMUCS_ONNX_PRECISION = (
+    os.environ.get("STEMDECK_DEMUCS_ONNX_PRECISION", "fp16weights").strip() or "fp16weights"
+)
 MAX_DURATION_SEC = max(60, _env_int("STEMDECK_MAX_DURATION_SEC", 1200))  # 20 min default
 JOB_TTL_SECONDS = max(300, _env_int("STEMDECK_JOB_TTL_SECONDS", 24 * 3600))  # 24 h default
 # TTL for quarantined failed-job dirs (jobs/failed/<id>, kept for diagnostics).

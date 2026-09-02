@@ -66,6 +66,7 @@ DirectML with the result -- it catches transcription bugs in this file or
 in `split_istft.py` by comparing against the ordinary (un-split) model on
 CPU, where both should agree to numerical noise.
 """
+
 from __future__ import annotations
 
 import copy
@@ -74,13 +75,17 @@ from pathlib import Path
 from typing import Any
 
 import torch
-from einops import rearrange
 
 # Reuse demucs-onnx's own, already-verified patches for the three blockers
 # unrelated to ISTFT (Fraction segment, random pos-embedding shift, fused
 # MHA) -- only the STFT/ISTFT patch and the tail of forward() differ here.
-from demucs_onnx.export import coerce_segment_to_float, disable_random_pos_shift, onnx_friendly_mha_forward
+from demucs_onnx.export import (
+    coerce_segment_to_float,
+    disable_random_pos_shift,
+    onnx_friendly_mha_forward,
+)
 from demucs_onnx.export.stft import RealSTFT
+from einops import rearrange
 
 STEM_TO_INDEX = {"drums": 0, "bass": 1, "other": 2, "vocals": 3}
 SAMPLE_RATE = 44100
@@ -241,6 +246,7 @@ def _patch_htdemucs_for_split_onnx(model: torch.nn.Module) -> torch.nn.Module:
 
     def _spec_real(self_: Any, x: torch.Tensor) -> torch.Tensor:
         import math
+
         hl = self_.hop_length
         nfft = self_.nfft
         if hl != nfft // 4:
@@ -251,7 +257,7 @@ def _patch_htdemucs_for_split_onnx(model: torch.nn.Module) -> torch.nn.Module:
         z = self_.real_stft(x)[..., :-1, :]  # drop the Nyquist bin
         if z.shape[-1] != le + 4:
             raise AssertionError((z.shape, x.shape, le))
-        return z[..., 2: 2 + le]
+        return z[..., 2 : 2 + le]
 
     def _magnitude_real(self_: Any, z: torch.Tensor) -> torch.Tensor:
         B, C, two, Fr, T = z.shape
@@ -273,11 +279,15 @@ def _patch_htdemucs_for_split_onnx(model: torch.nn.Module) -> torch.nn.Module:
     return model
 
 
-def export_split_to_onnx(checkpoint: str | Path, output: str | Path, *,
-                          stem: str | None = None,
-                          stems: list[str] | None = None,
-                          opset: int = 17,
-                          verbose: bool = True) -> dict[str, Path]:
+def export_split_to_onnx(
+    checkpoint: str | Path,
+    output: str | Path,
+    *,
+    stem: str | None = None,
+    stems: list[str] | None = None,
+    opset: int = 17,
+    verbose: bool = True,
+) -> dict[str, Path]:
     """Export a demucs/htdemucs checkpoint to a *split* ONNX graph (outputs
     `zspec`, `xt` instead of `stems`). Signature mirrors
     `demucs_onnx.export.export_to_onnx` for the common case, minus the
@@ -317,7 +327,11 @@ def export_split_to_onnx(checkpoint: str | Path, output: str | Path, *,
     else:
         if stem is not None and stems is not None:
             raise ValueError("pass either `stem` OR `stems`, not both.")
-        wanted = [stem] if stem is not None else (list(stems) if stems is not None else list(STEM_TO_INDEX))
+        wanted = (
+            [stem]
+            if stem is not None
+            else (list(stems) if stems is not None else list(STEM_TO_INDEX))
+        )
         for s in wanted:
             if s not in STEM_TO_INDEX:
                 raise ValueError(f"unknown stem {s!r}; expected one of {list(STEM_TO_INDEX)}")
@@ -334,9 +348,17 @@ def export_split_to_onnx(checkpoint: str | Path, output: str | Path, *,
         if is_specialist_bag and len(targets) > 1:
             file_path = out_root / f"htdemucs_ft_{stem_name}_split.onnx"
         elif is_specialist_bag:
-            file_path = out_root if out_root.suffix.lower() == ".onnx" else out_root / f"htdemucs_ft_{stem_name}_split.onnx"
+            file_path = (
+                out_root
+                if out_root.suffix.lower() == ".onnx"
+                else out_root / f"htdemucs_ft_{stem_name}_split.onnx"
+            )
         else:
-            file_path = out_root if out_root.suffix.lower() == ".onnx" else out_root / f"{stem_name}_split.onnx"
+            file_path = (
+                out_root
+                if out_root.suffix.lower() == ".onnx"
+                else out_root / f"{stem_name}_split.onnx"
+            )
 
         if verbose:
             print(f"\n=== Exporting {stem_name} (split, index {idx}) -> {file_path} ===")
@@ -359,10 +381,14 @@ def export_split_to_onnx(checkpoint: str | Path, output: str | Path, *,
         dummy = torch.randn(1, 2, N_SAMPLES, dtype=torch.float32)
         with torch.no_grad():
             torch.onnx.export(
-                patched, dummy, str(file_path),
+                patched,
+                dummy,
+                str(file_path),
                 opset_version=opset,
-                input_names=["mix"], output_names=["zspec", "xt"],
-                do_constant_folding=True, export_params=True,
+                input_names=["mix"],
+                output_names=["zspec", "xt"],
+                do_constant_folding=True,
+                export_params=True,
                 dynamo=False,
             )
         size_mb = file_path.stat().st_size / 1e6
@@ -370,6 +396,7 @@ def export_split_to_onnx(checkpoint: str | Path, output: str | Path, *,
             print(f"  exported {size_mb:.1f} MB")
 
         import onnx
+
         onnx.checker.check_model(onnx.load(str(file_path)))
         if verbose:
             print("  onnx.checker: PASS")

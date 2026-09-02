@@ -55,7 +55,12 @@ def test_every_file_is_described(client, logs_dir):
 
 def test_covers_rotations_and_the_desktop_logs(client, logs_dir):
     names = {f["name"] for f in client.get("/api/logs").json()["files"]}
-    assert {"anystemdeck.log", "anystemdeck.log.1", "anystemdeck.log.2", "anystemdeck.log.3"} <= names
+    assert {
+        "anystemdeck.log",
+        "anystemdeck.log.1",
+        "anystemdeck.log.2",
+        "anystemdeck.log.3",
+    } <= names
     # Written by the Tauri shell, so absent on server deployments but still
     # worth listing so a desktop user knows where to look.
     assert {"backend.log", "backend.log.1", "backend.log.2", "setup.log"} <= names
@@ -185,8 +190,12 @@ def test_tail_drops_continuations_of_old_entries(client, logs_dir):
 
 def test_tail_reads_the_previous_rotation_too(client, logs_dir):
     """A rotation inside the window would otherwise make a busy log look empty."""
-    (logs_dir / "anystemdeck.log.1").write_text(f"{_stamp(20)} I anystemdeck before rotation\n", "utf-8")
-    (logs_dir / "anystemdeck.log").write_text(f"{_stamp(5)} I anystemdeck after rotation\n", "utf-8")
+    (logs_dir / "anystemdeck.log.1").write_text(
+        f"{_stamp(20)} I anystemdeck before rotation\n", "utf-8"
+    )
+    (logs_dir / "anystemdeck.log").write_text(
+        f"{_stamp(5)} I anystemdeck after rotation\n", "utf-8"
+    )
     body = client.get("/api/logs/application?minutes=60").text
     assert "before rotation" in body
     assert body.index("before rotation") < body.index("after rotation"), (
@@ -268,8 +277,12 @@ def test_tail_serves_the_backend_log(client, logs_dir):
 
 
 def test_tail_reads_the_backend_rotations_in_order(client, logs_dir):
-    (logs_dir / "backend.log.2").write_text(f"{_stamp(30)} I anystemdeck oldest\n", encoding="utf-8")
-    (logs_dir / "backend.log.1").write_text(f"{_stamp(20)} I anystemdeck middle\n", encoding="utf-8")
+    (logs_dir / "backend.log.2").write_text(
+        f"{_stamp(30)} I anystemdeck oldest\n", encoding="utf-8"
+    )
+    (logs_dir / "backend.log.1").write_text(
+        f"{_stamp(20)} I anystemdeck middle\n", encoding="utf-8"
+    )
     (logs_dir / "backend.log").write_text(f"{_stamp(5)} I anystemdeck newest\n", encoding="utf-8")
     body = client.get("/api/logs/backend?minutes=60").text
     assert body.index("oldest") < body.index("middle") < body.index("newest")
@@ -289,7 +302,9 @@ def test_every_listed_log_file_is_reachable_through_some_view(client, logs_dir):
 
 
 def test_tail_says_so_when_the_window_is_empty(client, logs_dir):
-    (logs_dir / "anystemdeck.log").write_text(f"{_stamp(500)} I anystemdeck ancient\n", encoding="utf-8")
+    (logs_dir / "anystemdeck.log").write_text(
+        f"{_stamp(500)} I anystemdeck ancient\n", encoding="utf-8"
+    )
     assert "No entries in the last 60 minutes" in client.get("/api/logs/application").text
 
 

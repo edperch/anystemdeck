@@ -140,16 +140,22 @@ def _patch_demucs_onnx_for_directml() -> None:
     level_name = os.environ.get("ANYSTEMDECK_ONNX_GRAPH_OPT", "basic").strip().lower()
     level_attr = _GRAPH_OPT_LEVELS.get(level_name, _GRAPH_OPT_LEVELS["basic"])
     level = getattr(ort.GraphOptimizationLevel, level_attr)
-    print(f"[demucs_onnx_worker] DirectML session patch: graph_optimization_level={level_attr}, "
-          f"enable_mem_pattern=False (set ANYSTEMDECK_ONNX_GRAPH_OPT=disable|basic|extended|all to change)")
+    print(
+        f"[demucs_onnx_worker] DirectML session patch: graph_optimization_level={level_attr}, "
+        f"enable_mem_pattern=False (set ANYSTEMDECK_ONNX_GRAPH_OPT=disable|basic|extended|all to change)"
+    )
 
     def _patched_make_session(onnx_path, providers):
         sess_opts = ort.SessionOptions()
         is_dml = "DmlExecutionProvider" in providers
-        sess_opts.graph_optimization_level = level if is_dml else ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+        sess_opts.graph_optimization_level = (
+            level if is_dml else ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+        )
         if is_dml:
             sess_opts.enable_mem_pattern = False
-        return ort.InferenceSession(str(onnx_path), sess_options=sess_opts, providers=list(providers))
+        return ort.InferenceSession(
+            str(onnx_path), sess_options=sess_opts, providers=list(providers)
+        )
 
     _dox_inference._make_session = _patched_make_session
 
