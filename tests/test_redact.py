@@ -38,7 +38,7 @@ def test_does_not_touch_an_unrelated_url():
     """Only the hosts this app actually pulls tracks from are source URLs --
     a link to the app's own site/repo, or anything else, is not personal
     information and must survive (it's often the useful part of a log line)."""
-    text = "see https://github.com/anystemdeckapp/anystemdeck/issues/277 and https://anystemdeck.app"
+    text = "see https://github.com/edperch/anystemdeck/issues/277 and https://anystemdeck.app"
     result = redact(text)
     assert result == text
 

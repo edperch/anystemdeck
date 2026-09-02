@@ -17,7 +17,7 @@ import { t, plural } from "./i18n.js";
 const FAILURES_KEY = "anystemdeck:failures";
 // Enough to cover a bad session without letting a crash loop fill the store.
 const MAX_FAILURES = 20;
-const NEW_ISSUE_URL = "https://github.com/anystemdeckapp/anystemdeck/issues/new";
+const NEW_ISSUE_URL = "https://github.com/edperch/anystemdeck/issues/new";
 // Support channel for a quicker back-and-forth than a public issue -- same
 // invite as the About dialog's Discord icon (index.html).
 const DISCORD_URL = "https://discord.gg/YhCKsjhcwB";

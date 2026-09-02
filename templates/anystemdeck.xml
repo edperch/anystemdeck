@@ -1,16 +1,16 @@
 <?xml version="1.0"?>
 <Container version="2">
   <Name>AnyStemDeck</Name>
-  <Repository>ghcr.io/anystemdeckapp/anystemdeck:0.15.2</Repository>
-  <Registry>https://github.com/anystemdeckapp/anystemdeck/pkgs/container/anystemdeck</Registry>
+  <Repository>ghcr.io/edperch/anystemdeck:0.15.2</Repository>
+  <Registry>https://github.com/edperch/anystemdeck/pkgs/container/anystemdeck</Registry>
   <Network>bridge</Network>
   <Shell>sh</Shell>
   <Privileged>false</Privileged>
-  <Support>https://github.com/anystemdeckapp/anystemdeck/issues</Support>
-  <Project>https://github.com/anystemdeckapp/anystemdeck</Project>
-  <TemplateURL>https://raw.githubusercontent.com/anystemdeckapp/anystemdeck/main/templates/anystemdeck.xml</TemplateURL>
-  <ReadMe>https://raw.githubusercontent.com/anystemdeckapp/anystemdeck/main/README.md</ReadMe>
-  <Icon>https://raw.githubusercontent.com/anystemdeckapp/anystemdeck/main/desktop/src-tauri/icons/icon.png</Icon>
+  <Support>https://github.com/edperch/anystemdeck/issues</Support>
+  <Project>https://github.com/edperch/anystemdeck</Project>
+  <TemplateURL>https://raw.githubusercontent.com/edperch/anystemdeck/main/templates/anystemdeck.xml</TemplateURL>
+  <ReadMe>https://raw.githubusercontent.com/edperch/anystemdeck/main/README.md</ReadMe>
+  <Icon>https://raw.githubusercontent.com/edperch/anystemdeck/main/desktop/src-tauri/icons/icon.png</Icon>
   <WebUI>http://[IP]:[PORT:8000]/</WebUI>
   <ExtraParams></ExtraParams>
   <PostArgs></PostArgs>

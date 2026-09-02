@@ -7,12 +7,12 @@ By participating you agree to follow our [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## Ways to contribute
 
-- **Report a bug** - open a [Bug report](https://github.com/anystemdeckapp/anystemdeck/issues/new/choose).
+- **Report a bug** - open a [Bug report](https://github.com/edperch/anystemdeck/issues/new/choose).
   Include your OS, the AnyStemDeck version (Help icon -> About), and clear steps to reproduce.
-- **Suggest a feature** - open a [Feature request](https://github.com/anystemdeckapp/anystemdeck/issues/new/choose).
+- **Suggest a feature** - open a [Feature request](https://github.com/edperch/anystemdeck/issues/new/choose).
 - **Improve the docs** - fixes and clarifications to the README or these guides are always useful.
 - **Write code** - bug fixes and features. For anything large, please open an issue or a
-  [Discussion](https://github.com/anystemdeckapp/anystemdeck/discussions) first so we can agree on the
+  [Discussion](https://github.com/edperch/anystemdeck/discussions) first so we can agree on the
   approach before you invest time.
 - **Found a security issue?** Do not open a public issue - see [SECURITY.md](SECURITY.md).
 
@@ -78,5 +78,5 @@ contributions are licensed under the same terms.
 
 ## Questions
 
-Open a [Discussion](https://github.com/anystemdeckapp/anystemdeck/discussions) or join the
+Open a [Discussion](https://github.com/edperch/anystemdeck/discussions) or join the
 [Discord](https://discord.gg/YhCKsjhcwB). Thanks for helping make AnyStemDeck better.

@@ -104,7 +104,7 @@ const q = params(url);
 check("targets the bug form", q.get("template") === "bug_report.yml");
 check(
   "blank issues are disabled, so template must be present",
-  url.startsWith("https://github.com/anystemdeckapp/anystemdeck/issues/new?"),
+  url.startsWith("https://github.com/edperch/anystemdeck/issues/new?"),
 );
 check("title leads with the cause", q.get("title") === "[Bug]: Import failed - out-of-memory");
 check("version is prefixed with v", q.get("version") === "v0.9.1");

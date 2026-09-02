@@ -2065,8 +2065,8 @@ function wireWidgets() {
 
 const FALLBACK_VERSION = "0.1.0";
 let currentVersion = FALLBACK_VERSION;
-const REPO_URL = "https://github.com/anystemdeckapp/anystemdeck";
-const RELEASES_URL = "https://github.com/anystemdeckapp/anystemdeck/releases";
+const REPO_URL = "https://github.com/edperch/anystemdeck";
+const RELEASES_URL = "https://github.com/edperch/anystemdeck/releases";
 // The releases LIST, not /releases/latest. GitHub defines "latest" as the most
 // recent NON-PRERELEASE release, so the moment a version ships with the
 // pre-release box ticked it becomes invisible here and nobody is ever told an
@@ -2074,7 +2074,7 @@ const RELEASES_URL = "https://github.com/anystemdeckapp/anystemdeck/releases";
 // releases, which is why that has not bitten yet -- this makes the check
 // correct either way rather than dependent on remembering not to tick a box.
 const RELEASES_API =
-  "https://api.github.com/repos/anystemdeckapp/anystemdeck/releases?per_page=10";
+  "https://api.github.com/repos/edperch/anystemdeck/releases?per_page=10";
 const DISMISSED_UPDATE_KEY = "anystemdeck.dismissed_update";
 
 // The full GitHub release object from the last successful update check, used to
@@ -2450,7 +2450,7 @@ async function openReleaseDialog() {
   const serverMode = !window.__TAURI__?.core?.invoke;
   if (serverMode) {
     const tag = normalizeVersion(latestRelease.tag_name);
-    if (dockerCmd) dockerCmd.textContent = `docker pull ghcr.io/anystemdeckapp/anystemdeck:${tag}`;
+    if (dockerCmd) dockerCmd.textContent = `docker pull ghcr.io/edperch/anystemdeck:${tag}`;
     docker?.classList.remove("hidden");
     download?.classList.add("hidden");
   } else if (download) {

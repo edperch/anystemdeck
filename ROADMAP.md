@@ -4,7 +4,7 @@ Where AnyStemDeck has been, and what is next. Dates are the first tag in each
 line, taken from the repository rather than reconstructed.
 
 Day to day work is tracked in
-[issues](https://github.com/anystemdeckapp/anystemdeck/issues).
+[issues](https://github.com/edperch/anystemdeck/issues).
 
 ---
 
@@ -127,29 +127,29 @@ Search, preview, and the fixes found alongside them.
 
 | Issue | |
 |---|---|
-| [#441](https://github.com/anystemdeckapp/anystemdeck/issues/441) | Search YouTube and SoundCloud from the topbar |
-| [#442](https://github.com/anystemdeckapp/anystemdeck/issues/442) | Audition a result before extracting it |
-| [#440](https://github.com/anystemdeckapp/anystemdeck/issues/440) | An undecodable byte kills the whole separation |
-| [#443](https://github.com/anystemdeckapp/anystemdeck/issues/443) | Max track length clamps to 20 when the ceiling is 60 |
-| [#444](https://github.com/anystemdeckapp/anystemdeck/issues/444) | Portuguese ships only the Brazilian variant |
+| [#441](https://github.com/edperch/anystemdeck/issues/441) | Search YouTube and SoundCloud from the topbar |
+| [#442](https://github.com/edperch/anystemdeck/issues/442) | Audition a result before extracting it |
+| [#440](https://github.com/edperch/anystemdeck/issues/440) | An undecodable byte kills the whole separation |
+| [#443](https://github.com/edperch/anystemdeck/issues/443) | Max track length clamps to 20 when the ceiling is 60 |
+| [#444](https://github.com/edperch/anystemdeck/issues/444) | Portuguese ships only the Brazilian variant |
 
 ## Next
 
-**Keep YouTube import working.** [#432](https://github.com/anystemdeckapp/anystemdeck/issues/432)
-and [#438](https://github.com/anystemdeckapp/anystemdeck/issues/438). Extraction
+**Keep YouTube import working.** [#432](https://github.com/edperch/anystemdeck/issues/432)
+and [#438](https://github.com/edperch/anystemdeck/issues/438). Extraction
 currently works through a fallback client that yt-dlp has deprecated. The
 solver and a bundled JS runtime are both proven to work and are held on a
 packaging decision, not a technical one. This is not urgent and it is not
 optional.
 
-**Save and restore a workspace.** [#425](https://github.com/anystemdeckapp/anystemdeck/issues/425).
+**Save and restore a workspace.** [#425](https://github.com/edperch/anystemdeck/issues/425).
 Volume, mute and solo persist per song. Loop region, zoom, playhead, speed and
 click settings do not, so a reloaded track does not come back as it was left.
 
-**Pitch and key transposition.** [#245](https://github.com/anystemdeckapp/anystemdeck/issues/245).
+**Pitch and key transposition.** [#245](https://github.com/edperch/anystemdeck/issues/245).
 Requested for vocal practice and karaoke.
 
-**A VST plugin.** [#404](https://github.com/anystemdeckapp/anystemdeck/issues/404).
+**A VST plugin.** [#404](https://github.com/edperch/anystemdeck/issues/404).
 Exploratory.
 
 ---

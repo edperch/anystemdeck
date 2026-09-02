@@ -6,7 +6,7 @@
     practice and transcription. This repository maintains the official AnyStemDeck
     self-hosted server container. For help, open an issue on GitHub.
   </Profile>
-  <Icon>https://raw.githubusercontent.com/anystemdeckapp/anystemdeck/main/desktop/src-tauri/icons/icon.png</Icon>
-  <WebPage>https://github.com/anystemdeckapp/anystemdeck</WebPage>
-  <Forum>https://github.com/anystemdeckapp/anystemdeck/issues</Forum>
+  <Icon>https://raw.githubusercontent.com/edperch/anystemdeck/main/desktop/src-tauri/icons/icon.png</Icon>
+  <WebPage>https://github.com/edperch/anystemdeck</WebPage>
+  <Forum>https://github.com/edperch/anystemdeck/issues</Forum>
 </CommunityApplications>
