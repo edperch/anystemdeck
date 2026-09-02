@@ -15,7 +15,7 @@
 export const JOB_ID = "e2e0deadbeef";
 export const TRACK_TITLE = "E2E Fixture Track";
 
-const STORAGE_KEY = "stemdeck.folders";
+const STORAGE_KEY = "anystemdeck.folders";
 const STORAGE_VERSION = 2;
 
 /** Put the fixture track in the library so the sidebar renders it. */
@@ -157,7 +157,7 @@ export async function stubUpdateCheck(page, { available = false } = {}) {
         status: 200,
         contentType: "application/json",
         body: JSON.stringify({
-          name: "StemDeck",
+          name: "AnyStemDeck",
           status: "ok",
           version: "0.5.0",
           ffmpeg_configured: true,

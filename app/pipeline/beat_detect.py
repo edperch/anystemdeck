@@ -37,7 +37,7 @@ import threading
 
 from app.core.config import BEAT_DETECTOR, BEAT_MODEL_CHECKPOINT, BEATGRID_HOP
 
-logger = logging.getLogger("stemdeck.beatdetect")
+logger = logging.getLogger("anystemdeck.beatdetect")
 
 # Loading the checkpoint costs ~1 s and 81 MB of RAM, so the model is built once
 # and reused. Guarded because pipeline stages can run from a worker thread.

@@ -7,7 +7,7 @@ from pathlib import Path
 from app.core.config import JOBS_DIR, TIMEOUT_ANALYZE, ffmpeg_executable
 from app.core.models import Job, _set
 
-logger = logging.getLogger("stemdeck.analyze")
+logger = logging.getLogger("anystemdeck.analyze")
 
 # Albrecht-Shanahan key profiles, derived from a corpus of popular music
 # (Albrecht & Shanahan, 2013). Critically, the minor profile here weights

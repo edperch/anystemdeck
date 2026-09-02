@@ -109,7 +109,7 @@ export let loopEnd = 0;
 // client-side at render time. Persisted across reloads in localStorage
 // so a user who turns off "Vocals" stays set up that way for the
 // next song.
-const _STEM_SEL_KEY = "stemdeck:selected-stems";
+const _STEM_SEL_KEY = "anystemdeck:selected-stems";
 
 // Start with all stems selected (safe default). The async store load below
 // updates this binding once the store is available; ES module live bindings
@@ -148,7 +148,7 @@ export function setStemSelected(name, selected) {
 // lane) or "split" (auto-run the split once the next import finishes).
 // A page-level setting like selectedStems, applied at whatever moment the
 // user submits -- not stored per-job.
-const _VOCAL_SPLIT_MODE_KEY = "stemdeck:vocal-split-mode";
+const _VOCAL_SPLIT_MODE_KEY = "anystemdeck:vocal-split-mode";
 export let vocalSplitMode = "all";
 export const vocalSplitModeReady = (async () => {
   try {

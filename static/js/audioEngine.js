@@ -101,7 +101,7 @@ export function createAudioEngine(stems, { onTime, onEnded, context } = {}) {
 
     if (tracks.size === 0) {
       _loadError = undecodable
-        ? "This track's audio files are in a format StemDeck could not read."
+        ? "This track's audio files are in a format AnyStemDeck could not read."
         : unreachable
           ? "Could not load this track's audio files."
           : "This track has no stem files to play.";

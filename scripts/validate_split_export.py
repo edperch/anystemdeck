@@ -15,7 +15,7 @@ on it. If this passes, the split graph is numerically correct and the
 crashing -- that's `scripts/test_dml_smoke.py --split`.
 
 Usage (from the repo root, same environment `pip install -e .` ran into --
-this needs `torch`+`demucs`, which are already core StemDeck dependencies,
+this needs `torch`+`demucs`, which are already core AnyStemDeck dependencies,
 plus `onnx`+`onnxruntime`, already present from the DirectML work):
 
     python scripts/validate_split_export.py
@@ -23,7 +23,7 @@ plus `onnx`+`onnxruntime`, already present from the DirectML work):
     python scripts/validate_split_export.py --checkpoint htdemucs_ft --stem drums
 
 Runs entirely on CPU. Takes a couple of minutes (dominated by downloading
-the pretrained checkpoint on first run, same as any other demucs/StemDeck
+the pretrained checkpoint on first run, same as any other demucs/AnyStemDeck
 first use) -- no GPU, no DirectML, no AMD-specific anything required.
 """
 from __future__ import annotations

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# stemdeck dev server control: setup | start | stop | restart | status
+# anystemdeck dev server control: setup | start | stop | restart | status
 
 set -euo pipefail
 
@@ -66,7 +66,7 @@ stop() {
         echo "not running"
         # Sweep a stray server for THIS port only. A bare
         # "uvicorn app.main:app" pattern also matches the backend that
-        # StemDeck.app spawns, so it would kill the desktop app out from
+        # AnyStemDeck.app spawns, so it would kill the desktop app out from
         # under the user (#352).
         pkill -f "uvicorn app.main:app.*--port $PORT" 2>/dev/null || true
         rm -f "$PID_FILE"

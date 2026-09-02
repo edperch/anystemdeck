@@ -1,7 +1,7 @@
 """Search YouTube and SoundCloud for something to import.
 
 The topbar already takes a pasted link. This lets it take a query instead, so
-finding a track does not mean leaving StemDeck, finding it in a browser, and
+finding a track does not mean leaving AnyStemDeck, finding it in a browser, and
 coming back with a URL.
 
 Two things make this cheap enough to run while the user types:
@@ -34,7 +34,7 @@ from app.pipeline.download import (
     validate_youtube_url,
 )
 
-logger = logging.getLogger("stemdeck.search")
+logger = logging.getLogger("anystemdeck.search")
 
 SOURCES = ("youtube", "soundcloud")
 KINDS = ("track", "playlist")

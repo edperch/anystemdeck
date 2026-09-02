@@ -1,7 +1,7 @@
 // Live search in the topbar.
 //
 // The box already takes a pasted link. Typing anything that is not a link now
-// searches instead, so finding a track does not mean leaving StemDeck.
+// searches instead, so finding a track does not mean leaving AnyStemDeck.
 //
 // Three things keep this from being expensive:
 //

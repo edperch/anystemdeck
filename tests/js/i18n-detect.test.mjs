@@ -25,7 +25,7 @@ const check = (name, cond, detail = "") => {
   }
 };
 
-/** Pretend the browser reports `tag`, then ask what StemDeck would pick. */
+/** Pretend the browser reports `tag`, then ask what AnyStemDeck would pick. */
 function detectFor(tag) {
   Object.defineProperty(globalThis, "navigator", {
     value: { languages: [tag], language: tag },

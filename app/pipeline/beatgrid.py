@@ -49,7 +49,7 @@ from app.core.config import (
 from app.pipeline.analyze import _load_audio_ffmpeg
 from app.pipeline.beat_detect import detect as detect_beats
 
-logger = logging.getLogger("stemdeck.beatgrid")
+logger = logging.getLogger("anystemdeck.beatgrid")
 
 # Beat tracking wants percussive transients. The isolated drums stem is by far
 # the cleanest onset envelope available; the full mix is a distant fallback for

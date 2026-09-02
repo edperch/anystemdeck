@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 #
-# Build a portable Linux StemDeck package: a single .tar.gz containing the
+# Build a portable Linux AnyStemDeck package: a single .tar.gz containing the
 # Tauri binary plus a self-contained Python runtime (torch + demucs), so the
-# user extracts and runs ./StemDeck with no toolchain.
+# user extracts and runs ./AnyStemDeck with no toolchain.
 #
 # This is the Linux analog of scripts/windows/make-portable.ps1. Like the macOS
 # runtime pack (scripts/macos/make-runtime-pack.sh) it bundles a full
@@ -16,8 +16,8 @@
 # when one exists (see ensure_ffmpeg / download_linux_ffmpeg).
 #
 # Layout produced (so find_repo_root matches its backend/app + python branch):
-#   StemDeck-Linux-x64/
-#     StemDeck                 # Tauri ELF binary
+#   AnyStemDeck-Linux-x64/
+#     AnyStemDeck                 # Tauri ELF binary
 #     cpu-only                 # marker read by is_cpu_only_package
 #     README-LINUX.txt
 #     THIRD_PARTY_NOTICES.txt
@@ -26,7 +26,7 @@
 
 set -euo pipefail
 
-PACKAGE_NAME="${PACKAGE_NAME:-StemDeck-Linux-x64}"
+PACKAGE_NAME="${PACKAGE_NAME:-AnyStemDeck-Linux-x64}"
 PACKAGE_VERSION="${PACKAGE_VERSION:-}"
 OUTPUT_ROOT="${OUTPUT_ROOT:-dist}"
 PYTHON_VERSION="${PYTHON_VERSION:-3.12}"
@@ -44,7 +44,7 @@ ARCHIVE_PATH="${REPO_ROOT}/${OUTPUT_ROOT}/${PACKAGE_NAME}.tar.gz"
 CHECKSUM_PATH="${ARCHIVE_PATH}.sha256"
 PYTHON_DIR="${STAGE}/python"
 BACKEND_DIR="${STAGE}/backend"
-TARGET_BIN="${REPO_ROOT}/desktop/src-tauri/target/release/stemdeck"
+TARGET_BIN="${REPO_ROOT}/desktop/src-tauri/target/release/anystemdeck"
 
 if [[ "$(uname -s)" != "Linux" ]]; then
   echo "ERROR: this packaging script must run on Linux." >&2
@@ -118,7 +118,7 @@ find "$PYTHON_DIR/lib" -name "EXTERNALLY-MANAGED" -delete 2>/dev/null || true
 
 BUNDLED_PYTHON="${PYTHON_DIR}/bin/python"
 
-echo "==> Installing StemDeck into bundled Python"
+echo "==> Installing AnyStemDeck into bundled Python"
 # --system is required because python/ is a full PBS install, not a venv.
 uv pip install --system --python "$BUNDLED_PYTHON" pip setuptools wheel
 # Version is git-derived (hatch-vcs / setuptools-scm). Pin it so the install
@@ -187,8 +187,8 @@ cp "$REPO_ROOT/packaging/linux/THIRD_PARTY_NOTICES.txt" "$STAGE/THIRD_PARTY_NOTI
 # it doubles as the desktop icon with no separate artwork to keep in sync.
 echo "==> Staging desktop-entry assets"
 mkdir -p "$STAGE/packaging"
-cp "$REPO_ROOT/desktop/src-tauri/icons/icon.png" "$STAGE/packaging/stemdeck.png"
-cp "$REPO_ROOT/packaging/linux/stemdeck.desktop.in" "$STAGE/packaging/stemdeck.desktop.in"
+cp "$REPO_ROOT/desktop/src-tauri/icons/icon.png" "$STAGE/packaging/anystemdeck.png"
+cp "$REPO_ROOT/packaging/linux/anystemdeck.desktop.in" "$STAGE/packaging/anystemdeck.desktop.in"
 
 # The optional installer (#361). It installs the package it sits in, so it needs
 # no network access and cannot disagree with the build about which version it is
@@ -233,7 +233,7 @@ done
 # Runtime fingerprint, shipped inside python/ in every package (#421).
 #
 # The in-app updater's SAFETY GATE, not a download trigger: it replaces
-# StemDeck + backend/ only and never touches python/, so an app-only update is
+# AnyStemDeck + backend/ only and never touches python/, so an app-only update is
 # safe exactly when the release needs the same Python dependencies already
 # installed. Derived from uv.lock plus the interpreter's major.minor -- the same
 # formula make-portable.ps1 uses, deliberately not the package version, which
@@ -270,8 +270,8 @@ if [[ ! -f "$TARGET_BIN" ]]; then
   echo "ERROR: Tauri binary not found at ${TARGET_BIN}" >&2
   exit 1
 fi
-cp "$TARGET_BIN" "$STAGE/StemDeck"
-chmod +x "$STAGE/StemDeck"
+cp "$TARGET_BIN" "$STAGE/AnyStemDeck"
+chmod +x "$STAGE/AnyStemDeck"
 
 echo "==> Creating archive"
 tar -czf "$ARCHIVE_PATH" -C "${REPO_ROOT}/${OUTPUT_ROOT}" "$PACKAGE_NAME"
@@ -283,21 +283,21 @@ tar -czf "$ARCHIVE_PATH" -C "${REPO_ROOT}/${OUTPUT_ROOT}" "$PACKAGE_NAME"
 # it never re-extracts the whole Python runtime for a release that only changed
 # app code.
 #
-# StemDeck and backend/ are identical between the CPU and NVIDIA variants -- the
+# AnyStemDeck and backend/ are identical between the CPU and NVIDIA variants -- the
 # only per-variant difference in the package is the `cpu-only` marker at the
 # root, which the updater never touches -- so this is built once, from whichever
 # invocation sets PUBLISH_UPDATER_ASSETS=1, and needs no variant suffix.
 #
-# tar rather than zip so the executable bit on StemDeck survives; a zip would
+# tar rather than zip so the executable bit on AnyStemDeck survives; a zip would
 # land it without +x and the relaunch after an update would fail.
 if [[ "${PUBLISH_UPDATER_ASSETS:-0}" == "1" ]]; then
   echo "==> Creating updater app-layer asset"
-  UPDATER_APP_NAME="StemDeck-Linux-x64-app"
-  ( cd "$STAGE" && tar -czf "${REPO_ROOT}/${OUTPUT_ROOT}/${UPDATER_APP_NAME}.tar.gz" StemDeck backend )
+  UPDATER_APP_NAME="AnyStemDeck-Linux-x64-app"
+  ( cd "$STAGE" && tar -czf "${REPO_ROOT}/${OUTPUT_ROOT}/${UPDATER_APP_NAME}.tar.gz" AnyStemDeck backend )
   ( cd "${REPO_ROOT}/${OUTPUT_ROOT}" \
       && sha256sum "${UPDATER_APP_NAME}.tar.gz" > "${UPDATER_APP_NAME}.tar.gz.sha256" )
   cp "${PYTHON_DIR}/runtime-version.json" \
-     "${REPO_ROOT}/${OUTPUT_ROOT}/StemDeck-Linux-x64-runtime-version.json"
+     "${REPO_ROOT}/${OUTPUT_ROOT}/AnyStemDeck-Linux-x64-runtime-version.json"
   echo "Updater app pack : ${REPO_ROOT}/${OUTPUT_ROOT}/${UPDATER_APP_NAME}.tar.gz"
 fi
 

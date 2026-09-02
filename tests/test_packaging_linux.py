@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
-TEMPLATE = ROOT / "packaging" / "linux" / "stemdeck.desktop.in"
+TEMPLATE = ROOT / "packaging" / "linux" / "anystemdeck.desktop.in"
 ICON = ROOT / "desktop" / "src-tauri" / "icons" / "icon.png"
 MAKE_PORTABLE = ROOT / "scripts" / "linux" / "make-portable.sh"
 
@@ -33,8 +33,8 @@ def test_exec_is_quoted_so_a_path_with_spaces_still_launches():
     called ".../My". Quoting is the whole fix, and it is invisible until
     someone picks a custom path.
     """
-    exec_line = _entries()["Exec"].replace("@EXEC@", "/home/u/My Apps/StemDeck-Linux-x64/StemDeck")
-    assert shlex.split(exec_line) == ["/home/u/My Apps/StemDeck-Linux-x64/StemDeck"]
+    exec_line = _entries()["Exec"].replace("@EXEC@", "/home/u/My Apps/AnyStemDeck-Linux-x64/AnyStemDeck")
+    assert shlex.split(exec_line) == ["/home/u/My Apps/AnyStemDeck-Linux-x64/AnyStemDeck"]
 
 
 def test_placeholders_are_present_for_the_installer_to_substitute():
@@ -67,8 +67,8 @@ def test_the_icon_the_packaging_script_copies_exists():
 
 def test_make_portable_stages_the_desktop_assets():
     script = MAKE_PORTABLE.read_text(encoding="utf-8")
-    assert "packaging/stemdeck.png" in script
-    assert "packaging/stemdeck.desktop.in" in script
+    assert "packaging/anystemdeck.png" in script
+    assert "packaging/anystemdeck.desktop.in" in script
 
 
 def test_make_portable_stages_the_installer():

@@ -1,7 +1,7 @@
 // ─── Persistent store (tauri-plugin-store via custom commands) ───
 //
 // Falls back to localStorage when running outside Tauri (browser dev mode).
-// The store is backed by ~/Library/Application Support/app.stemdeck.desktop/user-data.json
+// The store is backed by ~/Library/Application Support/app.anystemdeck.desktop/user-data.json
 // on macOS — outside WebKit's reach, so WebView resets can never destroy user data.
 
 export async function storeGet(key, fallback = null) {
@@ -43,9 +43,9 @@ export function storeSetDebounced(key, value, delayMs = 300) {
 // Keys that hold critical user data and must be migrated from localStorage
 // to the store on first launch after this feature ships.
 const _MIGRATE_KEYS = [
-  "stemdeck.folders",
-  "stemdeck.deleted_jobs",
-  "stemdeck:selected-stems",
+  "anystemdeck.folders",
+  "anystemdeck.deleted_jobs",
+  "anystemdeck:selected-stems",
 ];
 
 // One-time bootstrap: copy localStorage → store for existing users.
@@ -72,10 +72,10 @@ export async function runStoreMigrationIfNeeded() {
           }
         } catch (e) { console.warn("[store] migration failed for key", k, e); }
       }
-      // Migrate per-job mix keys (stemdeck:mix:<jobId>).
+      // Migrate per-job mix keys (anystemdeck:mix:<jobId>).
       for (let i = 0; i < localStorage.length; i++) {
         const k = localStorage.key(i);
-        if (k?.startsWith("stemdeck:mix:")) {
+        if (k?.startsWith("anystemdeck:mix:")) {
           try {
             const raw = localStorage.getItem(k);
             if (raw !== null) {

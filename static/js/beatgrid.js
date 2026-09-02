@@ -492,7 +492,7 @@ function _onContextMenu(e) {
 
 // ─── lifecycle ──────────────────────────────────────────────
 
-const PREFS_KEY = "stemdeck:beatgrid-prefs";
+const PREFS_KEY = "anystemdeck:beatgrid-prefs";
 
 export function initBeatGrid({ jobId, grid, duration, onChange }) {
   destroyBeatGrid();

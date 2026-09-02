@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Boot a StemDeck backend for the browser tests, against a throwaway jobs
+# Boot a AnyStemDeck backend for the browser tests, against a throwaway jobs
 # directory seeded with one finished track.
 #
 # Everything the app writes is redirected into that directory, so a test run can
@@ -11,7 +11,7 @@ set -euo pipefail
 
 PORT="${1:-8123}"
 REPO_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
-WORK_DIR="${STEMDECK_E2E_DIR:-${TMPDIR:-/tmp}/stemdeck-e2e}"
+WORK_DIR="${STEMDECK_E2E_DIR:-${TMPDIR:-/tmp}/anystemdeck-e2e}"
 
 rm -rf "$WORK_DIR"
 mkdir -p "$WORK_DIR/jobs" "$WORK_DIR/data"

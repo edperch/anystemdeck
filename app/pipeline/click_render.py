@@ -19,7 +19,7 @@ import logging
 import wave
 from pathlib import Path
 
-logger = logging.getLogger("stemdeck.clickrender")
+logger = logging.getLogger("anystemdeck.clickrender")
 
 # Mirrors the constants at the top of static/js/metronome.js. Changing either
 # side without the other makes exports diverge from playback.

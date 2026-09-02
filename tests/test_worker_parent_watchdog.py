@@ -1,6 +1,6 @@
 """The separation worker must not outlive whoever spawned it.
 
-Closing StemDeck has to leave nothing behind. The worker holds the GPU and is
+Closing AnyStemDeck has to leave nothing behind. The worker holds the GPU and is
 the one child that can run for minutes, so it cannot depend on the parent
 getting a chance to clean up: Force Quit, Task Manager and a crash all skip
 that entirely.

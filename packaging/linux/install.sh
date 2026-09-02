@@ -1,32 +1,32 @@
 #!/usr/bin/env bash
 #
-# StemDeck Linux installer (#342).
+# AnyStemDeck Linux installer (#342).
 #
 # Ships inside the portable tarball and installs the package it sits in, so it
 # never downloads anything: the version and the CPU/NVIDIA variant are read out
 # of the package, which means the installer and the build can never disagree
 # about what is being installed.
 #
-# Desktop integration is the whole point. StemDeck stays portable -- extract the
-# tarball and run ./StemDeck and nothing here is required.
+# Desktop integration is the whole point. AnyStemDeck stays portable -- extract the
+# tarball and run ./AnyStemDeck and nothing here is required.
 #
 # Usage:
 #   ./install.sh                 install, or upgrade an existing install in place
-#   ./install.sh --global        install to /opt/stemdeck (needs sudo)
-#   ./install.sh --local         install to ~/.local/opt/stemdeck
-#   ./install.sh --prefix DIR    install to DIR/stemdeck
+#   ./install.sh --global        install to /opt/anystemdeck (needs sudo)
+#   ./install.sh --local         install to ~/.local/opt/anystemdeck
+#   ./install.sh --prefix DIR    install to DIR/anystemdeck
 #   ./install.sh --uninstall     remove what the manifest records
 #   ./install.sh --yes           never prompt
 #
-# User data is never touched by any of this. Stems live in ~/Documents/StemDeck
-# and the runtime, models, ffmpeg and logs in ~/.local/share/stemdeck (or
-# $XDG_DATA_HOME/stemdeck); neither is inside the install directory.
+# User data is never touched by any of this. Stems live in ~/Documents/AnyStemDeck
+# and the runtime, models, ffmpeg and logs in ~/.local/share/anystemdeck (or
+# $XDG_DATA_HOME/anystemdeck); neither is inside the install directory.
 
 set -euo pipefail
 
 PKG_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 
-CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/stemdeck"
+CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/anystemdeck"
 MANIFEST="${CONFIG_DIR}/install-manifest"
 
 GLOBAL_APPS="/usr/share/applications"
@@ -165,13 +165,13 @@ package_variant() {
 }
 
 verify_package() {
-    [[ -x "${PKG_DIR}/StemDeck" || -f "${PKG_DIR}/StemDeck" ]] \
-        || die "this does not look like a StemDeck package: no StemDeck executable next to the installer."
+    [[ -x "${PKG_DIR}/AnyStemDeck" || -f "${PKG_DIR}/AnyStemDeck" ]] \
+        || die "this does not look like a AnyStemDeck package: no AnyStemDeck executable next to the installer."
     [[ -d "${PKG_DIR}/backend/app" ]] \
         || die "the package is incomplete: backend/app is missing."
     [[ -d "${PKG_DIR}/python" ]] \
         || die "the package is incomplete: the bundled Python runtime is missing."
-    [[ -f "${PKG_DIR}/packaging/stemdeck.png" && -f "${PKG_DIR}/packaging/stemdeck.desktop.in" ]] \
+    [[ -f "${PKG_DIR}/packaging/anystemdeck.png" && -f "${PKG_DIR}/packaging/anystemdeck.desktop.in" ]] \
         || die "the package is incomplete: packaging/ assets are missing."
 
     # STEMDECK_INSTALL_ARCH overrides the detected machine type, for the test
@@ -181,7 +181,7 @@ verify_package() {
     local arch
     arch="${STEMDECK_INSTALL_ARCH:-$(uname -m)}"
     if [[ "$arch" != "x86_64" ]]; then
-        die "StemDeck ships x86_64 binaries only; this machine reports ${arch}."
+        die "AnyStemDeck ships x86_64 binaries only; this machine reports ${arch}."
     fi
 }
 
@@ -193,30 +193,30 @@ resolve_scope() {
     local choice
     if [[ -n "$WANT_PREFIX" ]]; then
         SCOPE="Custom"
-        INSTALL_DIR="${WANT_PREFIX%/}/stemdeck"
+        INSTALL_DIR="${WANT_PREFIX%/}/anystemdeck"
         return 0
     fi
     case "$WANT_SCOPE" in
-        global) SCOPE="Global"; INSTALL_DIR="/opt/stemdeck"; return 0 ;;
-        local)  SCOPE="Local";  INSTALL_DIR="${HOME}/.local/opt/stemdeck"; return 0 ;;
+        global) SCOPE="Global"; INSTALL_DIR="/opt/anystemdeck"; return 0 ;;
+        local)  SCOPE="Local";  INSTALL_DIR="${HOME}/.local/opt/anystemdeck"; return 0 ;;
     esac
 
     if [[ $ASSUME_YES -eq 1 ]]; then
-        SCOPE="Local"; INSTALL_DIR="${HOME}/.local/opt/stemdeck"; return 0
+        SCOPE="Local"; INSTALL_DIR="${HOME}/.local/opt/anystemdeck"; return 0
     fi
 
     echo
-    echo "Where should StemDeck be installed?"
+    echo "Where should AnyStemDeck be installed?"
     echo
-    echo "  1) Just me      ${HOME}/.local/opt/stemdeck"
-    echo "  2) All users    /opt/stemdeck  (needs sudo)"
+    echo "  1) Just me      ${HOME}/.local/opt/anystemdeck"
+    echo "  2) All users    /opt/anystemdeck  (needs sudo)"
     echo "  3) Somewhere else"
     echo
     while true; do
         read -r -p "Choice [1-3] (default 1): " choice
         case "${choice:-1}" in
-            1) SCOPE="Local";  INSTALL_DIR="${HOME}/.local/opt/stemdeck"; return 0 ;;
-            2) SCOPE="Global"; INSTALL_DIR="/opt/stemdeck"; return 0 ;;
+            1) SCOPE="Local";  INSTALL_DIR="${HOME}/.local/opt/anystemdeck"; return 0 ;;
+            2) SCOPE="Global"; INSTALL_DIR="/opt/anystemdeck"; return 0 ;;
             3)
                 local dir
                 read -r -p "Directory: " dir
@@ -228,7 +228,7 @@ resolve_scope() {
                 # shellcheck disable=SC2088
                 case "$dir" in "~") dir="$HOME" ;; "~/"*) dir="${HOME}/${dir#\~/}" ;; esac
                 [[ "$dir" = /* ]] || { echo "Use an absolute path."; continue; }
-                SCOPE="Custom"; INSTALL_DIR="${dir}/stemdeck"; return 0 ;;
+                SCOPE="Custom"; INSTALL_DIR="${dir}/anystemdeck"; return 0 ;;
             *) echo "Enter 1, 2 or 3." ;;
         esac
     done
@@ -239,11 +239,11 @@ resolve_scope() {
 # everyone else on the machine.
 set_integration_paths() {
     if [[ "$SCOPE" == "Global" ]]; then
-        DESKTOP_FILE="${GLOBAL_APPS}/stemdeck.desktop"
-        ICON_FILE="${GLOBAL_ICONS}/stemdeck.png"
+        DESKTOP_FILE="${GLOBAL_APPS}/anystemdeck.desktop"
+        ICON_FILE="${GLOBAL_ICONS}/anystemdeck.png"
     else
-        DESKTOP_FILE="${LOCAL_APPS}/stemdeck.desktop"
-        ICON_FILE="${LOCAL_ICONS}/stemdeck.png"
+        DESKTOP_FILE="${LOCAL_APPS}/anystemdeck.desktop"
+        ICON_FILE="${LOCAL_ICONS}/anystemdeck.png"
     fi
 }
 
@@ -257,7 +257,7 @@ privileged_for_scope() {
 
 # Copy into <target>.new, prove it, then swap. A half-finished copy -- a full
 # disk, a snapped network mount -- must never be able to leave the machine with
-# no working StemDeck, which is what removing the old copy first would risk.
+# no working AnyStemDeck, which is what removing the old copy first would risk.
 stage_and_swap() {
     local staging="${INSTALL_DIR}.new"
     local previous="${INSTALL_DIR}.old"
@@ -275,11 +275,11 @@ stage_and_swap() {
         discard_staging
         die "could not copy the package into place; nothing was changed."
     fi
-    if ! privileged_for_scope chmod +x "${staging}/StemDeck"; then
+    if ! privileged_for_scope chmod +x "${staging}/AnyStemDeck"; then
         discard_staging
         die "could not make the copied executable runnable; nothing was changed."
     fi
-    if [[ ! -x "${staging}/StemDeck" || ! -d "${staging}/backend/app" || ! -d "${staging}/python" ]]; then
+    if [[ ! -x "${staging}/AnyStemDeck" || ! -d "${staging}/backend/app" || ! -d "${staging}/python" ]]; then
         discard_staging
         die "the copy came out incomplete; nothing was changed."
     fi
@@ -308,15 +308,15 @@ install_integration() {
     info "Installing the desktop entry ..."
 
     privileged_for_scope mkdir -p "$(dirname "$ICON_FILE")" "$(dirname "$DESKTOP_FILE")"
-    privileged_for_scope cp "${INSTALL_DIR}/packaging/stemdeck.png" "$ICON_FILE"
+    privileged_for_scope cp "${INSTALL_DIR}/packaging/anystemdeck.png" "$ICON_FILE"
     privileged_for_scope chmod 644 "$ICON_FILE"
 
     tmp="$(mktemp)"
     # The template quotes Exec, so an install path containing a space still
     # launches. sed with | as the delimiter keeps / in paths from ending it.
-    sed -e "s|@EXEC@|${INSTALL_DIR}/StemDeck|g" \
+    sed -e "s|@EXEC@|${INSTALL_DIR}/AnyStemDeck|g" \
         -e "s|@ICON@|${ICON_FILE}|g" \
-        "${INSTALL_DIR}/packaging/stemdeck.desktop.in" > "$tmp"
+        "${INSTALL_DIR}/packaging/anystemdeck.desktop.in" > "$tmp"
     privileged_for_scope cp "$tmp" "$DESKTOP_FILE"
     privileged_for_scope chmod 644 "$DESKTOP_FILE"
     rm -f "$tmp"
@@ -335,12 +335,12 @@ write_manifest() {
     # Written last: it is the record that the install completed, so a failure
     # anywhere above must not leave one behind claiming otherwise.
     cat > "$MANIFEST" <<EOF
-# StemDeck installation manifest. Written by install.sh; edit at your own risk.
+# AnyStemDeck installation manifest. Written by install.sh; edit at your own risk.
 Version=${VERSION}
 Variant=${VARIANT}
 Scope=${SCOPE}
 InstallDir=${INSTALL_DIR}
-Exec=${INSTALL_DIR}/StemDeck
+Exec=${INSTALL_DIR}/AnyStemDeck
 DesktopFile=${DESKTOP_FILE}
 IconFile=${ICON_FILE}
 InstalledAt=$(date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -364,7 +364,7 @@ do_install() {
         INSTALL_DIR="$installed_dir"
 
         echo
-        echo "StemDeck ${installed_version:-unknown} is installed at ${INSTALL_DIR}."
+        echo "AnyStemDeck ${installed_version:-unknown} is installed at ${INSTALL_DIR}."
         echo "This package is ${VERSION} (${VARIANT})."
         echo
         if [[ -n "$installed_version" && "$installed_version" != "unknown" && "$VERSION" != "unknown" ]]; then
@@ -398,7 +398,7 @@ do_install() {
     set_integration_paths
 
     echo
-    info "StemDeck ${VERSION} (${VARIANT})"
+    info "AnyStemDeck ${VERSION} (${VARIANT})"
     info "Installing to ${INSTALL_DIR}"
     [[ "$SCOPE" == "Global" ]] && info "This needs sudo to write outside your home directory."
 
@@ -407,14 +407,14 @@ do_install() {
     write_manifest
 
     echo
-    echo "Done. StemDeck ${VERSION} is installed."
+    echo "Done. AnyStemDeck ${VERSION} is installed."
     echo
     echo "  Location : ${INSTALL_DIR}"
     echo "  Launcher : ${DESKTOP_FILE}"
-    echo "  Run      : ${INSTALL_DIR}/StemDeck"
+    echo "  Run      : ${INSTALL_DIR}/AnyStemDeck"
     echo
     echo "Your tracks and settings are untouched, and live outside this folder."
-    echo "To remove StemDeck later: ${INSTALL_DIR}/install.sh --uninstall"
+    echo "To remove AnyStemDeck later: ${INSTALL_DIR}/install.sh --uninstall"
     echo
 }
 
@@ -425,7 +425,7 @@ do_install() {
 do_uninstall() {
     local dir desktop icon scope version
 
-    [[ -f "$MANIFEST" ]] || die "no StemDeck installation is recorded at ${MANIFEST}."
+    [[ -f "$MANIFEST" ]] || die "no AnyStemDeck installation is recorded at ${MANIFEST}."
 
     version="$(manifest_value Version)"
     dir="$(manifest_value InstallDir)"
@@ -438,17 +438,17 @@ do_uninstall() {
     [[ -n "$dir" ]] || die "the manifest records no install directory; it may be corrupt. Nothing was removed."
 
     echo
-    echo "StemDeck ${version:-unknown} at ${dir}"
+    echo "AnyStemDeck ${version:-unknown} at ${dir}"
     echo
     echo "This removes the application only. Your tracks and settings stay where"
     echo "they are, outside the install directory."
     echo
-    confirm "Remove StemDeck?" || { echo "Nothing to do."; exit 0; }
+    confirm "Remove AnyStemDeck?" || { echo "Nothing to do."; exit 0; }
 
     # Legacy in-install user data: refuse to be the thing that deletes it.
     if [[ -d "${dir}/data" ]]; then
         warn "leaving ${dir} in place: it contains a data/ folder from an older"
-        warn "StemDeck that may hold your tracks. Move it somewhere safe, then"
+        warn "AnyStemDeck that may hold your tracks. Move it somewhere safe, then"
         warn "delete the folder by hand."
     elif [[ -e "$dir" ]]; then
         info "Removing ${dir}"
@@ -471,11 +471,11 @@ do_uninstall() {
     rmdir "$CONFIG_DIR" 2>/dev/null || true
 
     echo
-    echo "StemDeck has been removed."
+    echo "AnyStemDeck has been removed."
     echo
     echo "Your tracks and settings were not touched:"
-    echo "  ~/Documents/StemDeck"
-    echo "  ${XDG_DATA_HOME:-$HOME/.local/share}/stemdeck"
+    echo "  ~/Documents/AnyStemDeck"
+    echo "  ${XDG_DATA_HOME:-$HOME/.local/share}/anystemdeck"
     echo
 }
 

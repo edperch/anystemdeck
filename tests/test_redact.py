@@ -38,7 +38,7 @@ def test_does_not_touch_an_unrelated_url():
     """Only the hosts this app actually pulls tracks from are source URLs --
     a link to the app's own site/repo, or anything else, is not personal
     information and must survive (it's often the useful part of a log line)."""
-    text = "see https://github.com/stemdeckapp/stemdeck/issues/277 and https://stemdeck.app"
+    text = "see https://github.com/anystemdeckapp/anystemdeck/issues/277 and https://anystemdeck.app"
     result = redact(text)
     assert result == text
 
@@ -50,7 +50,7 @@ def test_strips_an_ipv4_address():
 
 
 def test_does_not_mistake_a_version_string_for_an_ip():
-    result = redact("StemDeck v0.9.1.dev2+g682ab90d7.d20260816")
+    result = redact("AnyStemDeck v0.9.1.dev2+g682ab90d7.d20260816")
     assert "0.9.1" in result
     assert "<ip>" not in result
 
@@ -59,13 +59,13 @@ def test_does_not_mistake_a_timestamp_for_anything():
     """The pipeline's own log format is `YYYY-MM-DD HH:MM:SS ...` -- every
     single line has one, so any redaction pattern with false positives here
     would mangle the entire report, not just the rare real leak."""
-    text = "2026-08-17 16:50:02 E stemdeck.pipeline pipeline failed for job abcdefabcdef"
+    text = "2026-08-17 16:50:02 E anystemdeck.pipeline pipeline failed for job abcdefabcdef"
     assert redact(text) == text
 
 
 def test_composes_all_three_kinds_in_one_pass():
     home = str(Path.home())
-    text = f"{home}\\stemdeck  192.168.1.14 requested https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+    text = f"{home}\\anystemdeck  192.168.1.14 requested https://www.youtube.com/watch?v=dQw4w9WgXcQ"
     result = redact(text)
     assert home not in result
     assert "192.168.1.14" not in result

@@ -2,9 +2,9 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-SOURCE_SVG="${SOURCE_SVG:-${REPO_ROOT}/imgs/stemdeck-svg-assets/stemdeck-icon.svg}"
+SOURCE_SVG="${SOURCE_SVG:-${REPO_ROOT}/imgs/anystemdeck-svg-assets/anystemdeck-icon.svg}"
 ICON_DIR="${REPO_ROOT}/desktop/src-tauri/icons"
-WORK_DIR="${TMPDIR:-/tmp}/stemdeck-iconset"
+WORK_DIR="${TMPDIR:-/tmp}/anystemdeck-iconset"
 RENDER_DIR="${WORK_DIR}/render"
 ICONSET_DIR="${WORK_DIR}/icon.iconset"
 

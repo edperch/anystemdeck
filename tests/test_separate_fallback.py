@@ -80,7 +80,7 @@ def test_gpu_failure_falls_back_to_cpu(job, tmp_path, monkeypatch, caplog):
     monkeypatch.setattr(sep_mod, "get_demucs_device", lambda: "cuda")
     monkeypatch.setattr(sep_mod, "_spawn_worker_cmd", _stub_spawns({"cuda"}, calls))
 
-    with caplog.at_level(logging.WARNING, logger="stemdeck.pipeline"):
+    with caplog.at_level(logging.WARNING, logger="anystemdeck.pipeline"):
         stems_root = sep_mod.separate(job, tmp_path / "source.wav", tmp_path)
 
     assert calls == ["cuda", "cpu"]

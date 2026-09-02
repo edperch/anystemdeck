@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "StemDeck",
+  "productName": "AnyStemDeck",
   "version": "0.0.0",
-  "identifier": "app.stemdeck.desktop",
+  "identifier": "app.anystemdeck.desktop",
   "build": {
     "frontendDist": "../ui",
     "beforeDevCommand": "",
@@ -12,7 +12,7 @@
     "withGlobalTauri": true,
     "windows": [
       {
-        "title": "StemDeck",
+        "title": "AnyStemDeck",
         "width": 1280,
         "height": 820,
         "minWidth": 1024,

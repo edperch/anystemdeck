@@ -11,7 +11,7 @@ def test_health_endpoints_report_ok():
             r = client.get(path)
             assert r.status_code == 200
             body = r.json()
-            assert body["name"] == "StemDeck"
+            assert body["name"] == "AnyStemDeck"
             assert body["status"] == "ok"
             assert body["version"]
             assert "ffmpeg_configured" in body
@@ -22,7 +22,7 @@ def test_health_endpoints_report_ok():
 def test_health_identifies_the_answering_process():
     # The desktop shell spawns this backend and polls /api/health to know it
     # started. A 200 alone only proves *something* holds the port: a second
-    # StemDeck used to adopt the first instance's backend, and with it the first
+    # AnyStemDeck used to adopt the first instance's backend, and with it the first
     # instance's data directory and library (#424). The pid is what the shell
     # names when it reports a port conflict, so it must be the real one.
     import os
@@ -90,9 +90,9 @@ def test_app_version_falls_back_when_marker_is_absent_or_junk(tmp_path, monkeypa
     from app import main
 
     monkeypatch.setattr(main, "STATIC_DIR", tmp_path)
-    assert main.app_version() == main.package_version("stemdeck")
+    assert main.app_version() == main.package_version("anystemdeck")
 
     # "[]" parses fine but has no .get -- the narrowed except must still catch it.
     for junk in ('{"version": ""}', '{"version": null}', "{}", "not json", "[]"):
         (tmp_path / "version.json").write_text(junk, encoding="utf-8")
-        assert main.app_version() == main.package_version("stemdeck"), junk
+        assert main.app_version() == main.package_version("anystemdeck"), junk

@@ -14,10 +14,10 @@
 import { storeGet, storeSet } from "./utils.js";
 import { t, plural } from "./i18n.js";
 
-const FAILURES_KEY = "stemdeck:failures";
+const FAILURES_KEY = "anystemdeck:failures";
 // Enough to cover a bad session without letting a crash loop fill the store.
 const MAX_FAILURES = 20;
-const NEW_ISSUE_URL = "https://github.com/stemdeckapp/stemdeck/issues/new";
+const NEW_ISSUE_URL = "https://github.com/anystemdeckapp/anystemdeck/issues/new";
 // Support channel for a quicker back-and-forth than a public issue -- same
 // invite as the About dialog's Discord icon (index.html).
 const DISCORD_URL = "https://discord.gg/YhCKsjhcwB";
@@ -77,7 +77,7 @@ export function installOption(target, isDesktop) {
 function technicalBlock(record, diag) {
   const ctx = record.context || {};
   const rows = [
-    ["StemDeck", diag.version ? `v${diag.version}` : "(unknown)"],
+    ["AnyStemDeck", diag.version ? `v${diag.version}` : "(unknown)"],
     ["Failure", `${record.kind}${record.cause ? ` / ${record.cause}` : ""}`],
     ["Stage", ctx.stage],
     ["Device", ctx.device && ctx.gpuFallback ? `${ctx.device} (fell back to CPU)` : ctx.device],
@@ -142,9 +142,9 @@ export function buildReportUrl(record, diag = {}) {
   const title = `[Bug]: ${label}${record.cause ? ` - ${record.cause}` : ""}`;
 
   const what = [
-    `${label} in StemDeck.`,
+    `${label} in AnyStemDeck.`,
     "",
-    `**StemDeck said:** ${record.message || "(no message)"}`,
+    `**AnyStemDeck said:** ${record.message || "(no message)"}`,
     record.detail ? `**Detail:** ${record.detail}` : null,
     "",
     "<!-- Anything else worth knowing? What were you working on? -->",
@@ -152,7 +152,7 @@ export function buildReportUrl(record, diag = {}) {
 
   const steps = [
     "1. <!-- what were you doing? -->",
-    record.context?.stage ? `2. StemDeck failed at: ${record.context.stage}` : "2. It failed.",
+    record.context?.stage ? `2. AnyStemDeck failed at: ${record.context.stage}` : "2. It failed.",
   ].join("\n");
 
   const base = {

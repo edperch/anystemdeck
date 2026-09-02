@@ -57,11 +57,11 @@ import { t, plural, onLanguageChange } from "./i18n.js";
 // owns playback, so the engine has exclusive HTTP access (the old Windows
 // connection-competition regression is avoided).
 //
-// localStorage "stemdeck.audioEngine": "0" = legacy streaming <audio> multitrack
+// localStorage "anystemdeck.audioEngine": "0" = legacy streaming <audio> multitrack
 // (debug), "fulldecode" = full-decode engine, anything else / unset = chunked.
 function engineMode() {
   try {
-    const pref = localStorage.getItem("stemdeck.audioEngine");
+    const pref = localStorage.getItem("anystemdeck.audioEngine");
     if (pref === "0") return "streaming";
     if (pref === "fulldecode") return "fulldecode";
   } catch (e) {

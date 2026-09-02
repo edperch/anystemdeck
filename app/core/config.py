@@ -55,7 +55,7 @@ def available_onnx_providers() -> list[str]:
     DirectML-accelerated separation path (AnyStemDeck addition -- see
     docs/plan.md). Only ever returns "dml", and only when both onnxruntime is
     importable AND DmlExecutionProvider is actually registered: plain
-    onnxruntime (CPU-only, already a StemDeck dependency for the karaoke
+    onnxruntime (CPU-only, already a AnyStemDeck dependency for the karaoke
     feature) and onnxruntime-directml share the same "onnxruntime" import
     name, so a successful import alone does not tell you which one is
     installed -- checking get_available_providers() does."""
@@ -164,7 +164,7 @@ def _stored_jobs_dir() -> Path | None:
 #                                   Desktop only; the endpoint that writes it
 #                                   refuses to run anywhere else.
 #   3. STEMDECK_DEFAULT_JOBS_DIR -- the desktop shell's default
-#                                   (~/Documents/StemDeck/jobs). Passed as a
+#                                   (~/Documents/AnyStemDeck/jobs). Passed as a
 #                                   default rather than a pin, so 2 can win.
 #   4. DATA_DIR/jobs             -- portable default
 #   5. <repo>/jobs               -- plain dev checkout

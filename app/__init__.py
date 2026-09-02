@@ -1,4 +1,4 @@
-"""StemDeck.
+"""AnyStemDeck.
 
 The vendored path insert below runs before anything else in the package, which
 is the only place it can work: yt-dlp resolves its optional dependencies at
@@ -18,7 +18,7 @@ from pathlib import Path
 # A new dependency would therefore have sent every existing desktop install to
 # a full manual reinstall to get this.
 #
-# This package is not one StemDeck imports. It is a 53 KB pure-Python payload
+# This package is not one AnyStemDeck imports. It is a 53 KB pure-Python payload
 # with no dependencies that yt-dlp discovers at runtime, so it belongs in the
 # app layer that the updater does replace. Existing installs get the solver
 # through the ordinary in-app update instead.

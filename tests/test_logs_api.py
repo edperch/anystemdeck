@@ -40,12 +40,12 @@ def test_reports_a_missing_directory_without_failing(client, tmp_path):
 
 
 def test_marks_existing_files_with_size(client, logs_dir):
-    (logs_dir / "stemdeck.log").write_text("hello", encoding="utf-8")
+    (logs_dir / "anystemdeck.log").write_text("hello", encoding="utf-8")
     files = {f["name"]: f for f in client.get("/api/logs").json()["files"]}
-    assert files["stemdeck.log"]["exists"] is True
-    assert files["stemdeck.log"]["size"] == 5
-    assert files["stemdeck.log"]["modified"] is not None
-    assert files["stemdeck.log.1"]["exists"] is False
+    assert files["anystemdeck.log"]["exists"] is True
+    assert files["anystemdeck.log"]["size"] == 5
+    assert files["anystemdeck.log"]["modified"] is not None
+    assert files["anystemdeck.log.1"]["exists"] is False
 
 
 def test_every_file_is_described(client, logs_dir):
@@ -55,7 +55,7 @@ def test_every_file_is_described(client, logs_dir):
 
 def test_covers_rotations_and_the_desktop_logs(client, logs_dir):
     names = {f["name"] for f in client.get("/api/logs").json()["files"]}
-    assert {"stemdeck.log", "stemdeck.log.1", "stemdeck.log.2", "stemdeck.log.3"} <= names
+    assert {"anystemdeck.log", "anystemdeck.log.1", "anystemdeck.log.2", "anystemdeck.log.3"} <= names
     # Written by the Tauri shell, so absent on server deployments but still
     # worth listing so a desktop user knows where to look.
     assert {"backend.log", "backend.log.1", "backend.log.2", "setup.log"} <= names
@@ -64,7 +64,7 @@ def test_covers_rotations_and_the_desktop_logs(client, logs_dir):
 def test_never_returns_log_contents(client, logs_dir):
     """Metadata only: a traceback can capture anything, and serving it over
     HTTP would widen that to whoever can reach the app."""
-    (logs_dir / "stemdeck.log").write_text("SECRET-TOKEN-abc123", encoding="utf-8")
+    (logs_dir / "anystemdeck.log").write_text("SECRET-TOKEN-abc123", encoding="utf-8")
     assert "SECRET-TOKEN" not in client.get("/api/logs").text
 
 
@@ -77,28 +77,28 @@ def _names(resp):
 
 
 def test_zip_bundles_every_present_log(client, logs_dir):
-    (logs_dir / "stemdeck.log").write_text("current", encoding="utf-8")
-    (logs_dir / "stemdeck.log.1").write_text("older", encoding="utf-8")
+    (logs_dir / "anystemdeck.log").write_text("current", encoding="utf-8")
+    (logs_dir / "anystemdeck.log.1").write_text("older", encoding="utf-8")
     (logs_dir / "setup.log").write_text("setup", encoding="utf-8")
     r = client.get("/api/logs.zip")
     assert r.status_code == 200
     assert r.headers["content-type"] == "application/zip"
-    assert _names(r) == {"stemdeck.log", "stemdeck.log.1", "setup.log"}
+    assert _names(r) == {"anystemdeck.log", "anystemdeck.log.1", "setup.log"}
 
 
 def test_zip_preserves_contents(client, logs_dir):
-    (logs_dir / "stemdeck.log").write_text("line one\nline two\n", encoding="utf-8")
+    (logs_dir / "anystemdeck.log").write_text("line one\nline two\n", encoding="utf-8")
     with zipfile.ZipFile(io.BytesIO(client.get("/api/logs.zip").content)) as z:
-        assert z.read("stemdeck.log").decode() == "line one\nline two\n"
+        assert z.read("anystemdeck.log").decode() == "line one\nline two\n"
 
 
 def test_zip_only_includes_known_log_names(client, logs_dir):
     """The name set is fixed, so anything else dropped in the directory -- a
     stray dump, an editor swap file -- can never be swept into a download."""
-    (logs_dir / "stemdeck.log").write_text("ok", encoding="utf-8")
+    (logs_dir / "anystemdeck.log").write_text("ok", encoding="utf-8")
     (logs_dir / "credentials.txt").write_text("do not ship me", encoding="utf-8")
     (logs_dir / "notes.log").write_text("nor me", encoding="utf-8")
-    assert _names(client.get("/api/logs.zip")) == {"stemdeck.log"}
+    assert _names(client.get("/api/logs.zip")) == {"anystemdeck.log"}
 
 
 def test_zip_explains_itself_when_there_is_nothing_to_send(client, logs_dir):
@@ -114,15 +114,15 @@ def test_zip_survives_a_missing_directory(client, tmp_path):
 
 
 def test_zip_filename_is_timestamped(client, logs_dir):
-    (logs_dir / "stemdeck.log").write_text("x", encoding="utf-8")
+    (logs_dir / "anystemdeck.log").write_text("x", encoding="utf-8")
     cd = client.get("/api/logs.zip").headers["content-disposition"]
-    assert cd.startswith('attachment; filename="stemdeck-logs-')
+    assert cd.startswith('attachment; filename="anystemdeck-logs-')
     assert cd.endswith('.zip"')
 
 
 def test_zip_skips_an_unreadable_file_rather_than_failing(client, logs_dir, monkeypatch):
     """One bad file must not lose the rest of the bundle."""
-    (logs_dir / "stemdeck.log").write_text("good", encoding="utf-8")
+    (logs_dir / "anystemdeck.log").write_text("good", encoding="utf-8")
     (logs_dir / "setup.log").write_text("bad", encoding="utf-8")
 
     real = type(logs_dir).read_bytes
@@ -133,7 +133,7 @@ def test_zip_skips_an_unreadable_file_rather_than_failing(client, logs_dir, monk
         return real(self)
 
     monkeypatch.setattr(type(logs_dir), "read_bytes", _boom)
-    assert _names(client.get("/api/logs.zip")) == {"stemdeck.log"}
+    assert _names(client.get("/api/logs.zip")) == {"anystemdeck.log"}
 
 
 # --- GET /api/logs/{view} --------------------------------------------------
@@ -144,10 +144,10 @@ def _stamp(offset_min: float) -> str:
 
 
 def test_tail_keeps_only_the_requested_window(client, logs_dir):
-    (logs_dir / "stemdeck.log").write_text(
-        f"{_stamp(180)} I stemdeck ancient\n"
-        f"{_stamp(90)} I stemdeck too old\n"
-        f"{_stamp(10)} I stemdeck recent\n",
+    (logs_dir / "anystemdeck.log").write_text(
+        f"{_stamp(180)} I anystemdeck ancient\n"
+        f"{_stamp(90)} I anystemdeck too old\n"
+        f"{_stamp(10)} I anystemdeck recent\n",
         encoding="utf-8",
     )
     body = client.get("/api/logs/application?minutes=60").text
@@ -159,8 +159,8 @@ def test_tail_keeps_only_the_requested_window(client, logs_dir):
 def test_tail_keeps_untimestamped_continuation_lines(client, logs_dir):
     """A traceback is one event across many lines; dropping the ones without a
     timestamp of their own would shred it."""
-    (logs_dir / "stemdeck.log").write_text(
-        f"{_stamp(5)} E stemdeck job failed\n"
+    (logs_dir / "anystemdeck.log").write_text(
+        f"{_stamp(5)} E anystemdeck job failed\n"
         "Traceback (most recent call last):\n"
         '  File "x.py", line 1\n'
         "ValueError: boom\n",
@@ -172,10 +172,10 @@ def test_tail_keeps_untimestamped_continuation_lines(client, logs_dir):
 
 
 def test_tail_drops_continuations_of_old_entries(client, logs_dir):
-    (logs_dir / "stemdeck.log").write_text(
-        f"{_stamp(200)} E stemdeck old failure\n"
+    (logs_dir / "anystemdeck.log").write_text(
+        f"{_stamp(200)} E anystemdeck old failure\n"
         "  old traceback line\n"
-        f"{_stamp(2)} I stemdeck fresh\n",
+        f"{_stamp(2)} I anystemdeck fresh\n",
         encoding="utf-8",
     )
     body = client.get("/api/logs/application?minutes=60").text
@@ -185,8 +185,8 @@ def test_tail_drops_continuations_of_old_entries(client, logs_dir):
 
 def test_tail_reads_the_previous_rotation_too(client, logs_dir):
     """A rotation inside the window would otherwise make a busy log look empty."""
-    (logs_dir / "stemdeck.log.1").write_text(f"{_stamp(20)} I stemdeck before rotation\n", "utf-8")
-    (logs_dir / "stemdeck.log").write_text(f"{_stamp(5)} I stemdeck after rotation\n", "utf-8")
+    (logs_dir / "anystemdeck.log.1").write_text(f"{_stamp(20)} I anystemdeck before rotation\n", "utf-8")
+    (logs_dir / "anystemdeck.log").write_text(f"{_stamp(5)} I anystemdeck after rotation\n", "utf-8")
     body = client.get("/api/logs/application?minutes=60").text
     assert "before rotation" in body
     assert body.index("before rotation") < body.index("after rotation"), (
@@ -199,8 +199,8 @@ def test_tail_redacts_a_source_url(client, logs_dir):
     failing job's -- a raw log tail would otherwise leak the YouTube/
     SoundCloud link for everything the reporter has imported in the fetched
     window into a public GitHub issue or Discord message."""
-    (logs_dir / "stemdeck.log").write_text(
-        f"{_stamp(1)} I stemdeck.download [abc] download starting: "
+    (logs_dir / "anystemdeck.log").write_text(
+        f"{_stamp(1)} I anystemdeck.download [abc] download starting: "
         "https://www.youtube.com/watch?v=dQw4w9WgXcQ\n",
         encoding="utf-8",
     )
@@ -215,7 +215,7 @@ def test_tail_redacts_an_ip_address(client, logs_dir):
     is on, so uvicorn's access log (captured into backend.log on desktop) can
     carry another device's address on the reporter's home network."""
     (logs_dir / "backend.log").write_text(
-        f'{_stamp(1)} I stemdeck  INFO:     192.168.1.14:52341 - "GET /api/jobs HTTP/1.1" 200 OK\n',
+        f'{_stamp(1)} I anystemdeck  INFO:     192.168.1.14:52341 - "GET /api/jobs HTTP/1.1" 200 OK\n',
         encoding="utf-8",
     )
     body = client.get("/api/logs/backend?minutes=60").text
@@ -231,8 +231,8 @@ def test_tail_redacts_the_users_home_directory(client, logs_dir):
     from pathlib import Path
 
     home = str(Path.home())
-    (logs_dir / "stemdeck.log").write_text(
-        f'{_stamp(1)} E stemdeck  File "{home}\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\threads.py", line 25\n',
+    (logs_dir / "anystemdeck.log").write_text(
+        f'{_stamp(1)} E anystemdeck  File "{home}\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\threads.py", line 25\n',
         encoding="utf-8",
     )
     body = client.get("/api/logs/application?minutes=60").text
@@ -246,7 +246,7 @@ def test_tail_parses_the_setup_log_epoch_format(client, logs_dir):
     crate has no date library."""
     now = int(time.time())
     (logs_dir / "setup.log").write_text(
-        f"[{now - 7200}] [stemdeck] old entry\n[{now - 60}] [stemdeck] new entry\n",
+        f"[{now - 7200}] [anystemdeck] old entry\n[{now - 60}] [anystemdeck] new entry\n",
         encoding="utf-8",
     )
     body = client.get("/api/logs/setup?minutes=60").text
@@ -259,7 +259,7 @@ def test_tail_serves_the_backend_log(client, logs_dir):
     view -- the one log holding what killed a backend before its own logging
     was up was the one log you could not read in the app."""
     (logs_dir / "backend.log").write_text(
-        f"{_stamp(120)} I stemdeck ancient\n{_stamp(3)} I stemdeck recent crash\n",
+        f"{_stamp(120)} I anystemdeck ancient\n{_stamp(3)} I anystemdeck recent crash\n",
         encoding="utf-8",
     )
     body = client.get("/api/logs/backend?minutes=60").text
@@ -268,9 +268,9 @@ def test_tail_serves_the_backend_log(client, logs_dir):
 
 
 def test_tail_reads_the_backend_rotations_in_order(client, logs_dir):
-    (logs_dir / "backend.log.2").write_text(f"{_stamp(30)} I stemdeck oldest\n", encoding="utf-8")
-    (logs_dir / "backend.log.1").write_text(f"{_stamp(20)} I stemdeck middle\n", encoding="utf-8")
-    (logs_dir / "backend.log").write_text(f"{_stamp(5)} I stemdeck newest\n", encoding="utf-8")
+    (logs_dir / "backend.log.2").write_text(f"{_stamp(30)} I anystemdeck oldest\n", encoding="utf-8")
+    (logs_dir / "backend.log.1").write_text(f"{_stamp(20)} I anystemdeck middle\n", encoding="utf-8")
+    (logs_dir / "backend.log").write_text(f"{_stamp(5)} I anystemdeck newest\n", encoding="utf-8")
     body = client.get("/api/logs/backend?minutes=60").text
     assert body.index("oldest") < body.index("middle") < body.index("newest")
 
@@ -289,7 +289,7 @@ def test_every_listed_log_file_is_reachable_through_some_view(client, logs_dir):
 
 
 def test_tail_says_so_when_the_window_is_empty(client, logs_dir):
-    (logs_dir / "stemdeck.log").write_text(f"{_stamp(500)} I stemdeck ancient\n", encoding="utf-8")
+    (logs_dir / "anystemdeck.log").write_text(f"{_stamp(500)} I anystemdeck ancient\n", encoding="utf-8")
     assert "No entries in the last 60 minutes" in client.get("/api/logs/application").text
 
 
@@ -306,7 +306,7 @@ def test_tail_rejects_an_unknown_view(client, logs_dir):
     [
         "..%2F..%2Fetc%2Fpasswd",
         "%2e%2e%2fsettings",
-        "stemdeck.log",  # a real filename is still not a view name
+        "anystemdeck.log",  # a real filename is still not a view name
         "logs.zip",
     ],
 )
@@ -319,13 +319,13 @@ def test_tail_only_serves_named_views_not_paths(client, logs_dir, view):
 
 
 def test_tail_clamps_an_absurd_window(client, logs_dir):
-    (logs_dir / "stemdeck.log").write_text(f"{_stamp(1)} I stemdeck hi\n", encoding="utf-8")
+    (logs_dir / "anystemdeck.log").write_text(f"{_stamp(1)} I anystemdeck hi\n", encoding="utf-8")
     assert client.get("/api/logs/application?minutes=999999").status_code == 200
 
 
 def test_tail_truncates_a_flood(client, logs_dir):
-    (logs_dir / "stemdeck.log").write_text(
-        "".join(f"{_stamp(1)} I stemdeck line {i}\n" for i in range(6000)), encoding="utf-8"
+    (logs_dir / "anystemdeck.log").write_text(
+        "".join(f"{_stamp(1)} I anystemdeck line {i}\n" for i in range(6000)), encoding="utf-8"
     )
     body = client.get("/api/logs/application").text
     assert "earlier lines not shown" in body

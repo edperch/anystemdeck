@@ -104,13 +104,13 @@ const q = params(url);
 check("targets the bug form", q.get("template") === "bug_report.yml");
 check(
   "blank issues are disabled, so template must be present",
-  url.startsWith("https://github.com/stemdeckapp/stemdeck/issues/new?"),
+  url.startsWith("https://github.com/anystemdeckapp/anystemdeck/issues/new?"),
 );
 check("title leads with the cause", q.get("title") === "[Bug]: Import failed - out-of-memory");
 check("version is prefixed with v", q.get("version") === "v0.9.1");
 check("os matches the dropdown", q.get("os") === "Windows");
 check("install matches the dropdown", q.get("install") === "Windows ZIP");
-check("what carries StemDeck's own message", q.get("what").includes("Audio processing failed"));
+check("what carries AnyStemDeck's own message", q.get("what").includes("Audio processing failed"));
 check("what carries the classified detail", q.get("what").includes("out-of-memory"));
 check("steps names the stage it died at", q.get("steps").includes("Error: Processing failed"));
 
@@ -173,7 +173,7 @@ check("tail is fenced so GitHub renders it as code", text.includes("```"));
 const WITH_LOGS = {
   ...RECORD,
   logs: {
-    backend: "2026-08-17 16:50:02 E stemdeck backend crashed",
+    backend: "2026-08-17 16:50:02 E anystemdeck backend crashed",
     application: "",
     // setup intentionally absent -- same as "not fetched"
   },

@@ -2,7 +2,7 @@
 
 Deleting a finished separation destroys work that cannot be recovered. The
 behaviour used to be on by default and switched off by an environment variable,
-which meant every documented way of starting StemDeck set that variable and
+which meant every documented way of starting AnyStemDeck set that variable and
 anyone who started the backend directly lost their library within a day. These
 tests hold the direction: off unless asked, and the user's stored choice beats
 the environment.

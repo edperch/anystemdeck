@@ -40,7 +40,7 @@ from app.pipeline.runner import _pipeline_lock
 from app.pipeline.vocal_split import split_vocals
 
 router = APIRouter(tags=["jobs"])
-logger = logging.getLogger("stemdeck.api")
+logger = logging.getLogger("anystemdeck.api")
 
 _ALLOWED_EXTS = frozenset((".mp3", ".wav", ".flac", ".mp4", ".m4a", ".ogg", ".opus"))
 _MAX_UPLOAD_BYTES = 400 * 1024 * 1024  # 400 MB
@@ -160,7 +160,7 @@ async def create_job(request: Request) -> dict[str, str]:
         # so anything accepted now would be orphaned by the restart.
         raise HTTPException(
             status_code=409,
-            detail="Restart StemDeck to finish moving your stems folder before importing",
+            detail="Restart AnyStemDeck to finish moving your stems folder before importing",
         )
     ct = request.headers.get("content-type", "")
     if "multipart/form-data" in ct:

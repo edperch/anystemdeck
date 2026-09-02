@@ -3,7 +3,7 @@ const { invoke } = window.__TAURI__.core;
 let _runtimeUnlisten = null;
 
 // The backend always binds all interfaces; network availability is gated live
-// by the backend itself (Settings → "Make StemDeck available on your network").
+// by the backend itself (Settings → "Make AnyStemDeck available on your network").
 function startBackend() {
   return invoke("start_backend");
 }
@@ -93,7 +93,7 @@ async function installRuntimePack(appRoot) {
   if (!status.manifestReady) {
     throw Object.assign(
       new Error(`Python runtime not found under ${appRoot}.`),
-      { hint: "Try reinstalling StemDeck. If the problem persists, check that your disk has at least 2 GB free." }
+      { hint: "Try reinstalling AnyStemDeck. If the problem persists, check that your disk has at least 2 GB free." }
     );
   }
 
@@ -123,10 +123,10 @@ async function installRuntimePack(appRoot) {
         const pct = Math.min(100, Math.round((received / total) * 100));
         progressFill.style.width = `${pct}%`;
         progressFill.classList.remove("indeterminate");
-        setStatus(`Downloading StemDeck runtime... ${mb} / ${(total / 1e6).toFixed(0)} MB`);
+        setStatus(`Downloading AnyStemDeck runtime... ${mb} / ${(total / 1e6).toFixed(0)} MB`);
       } else {
         progressFill.classList.add("indeterminate");
-        setStatus(`Downloading StemDeck runtime... ${mb} MB received`);
+        setStatus(`Downloading AnyStemDeck runtime... ${mb} MB received`);
       }
     }
   );
@@ -150,7 +150,7 @@ async function installRuntimePack(appRoot) {
     }
     if (!verified) {
       progressWrap.classList.remove("hidden");
-      setStatus("Downloading StemDeck runtime...");
+      setStatus("Downloading AnyStemDeck runtime...");
 
       // Reset stall baseline when network download is actually about to start (#150).
       lastProgressAt = Date.now();
@@ -175,7 +175,7 @@ async function installRuntimePack(appRoot) {
       // startProgressStatus is assigned after stallTimer creation; the closure
       // above captures stopSlowMsg by reference, so it sees the updated value.
       stopSlowMsg = startProgressStatus([
-        { afterSeconds: 0,  text: "Downloading StemDeck runtime..." },
+        { afterSeconds: 0,  text: "Downloading AnyStemDeck runtime..." },
         { afterSeconds: 30, text: "Still downloading runtime... slow connection detected." },
         { afterSeconds: 90, text: "Still downloading... large file on a slow connection can take a few minutes." },
       ]);
@@ -192,10 +192,10 @@ async function installRuntimePack(appRoot) {
         if (stopSlowMsg) { stopSlowMsg(); }
       }
       progressWrap.classList.add("hidden");
-      setStatus("Verifying StemDeck runtime...");
+      setStatus("Verifying AnyStemDeck runtime...");
       await invoke("verify_runtime_pack");
     }
-    setStatus("Installing StemDeck runtime...");
+    setStatus("Installing AnyStemDeck runtime...");
     const installed = await invoke("extract_runtime_pack");
     if (!installed.runtimeReady) {
       throw Object.assign(
@@ -270,9 +270,9 @@ async function runSetup() {
         }
       }
       await runStep("backend", async () => {
-        setStatus("Runtime is ready. Starting StemDeck backend...");
+        setStatus("Runtime is ready. Starting AnyStemDeck backend...");
         const backend = await startBackend();
-        setStatus("Opening StemDeck...");
+        setStatus("Opening AnyStemDeck...");
         window.location.replace(backend.url);
       });
       return;
@@ -289,7 +289,7 @@ async function runSetup() {
         setStep("runtime", "error");
         throw Object.assign(
           new Error(`Python runtime setup failed under: ${runtime.dataDir}`),
-          { hint: "Check that your disk has at least 2 GB free and click Retry. If it keeps failing, try reinstalling StemDeck." }
+          { hint: "Check that your disk has at least 2 GB free and click Retry. If it keeps failing, try reinstalling AnyStemDeck." }
         );
       }
     }
@@ -331,7 +331,7 @@ async function runSetup() {
           const wrapped = new Error(String(err?.message ?? err));
           wrapped.hint =
             "If this keeps failing, your network or firewall may be blocking the FFmpeg " +
-            "download server. You can point StemDeck at a different FFmpeg build by " +
+            "download server. You can point AnyStemDeck at a different FFmpeg build by " +
             "setting the STEMDECK_FFMPEG_URL environment variable before launching, then " +
             "retrying.";
           throw wrapped;
@@ -385,7 +385,7 @@ async function runSetup() {
         } else {
           if (gpu.gpuDetected && !gpu.cudaVerified) {
             showError(
-              `GPU detected (${gpu.gpuName}) but CUDA setup failed - stem separation will use CPU.\nCheck logs/setup.log in the StemDeck data folder for details.`
+              `GPU detected (${gpu.gpuName}) but CUDA setup failed - stem separation will use CPU.\nCheck logs/setup.log in the AnyStemDeck data folder for details.`
             );
           }
           gpuSummary = gpu.gpuDetected
@@ -430,9 +430,9 @@ async function runSetup() {
     });
 
     await runStep("backend", async () => {
-      setStatus(gpuSummary ? `${gpuSummary} - starting backend...` : "Starting StemDeck backend...");
+      setStatus(gpuSummary ? `${gpuSummary} - starting backend...` : "Starting AnyStemDeck backend...");
       const backend = await startBackend();
-      setStatus("Opening StemDeck...");
+      setStatus("Opening AnyStemDeck...");
       window.location.replace(backend.url);
     });
   } catch (error) {

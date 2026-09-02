@@ -1,6 +1,6 @@
 # Model licensing notes
 
-Records the license basis for ML checkpoints StemDeck downloads at runtime.
+Records the license basis for ML checkpoints AnyStemDeck downloads at runtime.
 Not exhaustive -- only entries where the decision wasn't a simple upstream
 license file are documented here.
 
@@ -44,7 +44,7 @@ A cleanly-licensed roformer alternative (Kimberley Jensen's
 `Mel-Band-Roformer-Vocal-Model`) was also checked and found to have no
 LICENSE file despite a claim to the contrary surfacing in a web search.
 
-Since StemDeck is free/non-commercial, the practical risk of using an
+Since AnyStemDeck is free/non-commercial, the practical risk of using an
 unlicensed-but-freely-shared community checkpoint is low -- but a
 Boosty-paywall origin is a step past "unlicensed," suggesting the author did
 not intend it for free redistribution at all, and its already-dead HF mirror

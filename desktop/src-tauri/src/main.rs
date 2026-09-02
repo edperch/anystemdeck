@@ -37,16 +37,16 @@ const SETUP_VERSION: u64 = 1;
 // The archive format differs because each platform's packaging script already
 // produces one: Compress-Archive on Windows, tar on Linux.
 #[cfg(windows)]
-const UPDATE_APP_ARCHIVE: &str = "stemdeck-update-app.zip";
+const UPDATE_APP_ARCHIVE: &str = "anystemdeck-update-app.zip";
 #[cfg(target_os = "linux")]
-const UPDATE_APP_ARCHIVE: &str = "stemdeck-update-app.tar.gz";
+const UPDATE_APP_ARCHIVE: &str = "anystemdeck-update-app.tar.gz";
 
 /// The shipped executable's filename. Defined for every platform so the
 /// leftover sweep does not need its own cfg dance.
 #[cfg(windows)]
-const APP_EXE_NAME: &str = "StemDeck.exe";
+const APP_EXE_NAME: &str = "AnyStemDeck.exe";
 #[cfg(not(windows))]
-const APP_EXE_NAME: &str = "StemDeck";
+const APP_EXE_NAME: &str = "AnyStemDeck";
 // Windows FFmpeg comes from BtbN's GitHub build (served via GitHub's CDN, far
 // faster worldwide than the old gyan.dev single mirror -- #248). Unlike gyan.dev,
 // which published a per-file `{url}.sha256` companion, BtbN publishes ONE combined
@@ -113,7 +113,7 @@ const DEFAULT_LINUX_FFMPEG_URL: &str =
     "https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz";
 
 /// How the currently-running backend was started, and therefore how we watch
-/// it and stop it. Native holds the OS process handle StemDeck spawned
+/// it and stop it. Native holds the OS process handle AnyStemDeck spawned
 /// directly, exactly as before AMD-GPU/WSL2 support existed.
 ///
 /// Wsl2 *also* holds a Child now -- this is a revision of the original
@@ -354,7 +354,7 @@ fn main() {
             let data_dir = match local_data_dir() {
                 Ok(d) => d,
                 Err(e) => {
-                    eprintln!("[stemdeck] could not resolve data_dir, skipping version check: {e}");
+                    eprintln!("[anystemdeck] could not resolve data_dir, skipping version check: {e}");
                     return Ok(());
                 }
             };
@@ -368,10 +368,10 @@ fn main() {
             // Runs on EVERY launch, not just a version change. apply_app_update
             // relaunches and then exits, so on the very first launch of the new
             // build the outgoing process is usually still alive and Windows
-            // still holds StemDeck.exe.old open -- the delete fails silently
+            // still holds AnyStemDeck.exe.old open -- the delete fails silently
             // and, gated on a version change that has already happened, would
             // never be retried. Verified: after a real self-update both
-            // backend.old and StemDeck.exe.old were still on disk. Three path
+            // backend.old and AnyStemDeck.exe.old were still on disk. Three path
             // checks per launch is nothing; leaking ~30 MB forever is not.
             sweep_update_leftovers();
 
@@ -413,7 +413,7 @@ fn main() {
                 let freed = prune_downloads(&data_dir, keep.as_deref());
                 if freed > 0 {
                     eprintln!(
-                        "[stemdeck] freed {} MB of stale downloads",
+                        "[anystemdeck] freed {} MB of stale downloads",
                         freed / 1_048_576
                     );
                 }
@@ -421,7 +421,7 @@ fn main() {
                 // cleanup — a missing version file would otherwise cause every launch
                 // to wipe WebKit data.
                 if let Err(e) = fs::write(&version_file, current) {
-                    eprintln!("[stemdeck] failed to write version file, skipping cleanup: {e}");
+                    eprintln!("[anystemdeck] failed to write version file, skipping cleanup: {e}");
                 }
             }
             let _ = app; // suppress unused warning
@@ -456,7 +456,7 @@ fn main() {
             mark_store_migration_done,
         ])
         .build(tauri::generate_context!())
-        .expect("failed to build StemDeck desktop app")
+        .expect("failed to build AnyStemDeck desktop app")
         .run(|app_handle, event| {
             if let tauri::RunEvent::WindowEvent {
                 event: tauri::WindowEvent::CloseRequested { .. },
@@ -470,7 +470,7 @@ fn main() {
         });
 }
 
-/// Returns ~/Documents/StemDeck/ WITHOUT creating it. The Documents
+/// Returns ~/Documents/AnyStemDeck/ WITHOUT creating it. The Documents
 /// *default* for the jobs folder (documents_dir_for_jobs below) and the
 /// source of a pre-#403 user-data.json for one-time migration
 /// (documents_store_path) -- chosen so the library is visible in
@@ -481,12 +481,12 @@ fn main() {
 /// compute the *default* jobs path, even when the user has relocated their
 /// library elsewhere via Settings and this default will never be used. Prior
 /// to the fix for #403 (part 2) this always recreated an empty
-/// ~/Documents/StemDeck/jobs, since the backend's own ensure_runtime_dirs
+/// ~/Documents/AnyStemDeck/jobs, since the backend's own ensure_runtime_dirs
 /// (app/core/config.py) already mkdirs whichever JOBS_DIR actually wins that
 /// precedence -- this path only needs to exist when it is the one in use.
-fn documents_stemdeck_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+fn documents_anystemdeck_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     let documents = app.path().document_dir().map_err(|e| e.to_string())?;
-    Ok(documents.join("StemDeck"))
+    Ok(documents.join("AnyStemDeck"))
 }
 
 /// The stems/jobs folder as it exists right now: the backend's own
@@ -519,7 +519,7 @@ fn current_jobs_dir(app: &tauri::AppHandle) -> PathBuf {
 /// (app/core/stems_location.py) already moves every entry it finds inside
 /// the jobs folder one by one, so a plain file sitting there (same as
 /// registry.json) needs no special-casing on that side. Before #403 this
-/// lived at the jobs folder's *parent* (~/Documents/StemDeck/user-data.json),
+/// lived at the jobs folder's *parent* (~/Documents/AnyStemDeck/user-data.json),
 /// which relocation never touched -- a stems move would "forget" favorites,
 /// folder layout, and per-job mixer state even though the audio moved fine.
 ///
@@ -532,7 +532,7 @@ fn documents_store_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
         .map_err(|e| format!("failed to create {}: {e}", jobs_dir.display()))?;
     let new_path = jobs_dir.join("user-data.json");
     if !new_path.is_file() {
-        if let Ok(old_path) = documents_stemdeck_dir(app).map(|d| d.join("user-data.json")) {
+        if let Ok(old_path) = documents_anystemdeck_dir(app).map(|d| d.join("user-data.json")) {
             if old_path.is_file() && old_path != new_path {
                 let _ = fs::copy(&old_path, &new_path);
             }
@@ -549,7 +549,7 @@ fn directory_has_entries(path: &Path) -> bool {
         .unwrap_or(false)
 }
 
-/// The DEFAULT stems folder. Does NOT create it -- see documents_stemdeck_dir
+/// The DEFAULT stems folder. Does NOT create it -- see documents_anystemdeck_dir
 /// for why.
 ///
 /// Handed to the backend as STEMDECK_DEFAULT_JOBS_DIR, not STEMDECK_JOBS_DIR:
@@ -560,7 +560,7 @@ fn directory_has_entries(path: &Path) -> bool {
 ///
 /// Two candidates, resolved in this order:
 ///
-/// 1. ~/Documents/StemDeck/jobs, if it already has anything in it. Every
+/// 1. ~/Documents/AnyStemDeck/jobs, if it already has anything in it. Every
 ///    install before this default existed used this path, so an existing
 ///    user's real library lives there without any explicit `jobs_dir` in
 ///    settings.json to record it -- it was simply "the default." Checking
@@ -575,7 +575,7 @@ fn directory_has_entries(path: &Path) -> bool {
 ///    original Documents rationale (visible in Finder/Explorer, eligible for
 ///    OneDrive/iCloud backup, survives reinstalls) still applies to them.
 fn documents_dir_for_jobs(app: &tauri::AppHandle) -> PathBuf {
-    let legacy_default = match documents_stemdeck_dir(app) {
+    let legacy_default = match documents_anystemdeck_dir(app) {
         Ok(dir) => dir.join("jobs"),
         Err(_) => {
             return local_data_dir()
@@ -608,7 +608,7 @@ async fn pick_stems_folder(app: tauri::AppHandle) -> Result<Option<String>, Stri
     let (tx, rx) = std::sync::mpsc::channel();
     app.dialog()
         .file()
-        .set_title("Choose where StemDeck stores extracted stems")
+        .set_title("Choose where AnyStemDeck stores extracted stems")
         .pick_folder(move |path| {
             let _ = tx.send(path);
         });
@@ -635,8 +635,8 @@ fn store_set(app: tauri::AppHandle, key: String, value: serde_json::Value) -> Re
 
 /// Clear the persistent user-data store entirely (Settings -> General ->
 /// "Reset app data"). Complements the backend's own job-data wipe (POST
-/// /api/reset) -- together they fully clear a user's local StemDeck state,
-/// including the per-job mixer-state keys (stemdeck:mix:<job_id>) that have
+/// /api/reset) -- together they fully clear a user's local AnyStemDeck state,
+/// including the per-job mixer-state keys (anystemdeck:mix:<job_id>) that have
 /// no fixed enumeration to clear individually.
 #[tauri::command]
 fn reset_user_data(app: tauri::AppHandle) -> Result<(), String> {
@@ -654,10 +654,10 @@ fn mark_store_migration_done() {
     match local_data_dir() {
         Ok(d) => {
             if let Err(e) = fs::write(d.join("store_migration_done"), "") {
-                eprintln!("[stemdeck] failed to write migration flag: {e}");
+                eprintln!("[anystemdeck] failed to write migration flag: {e}");
             }
         }
-        Err(e) => eprintln!("[stemdeck] could not write migration flag: {e}"),
+        Err(e) => eprintln!("[anystemdeck] could not write migration flag: {e}"),
     }
 }
 
@@ -671,13 +671,13 @@ fn clear_webkit_data() {
         Err(_) => return,
     };
     let targets = [
-        format!("{home}/Library/WebKit/app.stemdeck.desktop"),
-        format!("{home}/Library/WebKit/stemdeck"),
+        format!("{home}/Library/WebKit/app.anystemdeck.desktop"),
+        format!("{home}/Library/WebKit/anystemdeck"),
     ];
     for path in &targets {
         if let Err(e) = fs::remove_dir_all(path) {
             if e.kind() != std::io::ErrorKind::NotFound {
-                eprintln!("[stemdeck] WebKit cleanup failed for {path}: {e}");
+                eprintln!("[anystemdeck] WebKit cleanup failed for {path}: {e}");
             }
         }
     }
@@ -936,7 +936,7 @@ async fn check_app_update(query: AppUpdateQuery) -> Result<AppUpdateAvailability
         };
 
         // A root-owned install (Linux `install.sh --global` puts it in
-        // /opt/stemdeck) cannot rewrite itself. Check before promising an
+        // /opt/anystemdeck) cannot rewrite itself. Check before promising an
         // update we would fail to apply.
         match app_root() {
             Ok(root) if !app_root_is_writable(&root) => {
@@ -1064,11 +1064,11 @@ fn verify_update_sha256(path: &Path, expected: &str, label: &str) -> Result<(), 
 }
 
 /// Unpack the downloaded app layer into `destination`, in whichever format
-/// this platform's packaging script produces. Both shapes put `StemDeck[.exe]`
+/// this platform's packaging script produces. Both shapes put `AnyStemDeck[.exe]`
 /// and `backend/` at the archive root, so the caller sees the same layout.
 ///
 /// tar is used on Linux rather than zip specifically because it preserves the
-/// executable bit; a zip would land StemDeck without +x and the relaunch would
+/// executable bit; a zip would land AnyStemDeck without +x and the relaunch would
 /// fail with a permission error.
 #[cfg(any(windows, target_os = "linux"))]
 fn extract_update_archive(archive: &Path, destination: &Path) -> Result<(), String> {
@@ -1091,7 +1091,7 @@ fn extract_update_archive(archive: &Path, destination: &Path) -> Result<(), Stri
 
 /// Whether this install can rewrite its own files.
 ///
-/// `packaging/linux/install.sh` offers a global install into `/opt/stemdeck`,
+/// `packaging/linux/install.sh` offers a global install into `/opt/anystemdeck`,
 /// which is root-owned while the app runs as the user. Renaming the binary
 /// there fails, so the updater has to decline up front and send the user to the
 /// normal download rather than discovering it half way through a swap. Windows
@@ -1099,7 +1099,7 @@ fn extract_update_archive(archive: &Path, destination: &Path) -> Result<(), Stri
 /// and honest on both.
 #[cfg(any(windows, target_os = "linux"))]
 fn app_root_is_writable(root: &Path) -> bool {
-    let probe = root.join(".stemdeck-update-probe");
+    let probe = root.join(".anystemdeck-update-probe");
     match fs::File::create(&probe) {
         Ok(_) => {
             let _ = fs::remove_file(&probe);
@@ -1172,7 +1172,7 @@ fn stop_backend_and_wait(state: &BackendState, timeout: Duration) -> Result<(), 
         // passes -- see BackendProcess's doc comment.
         BackendProcess::Wsl2(mut child) => {
             if let Err(e) = post_desktop_shutdown(handles.port, &handles.instance_token) {
-                eprintln!("[stemdeck] WSL2 backend shutdown request failed: {e}");
+                eprintln!("[anystemdeck] WSL2 backend shutdown request failed: {e}");
             }
             let deadline = Instant::now() + timeout;
             loop {
@@ -1323,8 +1323,8 @@ fn apply_app_update(
         //
         // Known residual gap: these two renames are back-to-back metadata
         // updates on one volume, but they are not a single atomic operation. A
-        // hard crash in that window would leave StemDeck.exe absent with
-        // StemDeck.exe.old holding the previous build, recoverable only by a
+        // hard crash in that window would leave AnyStemDeck.exe absent with
+        // AnyStemDeck.exe.old holding the previous build, recoverable only by a
         // manual rename -- unlike the swaps above there is no surviving
         // process to self-heal it on next launch. Closing it fully needs a
         // separate bootstrap launcher that is never itself replaced; flagging
@@ -1365,7 +1365,7 @@ fn shared_settings_dir() -> Option<PathBuf> {
     {
         env::var("LOCALAPPDATA")
             .ok()
-            .map(|base| PathBuf::from(base).join("StemDeck"))
+            .map(|base| PathBuf::from(base).join("AnyStemDeck"))
     }
     #[cfg(target_os = "macos")]
     {
@@ -1373,19 +1373,19 @@ fn shared_settings_dir() -> Option<PathBuf> {
             PathBuf::from(home)
                 .join("Library")
                 .join("Application Support")
-                .join("StemDeck")
+                .join("AnyStemDeck")
         })
     }
     #[cfg(all(unix, not(target_os = "macos")))]
     {
         if let Ok(xdg) = env::var("XDG_DATA_HOME") {
-            return Some(PathBuf::from(xdg).join("stemdeck"));
+            return Some(PathBuf::from(xdg).join("anystemdeck"));
         }
         env::var("HOME").ok().map(|home| {
             PathBuf::from(home)
                 .join(".local")
                 .join("share")
-                .join("stemdeck")
+                .join("anystemdeck")
         })
     }
 }
@@ -1455,7 +1455,7 @@ struct ModelWarmupStatus {
     vocal_split_ready: bool,
 }
 
-/// Eagerly downloads/caches the ML models StemDeck uses (Demucs, beat-this,
+/// Eagerly downloads/caches the ML models AnyStemDeck uses (Demucs, beat-this,
 /// and the on-demand lead/backing vocal-split karaoke model, #275) via
 /// `app/pipeline/warmup.py`, so a user's first real job doesn't pay for any
 /// of them mid-pipeline. Best-effort per model: a single model failing to
@@ -1815,7 +1815,7 @@ fn spawn_wsl2_heartbeat(app_handle: tauri::AppHandle, port: u16, instance_token:
             }
             let _ = client
                 .post(&url)
-                .header("X-Stemdeck-Token", &instance_token)
+                .header("X-AnyStemDeck-Token", &instance_token)
                 .send();
         }
     });
@@ -1828,7 +1828,7 @@ fn start_backend(
     state: tauri::State<BackendState>,
 ) -> Result<BackendStarted, String> {
     // Always bind all interfaces; whether other devices are actually served is
-    // controlled live by the backend's network gate (Settings → "Make StemDeck
+    // controlled live by the backend's network gate (Settings → "Make AnyStemDeck
     // available on your network"), which defaults off and always allows
     // loopback. The WebView itself connects via 127.0.0.1 regardless.
     let bind_host = "0.0.0.0";
@@ -1851,7 +1851,7 @@ fn start_backend(
         let root = app_root()?;
         let backend_dir = backend_dir(&root)?;
         let data_dir = local_data_dir()?;
-        // Jobs (stem audio files) live in ~/Documents/StemDeck/jobs/ so the user's
+        // Jobs (stem audio files) live in ~/Documents/AnyStemDeck/jobs/ so the user's
         // library is visible in Finder, backed up by iCloud, and survives app reinstalls.
         let jobs_dir = documents_dir_for_jobs(&app_handle);
         let log_path = data_dir.join("logs").join("backend.log");
@@ -1913,7 +1913,7 @@ fn start_backend(
             Ok((BackendProcess::Wsl2(child), url, port, instance_token))
         } else {
             let python = python_path(&root).filter(|p| p.is_file()).ok_or_else(|| {
-                "Python runtime not found. Expected python/ or .venv/ under StemDeck.".to_string()
+                "Python runtime not found. Expected python/ or .venv/ under AnyStemDeck.".to_string()
             })?;
             patch_pyvenv_cfg(&python);
             let (port, port_guard) = reserve_port(bind_host, configured_port())?;
@@ -2073,7 +2073,7 @@ fn build_target() -> BuildTarget {
 }
 
 /// Best-effort primary LAN IPv4, shown in Settings so the user knows the address
-/// to open StemDeck from another device. Uses the "connect a UDP socket" trick:
+/// to open AnyStemDeck from another device. Uses the "connect a UDP socket" trick:
 /// no packets are sent — connect() just makes the OS pick the source IP for the
 /// default route. Returns None when offline / no route.
 #[tauri::command]
@@ -2207,7 +2207,7 @@ fn is_cpu_only_package(root: &Path) -> bool {
 }
 
 /// The `portable.txt` marker is trusted ONLY in the app root: it ships next to
-/// StemDeck.exe inside the Windows portable zip (scripts/windows/make-portable.ps1),
+/// AnyStemDeck.exe inside the Windows portable zip (scripts/windows/make-portable.ps1),
 /// mirroring the `cpu-only` marker's root-only-trust pattern above. Shipped
 /// unconditionally in both the CPU and NVIDIA Windows builds, so a fresh
 /// extract is portable with zero user action. Never present on macOS/Linux.
@@ -2603,7 +2603,7 @@ fn python_stdlib_ok(python: &Path) -> bool {
     // Reuses bundled_python_home() rather than a separate inline computation
     // (which this used to have): that version unconditionally fell back to
     // PYTHONHOME=<venv root> even when nothing under it actually held a
-    // stdlib copy -- true for StemDeck's own bundled portable runtime
+    // stdlib copy -- true for AnyStemDeck's own bundled portable runtime
     // (python/base/Lib/...) and the legacy layout it also checks for, but
     // false for a plain `python -m venv .venv` dev checkout, which has no
     // bundled stdlib at all and relies on its own pyvenv.cfg to find the
@@ -2659,7 +2659,7 @@ fn classify_cuda_install_error(stderr: &str) -> String {
     }
     if lower.contains("access is denied") || lower.contains("permissionerror") {
         return "CUDA install failed: permission denied — antivirus software may be blocking \
-                the install. Try adding StemDeck to your AV exclusions and click Retry."
+                the install. Try adding AnyStemDeck to your AV exclusions and click Retry."
             .to_string();
     }
     if lower.contains("could not connect") || lower.contains("connection timed out") {
@@ -2881,7 +2881,7 @@ fn verify_cuda_torch(python: &Path) -> bool {
                     {
                         let _ = writeln!(
                             f,
-                            "[stemdeck] CUDA verify failed. stderr:\n{}",
+                            "[anystemdeck] CUDA verify failed. stderr:\n{}",
                             stderr.trim()
                         );
                     }
@@ -3138,7 +3138,7 @@ fn stop_backend_wsl2(child: &mut Child, port: u16, token: &str, timeout: Duratio
         // The backend may already be gone -- crashed, or its own heartbeat
         // watchdog beat us to it -- so log and still check below rather than
         // assuming this failure means it's stuck.
-        eprintln!("[stemdeck] WSL2 backend shutdown request failed: {e}");
+        eprintln!("[anystemdeck] WSL2 backend shutdown request failed: {e}");
     }
     let deadline = Instant::now() + timeout;
     while Instant::now() < deadline {
@@ -3149,7 +3149,7 @@ fn stop_backend_wsl2(child: &mut Child, port: u16, token: &str, timeout: Duratio
         thread::sleep(Duration::from_millis(100));
     }
     eprintln!(
-        "[stemdeck] WSL2 backend on port {port} did not stop within {}s of the shutdown \
+        "[anystemdeck] WSL2 backend on port {port} did not stop within {}s of the shutdown \
          request; killing wsl.exe directly.",
         timeout.as_secs()
     );
@@ -3167,7 +3167,7 @@ fn post_desktop_shutdown(port: u16, token: &str) -> Result<(), String> {
         .map_err(|e| e.to_string())?;
     let response = client
         .post(format!("http://127.0.0.1:{port}/api/desktop/shutdown"))
-        .header("X-Stemdeck-Token", token)
+        .header("X-AnyStemDeck-Token", token)
         .send()
         .map_err(|e| e.to_string())?;
     if response.status().is_success() {
@@ -3177,16 +3177,16 @@ fn post_desktop_shutdown(port: u16, token: &str) -> Result<(), String> {
     }
 }
 
-/// Returns the persistent user data directory for StemDeck.
-/// On Windows: %LocalAppData%\StemDeck
-/// On macOS: ~/Library/Application Support/StemDeck
-/// On Linux: $XDG_DATA_HOME/stemdeck  or  ~/.local/share/stemdeck
+/// Returns the persistent user data directory for AnyStemDeck.
+/// On Windows: %LocalAppData%\AnyStemDeck
+/// On macOS: ~/Library/Application Support/AnyStemDeck
+/// On Linux: $XDG_DATA_HOME/anystemdeck  or  ~/.local/share/anystemdeck
 /// Can be overridden by STEMDECK_DATA_DIR for development.
 fn local_data_dir() -> Result<PathBuf, String> {
     if let Ok(path) = env::var("STEMDECK_DATA_DIR") {
         return Ok(PathBuf::from(path));
     }
-    // Windows portable zip: redirect into data/ next to StemDeck.exe instead of
+    // Windows portable zip: redirect into data/ next to AnyStemDeck.exe instead of
     // %LocalAppData% (#399). No-ops on macOS/Linux, where the marker never ships.
     if let Ok(root) = app_root() {
         if is_portable_package(&root) {
@@ -3197,7 +3197,7 @@ fn local_data_dir() -> Result<PathBuf, String> {
     {
         let base = env::var("LOCALAPPDATA")
             .map_err(|_| "LOCALAPPDATA environment variable not set".to_string())?;
-        Ok(PathBuf::from(base).join("StemDeck"))
+        Ok(PathBuf::from(base).join("AnyStemDeck"))
     }
     #[cfg(target_os = "macos")]
     {
@@ -3205,18 +3205,18 @@ fn local_data_dir() -> Result<PathBuf, String> {
         Ok(PathBuf::from(home)
             .join("Library")
             .join("Application Support")
-            .join("StemDeck"))
+            .join("AnyStemDeck"))
     }
     #[cfg(all(unix, not(target_os = "macos")))]
     {
         if let Ok(xdg) = env::var("XDG_DATA_HOME") {
-            return Ok(PathBuf::from(xdg).join("stemdeck"));
+            return Ok(PathBuf::from(xdg).join("anystemdeck"));
         }
         let home = env::var("HOME").map_err(|_| "HOME environment variable not set".to_string())?;
         Ok(PathBuf::from(home)
             .join(".local")
             .join("share")
-            .join("stemdeck"))
+            .join("anystemdeck"))
     }
 }
 
@@ -3237,7 +3237,7 @@ fn append_to_setup_log(data_dir: &Path, msg: &str) {
         .map(|d| d.as_secs())
         .unwrap_or(0);
     if let Ok(mut f) = fs::OpenOptions::new().create(true).append(true).open(&log) {
-        let _ = writeln!(f, "[{ts}] [stemdeck] {msg}");
+        let _ = writeln!(f, "[{ts}] [anystemdeck] {msg}");
     }
 }
 
@@ -3409,7 +3409,7 @@ fn prune_downloads(data_dir: &Path, keep: Option<&Path>) -> u64 {
         };
         match removed {
             Ok(()) => freed += size,
-            Err(e) => eprintln!("[stemdeck] could not remove {}: {e}", path.display()),
+            Err(e) => eprintln!("[anystemdeck] could not remove {}: {e}", path.display()),
         }
     }
     freed
@@ -3443,8 +3443,8 @@ fn prune_runtime_leftovers(data_dir: &Path) {
             continue;
         }
         match fs::remove_dir_all(&path) {
-            Ok(()) => eprintln!("[stemdeck] removed leftover {}", path.display()),
-            Err(e) => eprintln!("[stemdeck] could not remove {}: {e}", path.display()),
+            Ok(()) => eprintln!("[anystemdeck] removed leftover {}", path.display()),
+            Err(e) => eprintln!("[anystemdeck] could not remove {}: {e}", path.display()),
         }
     }
 }
@@ -3455,7 +3455,7 @@ fn runtime_archive_path(data_dir: &Path, manifest: &RuntimeManifest) -> PathBuf 
         .clone()
         .or_else(|| manifest.runtime_url.rsplit('/').next().map(str::to_string))
         .filter(|value| !value.trim().is_empty())
-        .unwrap_or_else(|| format!("StemDeck-runtime-macOS-{}.tar.zst", manifest.arch));
+        .unwrap_or_else(|| format!("AnyStemDeck-runtime-macOS-{}.tar.zst", manifest.arch));
     data_dir.join("downloads").join(name)
 }
 
@@ -3960,7 +3960,7 @@ struct HealthIdentity {
 /// Wait until *our own* backend answers on `port`.
 ///
 /// Identity matters as much as liveness here. A 200 only proves something is
-/// listening; before #424 that was enough, so a second StemDeck launched while
+/// listening; before #424 that was enough, so a second AnyStemDeck launched while
 /// one was already running would adopt the first instance's backend, and with
 /// it the first instance's data directory and library, with nothing on screen
 /// to suggest anything was wrong.
@@ -3973,7 +3973,7 @@ struct HealthIdentity {
 /// the real interpreter as a *child of its own*. The PID that binds the port is
 /// therefore a grandchild and can never equal `child.id()`. Every Windows
 /// portable user got the full ninety second timeout followed by "Another
-/// program is already using port 8000", naming StemDeck's own healthy backend
+/// program is already using port 8000", naming AnyStemDeck's own healthy backend
 /// as the intruder.
 ///
 /// So identity travels in the environment instead, where it survives any number
@@ -4042,7 +4042,7 @@ fn port_conflict_hint(port: u16, foreign_pid: Option<u32>) -> String {
     match foreign_pid {
         Some(pid) => format!(
             "\n\nAnother program is already using port {port} (process {pid}). \
-             If that is a second copy of StemDeck, close it and try again, or \
+             If that is a second copy of AnyStemDeck, close it and try again, or \
              change the port in Settings."
         ),
         None => String::new(),
@@ -4133,9 +4133,9 @@ fn ensure_ffmpeg(data_dir: &Path) -> Result<PathBuf, String> {
     // Prefer a system FFmpeg on PATH -- a Homebrew/apt/choco install, or a dev
     // machine that already has one -- over downloading our own, on every
     // platform. verify_ffmpeg() confirms it both runs on this OS *and* has
-    // every encoder StemDeck's export pipeline needs (see its doc comment),
+    // every encoder AnyStemDeck's export pipeline needs (see its doc comment),
     // so this only short-circuits the download when the system build can
-    // actually fulfill StemDeck's requirements. This also protects macOS
+    // actually fulfill AnyStemDeck's requirements. This also protects macOS
     // users on an older OS than our downloaded build assumes (#414): if they
     // already have a working system FFmpeg, we no longer force a potentially
     // incompatible download on top of it.
@@ -4380,7 +4380,7 @@ fn download_macos_ffmpeg(data_dir: &Path) -> Result<(), String> {
     // fallback: a single host with no CDN behind it, reported unreachable
     // from multiple regions (#388). A checksum match only proves the bytes are
     // what we expect, not that the binary actually launches on this machine's
-    // macOS version or has every encoder StemDeck needs -- verify both before
+    // macOS version or has every encoder AnyStemDeck needs -- verify both before
     // accepting it over the fallback (#414).
     let primary_result = download_macos_ffmpeg_primary(&ffmpeg_dir)
         .and_then(|()| verify_ffmpeg(&ffmpeg_dir.join("ffmpeg")));
@@ -4627,7 +4627,7 @@ fn extract_ffmpeg_binaries(archive_path: &Path, data_dir: &Path) -> Result<(), S
     Ok(())
 }
 
-// Encoders StemDeck's export pipeline actually calls for by name: pcm_s16le
+// Encoders AnyStemDeck's export pipeline actually calls for by name: pcm_s16le
 // (WAV stems), flac (FLAC stems), libmp3lame (MP3 stems/zips), libvorbis (OGG
 // stems), aac (the audio track on MP4 video exports) -- see app/api/stems.py's
 // per-format ffmpeg args. A minimal or distro-stripped FFmpeg build can pass a
@@ -4666,7 +4666,7 @@ fn verify_ffmpeg_encoders(path: &Path) -> Result<(), String> {
     }
 }
 
-// A binary is only "compatible with StemDeck's requirements" (#414) if it
+// A binary is only "compatible with AnyStemDeck's requirements" (#414) if it
 // both runs on this machine and has every encoder the export pipeline needs
 // -- checking just one half would let either a broken-on-this-OS build or a
 // minimal/stripped one through.
@@ -4893,10 +4893,10 @@ mod tests {
         // user state at all.
         let root = make_tmp();
         let destination_parent = make_tmp();
-        let destination = destination_parent.path().join("StemDeck");
+        let destination = destination_parent.path().join("AnyStemDeck");
         fs::create_dir_all(&destination).unwrap();
         fs::create_dir_all(root.path().join("data")).unwrap();
-        let settings = br#"{"jobs_dir":"D:\\Audio\\StemDeck","separation_quality":"best"}"#;
+        let settings = br#"{"jobs_dir":"D:\\Audio\\AnyStemDeck","separation_quality":"best"}"#;
         fs::write(root.path().join("data/settings.json"), settings).unwrap();
         fs::write(
             root.path().join("data/config.json"),
@@ -4926,7 +4926,7 @@ mod tests {
     fn legacy_migration_never_overwrites_newer_user_settings() {
         let root = make_tmp();
         let destination_parent = make_tmp();
-        let destination = destination_parent.path().join("StemDeck");
+        let destination = destination_parent.path().join("AnyStemDeck");
         fs::create_dir_all(root.path().join("data")).unwrap();
         fs::create_dir_all(&destination).unwrap();
         fs::write(
@@ -4983,15 +4983,15 @@ mod tests {
         seed_downloads(
             dir.path(),
             &[
-                ("StemDeck-runtime-macOS-arm64-old.tar.zst", 2048),
+                ("AnyStemDeck-runtime-macOS-arm64-old.tar.zst", 2048),
                 ("ffmpeg-macos.zip", 1024),
-                ("StemDeck-runtime-macOS-arm64.tar.zst", 512),
+                ("AnyStemDeck-runtime-macOS-arm64.tar.zst", 512),
             ],
         );
         let keep = dir
             .path()
             .join("downloads")
-            .join("StemDeck-runtime-macOS-arm64.tar.zst");
+            .join("AnyStemDeck-runtime-macOS-arm64.tar.zst");
 
         let freed = super::prune_downloads(dir.path(), Some(&keep));
 
@@ -5098,10 +5098,10 @@ mod tests {
         super::RuntimeManifest {
             version: version.to_string(),
             arch: "arm64".to_string(),
-            runtime_url: "https://example.invalid/StemDeck-runtime-macOS-arm64.tar.zst".to_string(),
+            runtime_url: "https://example.invalid/AnyStemDeck-runtime-macOS-arm64.tar.zst".to_string(),
             runtime_sha256: "0".repeat(64),
             runtime_size: None,
-            archive_name: Some("StemDeck-runtime-macOS-arm64.tar.zst".to_string()),
+            archive_name: Some("AnyStemDeck-runtime-macOS-arm64.tar.zst".to_string()),
         }
     }
 
@@ -5234,7 +5234,7 @@ mod tests {
         // We can't safely delete real WebKit dirs in a test, but we can verify
         // the function handles NotFound gracefully by checking the logic:
         let tmp = make_tmp();
-        let fake_webkit = tmp.path().join("WebKit").join("app.stemdeck.desktop");
+        let fake_webkit = tmp.path().join("WebKit").join("app.anystemdeck.desktop");
         // Never created → remove_dir_all should return NotFound, which we ignore.
         let result = fs::remove_dir_all(&fake_webkit);
         assert!(result.is_err());
@@ -5309,7 +5309,7 @@ mod tests {
     fn parses_the_checksum_file_make_portable_writes() {
         // "<sha256>  <filename>" -- Get-FileHash + Set-Content.
         let sha = "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824";
-        let written = format!("{}  StemDeck-Windows-x64-app.zip\n", sha.to_uppercase());
+        let written = format!("{}  AnyStemDeck-Windows-x64-app.zip\n", sha.to_uppercase());
         assert_eq!(super::parse_sha256_line(&written).as_deref(), Some(sha));
     }
 
@@ -5443,7 +5443,7 @@ b6052160df96b31c9b1e33854a4dcda3d4b57641b880270f31736fb9f445d384  ffmpeg-n7.1-la
 
     #[test]
     fn missing_required_encoders_flags_only_the_absent_ones() {
-        // A full build listing every codec StemDeck needs -> nothing missing.
+        // A full build listing every codec AnyStemDeck needs -> nothing missing.
         let full = "\
  A....D pcm_s16le            PCM signed 16-bit little-endian
  A....D flac                 FLAC (Free Lossless Audio Codec)
@@ -5711,7 +5711,7 @@ b6052160df96b31c9b1e33854a4dcda3d4b57641b880270f31736fb9f445d384  ffmpeg-n7.1-la
         assert!(super::validate_download_url("not a url").is_err());
     }
 
-    // #424: a second StemDeck adopted the first one's backend, and with it the
+    // #424: a second AnyStemDeck adopted the first one's backend, and with it the
     // first one's library. Both halves of that are pinned below.
 
     #[test]
@@ -5759,7 +5759,7 @@ b6052160df96b31c9b1e33854a4dcda3d4b57641b880270f31736fb9f445d384  ffmpeg-n7.1-la
 
     #[test]
     fn a_held_reservation_keeps_everyone_else_out() {
-        // The reservation binds without listening, so that StemDeck.exe is not
+        // The reservation binds without listening, so that AnyStemDeck.exe is not
         // a server in the firewall's eyes. That only works if bind alone still
         // holds the address against a real listener -- if it did not, the port
         // could be stolen between reserving it and the backend binding it.
@@ -5783,7 +5783,7 @@ b6052160df96b31c9b1e33854a4dcda3d4b57641b880270f31736fb9f445d384  ffmpeg-n7.1-la
     #[test]
     fn health_identity_comes_from_the_body_only() {
         let ok = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n\
-                  {\"name\":\"StemDeck\",\"status\":\"ok\",\"pid\":4242,\"instance\":\"abc\"}";
+                  {\"name\":\"AnyStemDeck\",\"status\":\"ok\",\"pid\":4242,\"instance\":\"abc\"}";
         assert_eq!(
             super::parse_health_identity(ok),
             Some(super::HealthIdentity {
@@ -5839,7 +5839,7 @@ b6052160df96b31c9b1e33854a4dcda3d4b57641b880270f31736fb9f445d384  ffmpeg-n7.1-la
                 let mut buf = [0u8; 512];
                 let _ = stream.read(&mut buf);
                 let body = format!(
-                    "{{\"name\":\"StemDeck\",\"status\":\"ok\",\"pid\":{pid},\
+                    "{{\"name\":\"AnyStemDeck\",\"status\":\"ok\",\"pid\":{pid},\
                      \"instance\":\"{instance}\"}}"
                 );
                 let _ = stream.write_all(

@@ -1,13 +1,13 @@
 [Desktop Entry]
 Type=Application
 Version=1.0
-Name=StemDeck
+Name=AnyStemDeck
 GenericName=Stem Separation
 Comment=Free, local stem separation for music production and practice
 Exec="@EXEC@"
 Icon=@ICON@
 Terminal=false
 StartupNotify=true
-StartupWMClass=StemDeck
+StartupWMClass=AnyStemDeck
 Categories=AudioVideo;Audio;Music;
 Keywords=stems;separation;audio;vocals;drums;bass;karaoke;demucs;

@@ -318,7 +318,7 @@ async def test_pipeline_success_logs_timing_summary(tmp_path: Path, caplog):
 
     with (
         patch("app.pipeline.runner._run_blocking", side_effect=fake_stages),
-        caplog.at_level(logging.INFO, logger="stemdeck.pipeline"),
+        caplog.at_level(logging.INFO, logger="anystemdeck.pipeline"),
     ):
         await run_pipeline(job, "https://www.youtube.com/watch?v=dQw4w9WgXcQ", tmp_path)
 

@@ -28,5 +28,5 @@
     <path d="M300 196 L330 226 L360 196" fill="none" stroke="#ffffff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
   </g>
 
-  <text x="330" y="322" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="16" font-weight="600" fill="#dce5e8">Drag StemDeck to Applications</text>
+  <text x="330" y="322" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="16" font-weight="600" fill="#dce5e8">Drag AnyStemDeck to Applications</text>
 </svg>

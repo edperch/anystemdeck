@@ -1,5 +1,5 @@
-/* StemDeck mobile — ported from the Claude Design prototype
-   (design/mobile/StemDeck-Mobile.dc.html). Full-bleed for real phones:
+/* AnyStemDeck mobile — ported from the Claude Design prototype
+   (design/mobile/AnyStemDeck-Mobile.dc.html). Full-bleed for real phones:
    the device frame / status bar / dynamic island from the design canvas
    are dropped; the app fills the viewport and respects safe-area insets. */
 

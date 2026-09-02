@@ -1,7 +1,7 @@
 param(
   [string]$Configuration = "release",
   [string]$OutputRoot    = "dist",
-  [string]$PackageName   = "StemDeck-Windows-x64",
+  [string]$PackageName   = "AnyStemDeck-Windows-x64",
   [string]$PackageVersion,
   [switch]$SkipTauriBuild,
   [switch]$CpuOnly,
@@ -25,7 +25,7 @@ $PythonExe = Join-Path $PythonDir "Scripts\python.exe"
 $BackendDir = Join-Path $Stage "backend"
 $DesktopDir = Join-Path $Root "desktop"
 $TauriDir = Join-Path $DesktopDir "src-tauri"
-$TargetExe = Join-Path $TauriDir "target\$Configuration\stemdeck.exe"
+$TargetExe = Join-Path $TauriDir "target\$Configuration\anystemdeck.exe"
 
 function Require-Command([string]$Name) {
   if (-not (Get-Command $Name -ErrorAction SilentlyContinue)) {
@@ -134,7 +134,7 @@ function Assert-Fresh-TauriBuild {
   if ($newerSources.Count -gt 0) {
     $list = ($newerSources | Select-Object -First 8 | ForEach-Object { "  - $($_.FullName)" }) -join "`n"
     throw @"
--SkipTauriBuild would package a stale StemDeck.exe.
+-SkipTauriBuild would package a stale AnyStemDeck.exe.
 
 The existing executable is older than desktop UI/Tauri source files:
 $list
@@ -199,7 +199,7 @@ if ($QjsActual -ne $QjsSha256) {
 Write-Host "QuickJS verified."
 
 # Portable marker: present in every zip (CPU and NVIDIA alike) so double-
-# clicking StemDeck.exe uses .\data next to the exe for ffmpeg/models/config/
+# clicking AnyStemDeck.exe uses .\data next to the exe for ffmpeg/models/config/
 # logs instead of AppData (#399). Root-only trust, mirroring cpu-only below.
 New-Item -ItemType File -Force (Join-Path $Stage "portable.txt") | Out-Null
 if ($CpuOnly) {
@@ -308,7 +308,7 @@ Get-ChildItem -Path (Join-Path $PythonDir "Lib\site-packages") -Directory -Force
 # Runtime fingerprint, shipped INSIDE python/ in every package (#421).
 #
 # This is the in-app updater's SAFETY GATE, not a download trigger. The updater
-# only ever replaces StemDeck.exe + backend/; it never touches python/, because
+# only ever replaces AnyStemDeck.exe + backend/; it never touches python/, because
 # an NVIDIA install rewrites python/ with CUDA torch at first run
 # (install_cuda_torch) and swapping the directory would silently drop that user
 # back to CPU. So an app-only update is safe exactly when the new release needs
@@ -371,7 +371,7 @@ if (-not (Test-Path $TargetExe)) {
   throw "Tauri executable not found at $TargetExe"
 }
 
-Copy-Item -Force $TargetExe (Join-Path $Stage "StemDeck.exe")
+Copy-Item -Force $TargetExe (Join-Path $Stage "AnyStemDeck.exe")
 
 Compress-Archive -Path (Join-Path $Stage "*") -DestinationPath $ZipPath -Force
 $Hash = Get-FileHash -Algorithm SHA256 $ZipPath
@@ -383,7 +383,7 @@ Set-Content -Path $ChecksumPath -Value "$($Hash.Hash)  $PackageName.zip"
 # itself, so it never has to re-extract the ~20k-file Python runtime to pick up
 # a release that only changed app code.
 #
-# StemDeck.exe and backend/ are byte-identical between the CPU and NVIDIA
+# AnyStemDeck.exe and backend/ are byte-identical between the CPU and NVIDIA
 # variants -- the only per-variant difference in the package is the `cpu-only`
 # marker at the package root, which the updater never touches -- so this is
 # built once, from whichever invocation passes -PublishUpdaterAssets, and needs
@@ -393,14 +393,14 @@ Set-Content -Path $ChecksumPath -Value "$($Hash.Hash)  $PackageName.zip"
 # See the runtime-id note above for why. runtime-version.json is published on
 # its own so the updater can check compatibility before offering to update.
 if ($PublishUpdaterAssets) {
-  $UpdaterAppZipName = "StemDeck-Windows-x64-app"
+  $UpdaterAppZipName = "AnyStemDeck-Windows-x64-app"
   $UpdaterAppZipPath = Join-Path $Root "$OutputRoot\$UpdaterAppZipName.zip"
-  Compress-Archive -Path (Join-Path $Stage "StemDeck.exe"), (Join-Path $Stage "backend") `
+  Compress-Archive -Path (Join-Path $Stage "AnyStemDeck.exe"), (Join-Path $Stage "backend") `
       -DestinationPath $UpdaterAppZipPath -Force
   $AppHash = Get-FileHash -Algorithm SHA256 $UpdaterAppZipPath
   Set-Content -Path "$UpdaterAppZipPath.sha256" -Value "$($AppHash.Hash)  $UpdaterAppZipName.zip"
 
-  $RuntimeIdAssetPath = Join-Path $Root "$OutputRoot\StemDeck-Windows-x64-runtime-version.json"
+  $RuntimeIdAssetPath = Join-Path $Root "$OutputRoot\AnyStemDeck-Windows-x64-runtime-version.json"
   [System.IO.File]::WriteAllText($RuntimeIdAssetPath, $RuntimeIdJson + "`n", $utf8NoBom)
 }
 

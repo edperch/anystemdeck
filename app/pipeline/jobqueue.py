@@ -30,7 +30,7 @@ from app.core.models import Job, _set
 from app.core.registry import get as registry_get
 from app.core.registry import persist as registry_persist
 
-logger = logging.getLogger("stemdeck.queue")
+logger = logging.getLogger("anystemdeck.queue")
 
 # Waiting job ids, oldest first. Guarded by _lock because sync (threadpool)
 # endpoints read and mutate it -- matching registry.py's threading.Lock model.

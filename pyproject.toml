@@ -1,5 +1,5 @@
 [project]
-name = "stemdeck"
+name = "anystemdeck"
 # Version is derived from the git tag by hatch-vcs (see [tool.hatch.version]),
 # so it is never hand-edited — `git tag vX.Y.Z` is the single source of truth.
 # Builds between tags report a dev version (e.g. 0.7.0a5.dev3+g<sha>). (#169)

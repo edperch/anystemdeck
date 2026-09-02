@@ -32,12 +32,12 @@ trap 'rm -rf "$SANDBOX"' EXIT
 make_package() {
     local dir="$1" version="$2" variant="${3:-CPU}"
     mkdir -p "$dir/backend/static" "$dir/backend/app" "$dir/python/bin" "$dir/packaging"
-    printf '#!/bin/sh\necho stemdeck\n' > "$dir/StemDeck"
-    chmod +x "$dir/StemDeck"
+    printf '#!/bin/sh\necho anystemdeck\n' > "$dir/AnyStemDeck"
+    chmod +x "$dir/AnyStemDeck"
     printf '{ "version": "%s" }\n' "$version" > "$dir/backend/static/version.json"
     printf 'x' > "$dir/python/bin/python"
-    printf 'PNG-placeholder' > "$dir/packaging/stemdeck.png"
-    cp "${REPO_ROOT}/packaging/linux/stemdeck.desktop.in" "$dir/packaging/stemdeck.desktop.in"
+    printf 'PNG-placeholder' > "$dir/packaging/anystemdeck.png"
+    cp "${REPO_ROOT}/packaging/linux/anystemdeck.desktop.in" "$dir/packaging/anystemdeck.desktop.in"
     cp "$INSTALLER" "$dir/install.sh"
     chmod +x "$dir/install.sh"
     [[ "$variant" == "CPU" ]] && : > "$dir/cpu-only"
@@ -60,7 +60,7 @@ run_installer() {  # run_installer <home> <pkg> [args...]
         bash "$pkg/install.sh" "$@" 2>&1
 }
 
-manifest_of() { cat "$1/.config/stemdeck/install-manifest" 2>/dev/null || true; }
+manifest_of() { cat "$1/.config/anystemdeck/install-manifest" 2>/dev/null || true; }
 mvalue() { manifest_of "$1" | sed -n "s/^$2=//p" | head -1; }
 
 # ---------------------------------------------------------------------------
@@ -71,15 +71,15 @@ H="$(new_home fresh)"
 PKG="${SANDBOX}/pkg-1"
 make_package "$PKG" "0.8.0-alpha.17"
 OUT="$(run_installer "$H" "$PKG" --local --yes)"
-DIR="$H/.local/opt/stemdeck"
+DIR="$H/.local/opt/anystemdeck"
 
 check "fresh install: exit 0" "$([[ $? -eq 0 ]] && echo 1 || echo 0)"
-check "fresh install: binary in place" "$([[ -x "$DIR/StemDeck" ]] && echo 1 || echo 0)"
+check "fresh install: binary in place" "$([[ -x "$DIR/AnyStemDeck" ]] && echo 1 || echo 0)"
 check "fresh install: backend copied" "$([[ -d "$DIR/backend/app" ]] && echo 1 || echo 0)"
 check "fresh install: desktop entry written" \
-  "$([[ -f "$H/.local/share/applications/stemdeck.desktop" ]] && echo 1 || echo 0)"
+  "$([[ -f "$H/.local/share/applications/anystemdeck.desktop" ]] && echo 1 || echo 0)"
 check "fresh install: icon written" \
-  "$([[ -f "$H/.local/share/icons/stemdeck.png" ]] && echo 1 || echo 0)"
+  "$([[ -f "$H/.local/share/icons/anystemdeck.png" ]] && echo 1 || echo 0)"
 check "fresh install: version read from the package, not hardcoded" \
   "$([[ "$(mvalue "$H" Version)" == "0.8.0-alpha.17" ]] && echo 1 || echo 0)" "got '$(mvalue "$H" Version)'"
 check "fresh install: variant read from the cpu-only marker" \
@@ -88,7 +88,7 @@ check "fresh install: no staging dirs left behind" \
   "$([[ ! -e "${DIR}.new" && ! -e "${DIR}.old" ]] && echo 1 || echo 0)"
 
 # The bug that made the fork's entry unusable on a custom path.
-EXEC_LINE="$(sed -n 's/^Exec=//p' "$H/.local/share/applications/stemdeck.desktop")"
+EXEC_LINE="$(sed -n 's/^Exec=//p' "$H/.local/share/applications/anystemdeck.desktop")"
 check "fresh install: Exec is quoted" \
   "$([[ "$EXEC_LINE" == '"'*'"' ]] && echo 1 || echo 0)" "Exec=$EXEC_LINE"
 
@@ -113,12 +113,12 @@ PKG_NEW="${SANDBOX}/pkg-new"; make_package "$PKG_NEW" "0.8.0-alpha.17"
 run_installer "$H" "$PKG_OLD" --local --yes >/dev/null
 printf 'marker-new\n' > "$PKG_NEW/NEWFILE"
 OUT="$(run_installer "$H" "$PKG_NEW" --yes)"
-DIR="$H/.local/opt/stemdeck"
+DIR="$H/.local/opt/anystemdeck"
 check "upgrade: manifest now records the new version" \
   "$([[ "$(mvalue "$H" Version)" == "0.8.0-alpha.17" ]] && echo 1 || echo 0)" "got '$(mvalue "$H" Version)'"
 check "upgrade: new content is present" "$([[ -f "$DIR/NEWFILE" ]] && echo 1 || echo 0)"
 check "upgrade: reused the recorded location without asking" \
-  "$([[ -x "$DIR/StemDeck" ]] && echo 1 || echo 0)"
+  "$([[ -x "$DIR/AnyStemDeck" ]] && echo 1 || echo 0)"
 
 # ---------------------------------------------------------------------------
 # 4. THE BLOCKER: a failed upgrade must leave the working install alone
@@ -127,7 +127,7 @@ check "upgrade: reused the recorded location without asking" \
 H="$(new_home failed)"
 PKG_OK="${SANDBOX}/pkg-ok"; make_package "$PKG_OK" "0.8.0-alpha.16"
 run_installer "$H" "$PKG_OK" --local --yes >/dev/null
-DIR="$H/.local/opt/stemdeck"
+DIR="$H/.local/opt/anystemdeck"
 printf 'user-was-here\n' > "$DIR/sentinel"
 
 # A package that passes the up-front check but cannot be copied: the executable
@@ -140,11 +140,11 @@ OUT="$(run_installer "$H" "$PKG_BAD" --yes)"; RC=$?
 chmod 755 "$PKG_BAD/backend/app/unreadable" 2>/dev/null || true
 
 check "failed upgrade: the install directory survives" \
-  "$([[ -x "$DIR/StemDeck" ]] && echo 1 || echo 0)"
+  "$([[ -x "$DIR/AnyStemDeck" ]] && echo 1 || echo 0)"
 check "failed upgrade: the user's files survive" \
   "$([[ -f "$DIR/sentinel" ]] && echo 1 || echo 0)"
 check "failed upgrade: the desktop entry survives" \
-  "$([[ -f "$H/.local/share/applications/stemdeck.desktop" ]] && echo 1 || echo 0)"
+  "$([[ -f "$H/.local/share/applications/anystemdeck.desktop" ]] && echo 1 || echo 0)"
 check "failed upgrade: the manifest survives, still on the old version" \
   "$([[ "$(mvalue "$H" Version)" == "0.8.0-alpha.16" ]] && echo 1 || echo 0)" "got '$(mvalue "$H" Version)'"
 check "failed upgrade: no staging dirs left behind" \
@@ -158,8 +158,8 @@ H="$(new_home corrupt)"
 PKG="${SANDBOX}/pkg-c"; make_package "$PKG" "0.8.0-alpha.17"
 run_installer "$H" "$PKG" --local --yes >/dev/null
 # Strip Variant, as an older installer's manifest would lack newer keys.
-grep -v '^Variant=' "$H/.config/stemdeck/install-manifest" > "$H/m.tmp"
-mv "$H/m.tmp" "$H/.config/stemdeck/install-manifest"
+grep -v '^Variant=' "$H/.config/anystemdeck/install-manifest" > "$H/m.tmp"
+mv "$H/m.tmp" "$H/.config/anystemdeck/install-manifest"
 OUT="$(run_installer "$H" "$PKG" --yes)"; RC=$?
 check "missing manifest key: installer still runs" "$([[ $RC -eq 0 ]] && echo 1 || echo 0)" "rc=$RC"
 check "missing manifest key: repaired on write" \
@@ -167,8 +167,8 @@ check "missing manifest key: repaired on write" \
 
 # A manifest with no InstallDir is corrupt: uninstall must say so, not flail.
 H="$(new_home corrupt2)"
-mkdir -p "$H/.config/stemdeck"
-printf 'Version=0.8.0-alpha.17\n' > "$H/.config/stemdeck/install-manifest"
+mkdir -p "$H/.config/anystemdeck"
+printf 'Version=0.8.0-alpha.17\n' > "$H/.config/anystemdeck/install-manifest"
 PKG="${SANDBOX}/pkg-c2"; make_package "$PKG" "0.8.0-alpha.17"
 OUT="$(run_installer "$H" "$PKG" --uninstall --yes)"; RC=$?
 check "corrupt manifest: uninstall refuses with a message" \
@@ -184,13 +184,13 @@ PREFIX="${SANDBOX}/My Apps"
 mkdir -p "$PREFIX"
 OUT="$(run_installer "$H" "$PKG" --prefix "$PREFIX" --yes)"; RC=$?
 check "spaces: install succeeds" "$([[ $RC -eq 0 ]] && echo 1 || echo 0)" "$(tail -2 <<<"$OUT")"
-check "spaces: binary in place" "$([[ -x "$PREFIX/stemdeck/StemDeck" ]] && echo 1 || echo 0)"
-EXEC_LINE="$(sed -n 's/^Exec=//p' "$H/.local/share/applications/stemdeck.desktop")"
+check "spaces: binary in place" "$([[ -x "$PREFIX/anystemdeck/AnyStemDeck" ]] && echo 1 || echo 0)"
+EXEC_LINE="$(sed -n 's/^Exec=//p' "$H/.local/share/applications/anystemdeck.desktop")"
 check "spaces: Exec parses as a single argument" \
   "$(python3 -c "
 import shlex,sys
 parts=shlex.split(sys.argv[1])
-print(1 if len(parts)==1 and parts[0].endswith('/stemdeck/StemDeck') else 0)" "$EXEC_LINE")" "Exec=$EXEC_LINE"
+print(1 if len(parts)==1 and parts[0].endswith('/anystemdeck/AnyStemDeck') else 0)" "$EXEC_LINE")" "Exec=$EXEC_LINE"
 
 # ---------------------------------------------------------------------------
 # 7. Uninstall
@@ -199,24 +199,24 @@ print(1 if len(parts)==1 and parts[0].endswith('/stemdeck/StemDeck') else 0)" "$
 H="$(new_home uninstall)"
 PKG="${SANDBOX}/pkg-u"; make_package "$PKG" "0.8.0-alpha.17"
 run_installer "$H" "$PKG" --local --yes >/dev/null
-DIR="$H/.local/opt/stemdeck"
+DIR="$H/.local/opt/anystemdeck"
 # Stand in for the user's real data, which lives outside the install dir.
-mkdir -p "$H/Documents/StemDeck/jobs/abc" "$H/.local/share/stemdeck/models"
-printf 'stems' > "$H/Documents/StemDeck/jobs/abc/vocals.wav"
-printf 'model' > "$H/.local/share/stemdeck/models/htdemucs"
+mkdir -p "$H/Documents/AnyStemDeck/jobs/abc" "$H/.local/share/anystemdeck/models"
+printf 'stems' > "$H/Documents/AnyStemDeck/jobs/abc/vocals.wav"
+printf 'model' > "$H/.local/share/anystemdeck/models/htdemucs"
 
 OUT="$(run_installer "$H" "$PKG" --uninstall --yes)"; RC=$?
 check "uninstall: exit 0" "$([[ $RC -eq 0 ]] && echo 1 || echo 0)"
 check "uninstall: install directory gone" "$([[ ! -e "$DIR" ]] && echo 1 || echo 0)"
 check "uninstall: desktop entry gone" \
-  "$([[ ! -f "$H/.local/share/applications/stemdeck.desktop" ]] && echo 1 || echo 0)"
-check "uninstall: icon gone" "$([[ ! -f "$H/.local/share/icons/stemdeck.png" ]] && echo 1 || echo 0)"
+  "$([[ ! -f "$H/.local/share/applications/anystemdeck.desktop" ]] && echo 1 || echo 0)"
+check "uninstall: icon gone" "$([[ ! -f "$H/.local/share/icons/anystemdeck.png" ]] && echo 1 || echo 0)"
 check "uninstall: manifest gone" \
-  "$([[ ! -f "$H/.config/stemdeck/install-manifest" ]] && echo 1 || echo 0)"
+  "$([[ ! -f "$H/.config/anystemdeck/install-manifest" ]] && echo 1 || echo 0)"
 check "uninstall: stems untouched" \
-  "$([[ -f "$H/Documents/StemDeck/jobs/abc/vocals.wav" ]] && echo 1 || echo 0)"
+  "$([[ -f "$H/Documents/AnyStemDeck/jobs/abc/vocals.wav" ]] && echo 1 || echo 0)"
 check "uninstall: runtime and models untouched" \
-  "$([[ -f "$H/.local/share/stemdeck/models/htdemucs" ]] && echo 1 || echo 0)"
+  "$([[ -f "$H/.local/share/anystemdeck/models/htdemucs" ]] && echo 1 || echo 0)"
 
 # ---------------------------------------------------------------------------
 # 8. Legacy in-install data/ is never destroyed
@@ -226,7 +226,7 @@ H="$(new_home legacy)"
 PKG_A="${SANDBOX}/pkg-la"; make_package "$PKG_A" "0.8.0-alpha.16"
 PKG_B="${SANDBOX}/pkg-lb"; make_package "$PKG_B" "0.8.0-alpha.17"
 run_installer "$H" "$PKG_A" --local --yes >/dev/null
-DIR="$H/.local/opt/stemdeck"
+DIR="$H/.local/opt/anystemdeck"
 mkdir -p "$DIR/data/jobs/old"
 printf 'irreplaceable' > "$DIR/data/jobs/old/vocals.wav"
 
@@ -251,9 +251,9 @@ cp "$INSTALLER" "$PKG/install.sh"
 OUT="$(run_installer "$H" "$PKG" --local --yes)"; RC=$?
 check "incomplete package: refused" "$([[ $RC -ne 0 ]] && echo 1 || echo 0)"
 check "incomplete package: nothing installed" \
-  "$([[ ! -e "$H/.local/opt/stemdeck" ]] && echo 1 || echo 0)"
+  "$([[ ! -e "$H/.local/opt/anystemdeck" ]] && echo 1 || echo 0)"
 check "incomplete package: no manifest written" \
-  "$([[ ! -f "$H/.config/stemdeck/install-manifest" ]] && echo 1 || echo 0)"
+  "$([[ ! -f "$H/.config/anystemdeck/install-manifest" ]] && echo 1 || echo 0)"
 
 # ---------------------------------------------------------------------------
 # 10. Refusing to install over the copy we are running from
@@ -262,12 +262,12 @@ check "incomplete package: no manifest written" \
 H="$(new_home selfinstall)"
 PKG="${SANDBOX}/pkg-self"; make_package "$PKG" "0.8.0-alpha.17"
 run_installer "$H" "$PKG" --local --yes >/dev/null
-DIR="$H/.local/opt/stemdeck"
+DIR="$H/.local/opt/anystemdeck"
 OUT="$(env HOME="$H" XDG_CONFIG_HOME="$H/.config" XDG_DATA_HOME="$H/.local/share" \
        STEMDECK_INSTALL_ARCH=x86_64 bash "$DIR/install.sh" --yes 2>&1)"; RC=$?
 check "self-install: refused with a message" \
   "$([[ $RC -ne 0 ]] && grep -qi "extracted tarball" <<<"$OUT" && echo 1 || echo 0)" "rc=$RC"
-check "self-install: install left intact" "$([[ -x "$DIR/StemDeck" ]] && echo 1 || echo 0)"
+check "self-install: install left intact" "$([[ -x "$DIR/AnyStemDeck" ]] && echo 1 || echo 0)"
 
 # ---------------------------------------------------------------------------
 # 10b. The generated launcher is a valid desktop entry
@@ -280,7 +280,7 @@ if command -v desktop-file-validate >/dev/null 2>&1; then
     H="$(new_home validate)"
     PKG="${SANDBOX}/pkg-val"; make_package "$PKG" "0.8.0-alpha.17"
     run_installer "$H" "$PKG" --local --yes >/dev/null
-    ENTRY="$H/.local/share/applications/stemdeck.desktop"
+    ENTRY="$H/.local/share/applications/anystemdeck.desktop"
     if OUT="$(desktop-file-validate "$ENTRY" 2>&1)"; then
         ok "desktop entry validates"
     else
@@ -301,7 +301,7 @@ check "wrong arch: refused" "$([[ $RC -ne 0 ]] && echo 1 || echo 0)"
 check "wrong arch: names the machine type" \
   "$(grep -q "aarch64" <<<"$OUT" && echo 1 || echo 0)" "$(head -2 <<<"$OUT" | tr '\n' ' ')"
 check "wrong arch: nothing installed" \
-  "$([[ ! -e "$H/.local/opt/stemdeck" ]] && echo 1 || echo 0)"
+  "$([[ ! -e "$H/.local/opt/anystemdeck" ]] && echo 1 || echo 0)"
 
 # ---------------------------------------------------------------------------
 # 12. Semver comparison

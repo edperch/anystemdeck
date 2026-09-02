@@ -62,7 +62,7 @@ Sample rate: `demucs_onnx.separate()` resamples its output back to the
 which always writes at the model's fixed 44.1 kHz regardless of the
 source's rate. That means a 48 kHz source produces 48 kHz stems here but
 44.1 kHz stems on CUDA/MPS/CPU for the identical file -- a real, deliberate
-difference worth testing against StemDeck's player/mixer/beat-grid code
+difference worth testing against AnyStemDeck's player/mixer/beat-grid code
 (Phase 5), not silently normalized away here.
 """
 

@@ -11,7 +11,7 @@ from pathlib import Path
 from app.core.config import DEMUCS_MODEL, EXTRA_STEM_NAMES, JOB_ID_RE, STEM_NAMES
 from app.core.models import Job
 
-logger = logging.getLogger("stemdeck.registry")
+logger = logging.getLogger("anystemdeck.registry")
 
 REGISTRY_VERSION = 1
 

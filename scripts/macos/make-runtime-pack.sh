@@ -214,12 +214,12 @@ echo "==> Stripping Python caches"
 find "$PYTHON_DIR" -type d -name "__pycache__" -prune -exec rm -rf {} + 2>/dev/null || true
 find "$PYTHON_DIR" -type f \( -name "*.pyc" -o -name "*.pyo" \) -delete
 
-ARCHIVE_NAME="StemDeck-runtime-macOS-${ARCH}.tar.zst"
+ARCHIVE_NAME="AnyStemDeck-runtime-macOS-${ARCH}.tar.zst"
 ARCHIVE_PATH="${BUILD_DIR}/${ARCHIVE_NAME}"
 if command -v zstd >/dev/null 2>&1; then
   tar --zstd -cf "$ARCHIVE_PATH" -C "$STAGING" runtime
 else
-  ARCHIVE_NAME="StemDeck-runtime-macOS-${ARCH}.tar.gz"
+  ARCHIVE_NAME="AnyStemDeck-runtime-macOS-${ARCH}.tar.gz"
   ARCHIVE_PATH="${BUILD_DIR}/${ARCHIVE_NAME}"
   tar -czf "$ARCHIVE_PATH" -C "$STAGING" runtime
 fi

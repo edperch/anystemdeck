@@ -20,7 +20,7 @@ body:
     attributes:
       label: What happened?
       description: A clear description of the bug and what you expected instead.
-      placeholder: When I ..., StemDeck ... but I expected ...
+      placeholder: When I ..., AnyStemDeck ... but I expected ...
     validations:
       required: true
   - type: textarea
@@ -28,7 +28,7 @@ body:
     attributes:
       label: Steps to reproduce
       placeholder: |
-        1. Open StemDeck
+        1. Open AnyStemDeck
         2. Import ...
         3. Click ...
         4. See error
@@ -49,7 +49,7 @@ body:
   - type: input
     id: version
     attributes:
-      label: StemDeck version
+      label: AnyStemDeck version
       description: Shown in the About dialog (Help icon).
       placeholder: e.g. v0.9.0
     validations:

@@ -27,7 +27,7 @@ from app.pipeline.download import download
 from app.pipeline.errors import classify_failure
 from app.pipeline.separate import separate
 
-logger = logging.getLogger("stemdeck.pipeline")
+logger = logging.getLogger("anystemdeck.pipeline")
 
 
 def _rmtree(path: Path) -> None:

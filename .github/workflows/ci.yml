@@ -118,20 +118,20 @@ jobs:
       # torch 2.6.0 -- pinned to <2.7 because torchaudio 2.7+ removed its
       # built-in audio writer and now requires torchcodec, which has ABI
       # issues that break demucs 4.0.1's torchaudio.save() path. All torch
-      # CVEs below are in ops that StemDeck does not invoke; risk on a
+      # CVEs below are in ops that AnyStemDeck does not invoke; risk on a
       # local-only, single-user app is negligible. Re-evaluate once demucs
       # supports torch 2.7+ without torchcodec.
       #
       # torch PYSEC-2026-2286 (torch.load weights_only deserialization -> ACE,
       # HIGH; fix 2.10.0) -- the exploit needs an attacker-controlled .pth.
-      # StemDeck never calls torch.load on untrusted input: demucs loads only its
+      # AnyStemDeck never calls torch.load on untrusted input: demucs loads only its
       # official model weights from the trusted torch-hub source, and users
       # submit audio, not checkpoints. The same <2.7 pin blocks the 2.10.0 fix;
       # re-evaluate with the torch upgrade noted above.
       #
       # joblib PYSEC-2024-277 -- no fix version available as of 2026-05-21
       # (1.5.3 is latest). joblib is a transitive dep via demucs/librosa;
-      # StemDeck does not directly invoke joblib serialization. Drop once
+      # AnyStemDeck does not directly invoke joblib serialization. Drop once
       # a patched release is available.
       - run: |
           uv tool run pip-audit -r /tmp/requirements.txt --strict \

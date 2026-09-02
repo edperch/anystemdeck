@@ -29,7 +29,7 @@ from yt_dlp import YoutubeDL
 
 from app.pipeline.download import _ALLOWED_EXTRACTORS, _base_ydl_opts, validate_youtube_url
 
-logger = logging.getLogger("stemdeck.preview")
+logger = logging.getLogger("anystemdeck.preview")
 
 
 class PreviewUnavailable(RuntimeError):

@@ -81,33 +81,33 @@ jobs:
 
       - name: inspect artifacts
         run: |
-          test -f .build/macos-dist/StemDeck-macOS-arm64.dmg
-          test -f .build/StemDeck-runtime-macOS-arm64.tar.zst
+          test -f .build/macos-dist/AnyStemDeck-macOS-arm64.dmg
+          test -f .build/AnyStemDeck-runtime-macOS-arm64.tar.zst
           test -f .build/macos-dist/SHA256SUMS-macOS-arm64.txt
-          test -f .build/macos-dist/StemDeck-macOS-x64.dmg
-          test -f .build/StemDeck-runtime-macOS-x64.tar.zst
+          test -f .build/macos-dist/AnyStemDeck-macOS-x64.dmg
+          test -f .build/AnyStemDeck-runtime-macOS-x64.tar.zst
           test -f .build/macos-dist/SHA256SUMS-macOS-x64.txt
           cat .build/macos-dist/SHA256SUMS-macOS-arm64.txt
           cat .build/macos-dist/SHA256SUMS-macOS-x64.txt
-          du -sh .build/macos-dist/StemDeck-macOS-arm64.dmg .build/StemDeck-runtime-macOS-arm64.tar.zst
-          du -sh .build/macos-dist/StemDeck-macOS-x64.dmg .build/StemDeck-runtime-macOS-x64.tar.zst
-          if find desktop/src-tauri/target/aarch64-apple-darwin/release/bundle/macos/StemDeck.app \
+          du -sh .build/macos-dist/AnyStemDeck-macOS-arm64.dmg .build/AnyStemDeck-runtime-macOS-arm64.tar.zst
+          du -sh .build/macos-dist/AnyStemDeck-macOS-x64.dmg .build/AnyStemDeck-runtime-macOS-x64.tar.zst
+          if find desktop/src-tauri/target/aarch64-apple-darwin/release/bundle/macos/AnyStemDeck.app \
             \( -iname '*python*' -o -iname '*torch*' -o -iname '*ffmpeg*' -o -iname '*ffprobe*' \) |
             grep -q .; then
-            echo "arm64 StemDeck.app contains runtime binaries that should stay outside the DMG." >&2
+            echo "arm64 AnyStemDeck.app contains runtime binaries that should stay outside the DMG." >&2
             exit 1
           fi
-          if find desktop/src-tauri/target/x86_64-apple-darwin/release/bundle/macos/StemDeck.app \
+          if find desktop/src-tauri/target/x86_64-apple-darwin/release/bundle/macos/AnyStemDeck.app \
             \( -iname '*python*' -o -iname '*torch*' -o -iname '*ffmpeg*' -o -iname '*ffprobe*' \) |
             grep -q .; then
-            echo "x64 StemDeck.app contains runtime binaries that should stay outside the DMG." >&2
+            echo "x64 AnyStemDeck.app contains runtime binaries that should stay outside the DMG." >&2
             exit 1
           fi
           for arch in arm64 x64; do
-            mountpoint="$(mktemp -d /tmp/stemdeck-dmg.XXXXXX)"
-            hdiutil attach ".build/macos-dist/StemDeck-macOS-$arch.dmg" -readonly -nobrowse -mountpoint "$mountpoint"
+            mountpoint="$(mktemp -d /tmp/anystemdeck-dmg.XXXXXX)"
+            hdiutil attach ".build/macos-dist/AnyStemDeck-macOS-$arch.dmg" -readonly -nobrowse -mountpoint "$mountpoint"
             trap 'hdiutil detach "$mountpoint" >/dev/null 2>&1 || true; rmdir "$mountpoint" >/dev/null 2>&1 || true' EXIT
-            test -d "$mountpoint/StemDeck.app"
+            test -d "$mountpoint/AnyStemDeck.app"
             test -L "$mountpoint/Applications"
             test -f "$mountpoint/README-macOS.txt"
             test -f "$mountpoint/THIRD_PARTY_NOTICES.txt"
@@ -126,9 +126,9 @@ jobs:
           # that was never verified.
           prerelease: ${{ github.event.release.prerelease }}
           files: |
-            .build/macos-dist/StemDeck-macOS-arm64.dmg
-            .build/StemDeck-runtime-macOS-arm64.tar.zst
+            .build/macos-dist/AnyStemDeck-macOS-arm64.dmg
+            .build/AnyStemDeck-runtime-macOS-arm64.tar.zst
             .build/macos-dist/SHA256SUMS-macOS-arm64.txt
-            .build/macos-dist/StemDeck-macOS-x64.dmg
-            .build/StemDeck-runtime-macOS-x64.tar.zst
+            .build/macos-dist/AnyStemDeck-macOS-x64.dmg
+            .build/AnyStemDeck-runtime-macOS-x64.tar.zst
             .build/macos-dist/SHA256SUMS-macOS-x64.txt

@@ -32,7 +32,7 @@ from app.core.settings import get_export_sample_rate
 from app.pipeline.click_render import cache_key as click_cache_key
 from app.pipeline.click_render import count_in_beats, render_click_wav, render_count_in_wav
 
-logger = logging.getLogger("stemdeck.api")
+logger = logging.getLogger("anystemdeck.api")
 
 router = APIRouter(tags=["stems"])
 
@@ -1080,7 +1080,7 @@ async def get_all_stems_zip(
     if not sources:
         raise HTTPException(status_code=404, detail="no stems found")
 
-    fd, tmp = tempfile.mkstemp(prefix="stemdeck_zip_", suffix=".zip")
+    fd, tmp = tempfile.mkstemp(prefix="anystemdeck_zip_", suffix=".zip")
     os.close(fd)
     tmp_path = Path(tmp)
     try:

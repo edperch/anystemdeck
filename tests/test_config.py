@@ -96,7 +96,7 @@ def test_configure_portable_environment_leaves_dev_cache_env_alone(monkeypatch):
 def test_packaged_layout_finds_the_data_dir_beside_the_backend(tmp_path, monkeypatch):
     from app.core import config
 
-    package = tmp_path / "StemDeck-Windows-x64"
+    package = tmp_path / "AnyStemDeck-Windows-x64"
     backend = package / "backend"
     data = package / "data"
     backend.mkdir(parents=True)
@@ -111,7 +111,7 @@ def test_a_source_checkout_is_not_a_package(tmp_path, monkeypatch):
     named backend, so neither changes behaviour."""
     from app.core import config
 
-    for name in ("stemdeck", "app"):
+    for name in ("anystemdeck", "app"):
         root = tmp_path / name
         (root / "data").mkdir(parents=True)
         monkeypatch.setattr(config, "ROOT", root)

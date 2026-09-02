@@ -16,8 +16,8 @@
 //   its own strings.
 // - Language choice is a purely cosmetic, client-only preference (no backend
 //   behavior depends on it), so it's persisted via storeGet/storeSet
-//   (static/js/utils.js) under "stemdeck.language", the same convention as
-//   other UI-only preferences (stemdeck.catalog.collapsed, selected stems).
+//   (static/js/utils.js) under "anystemdeck.language", the same convention as
+//   other UI-only preferences (anystemdeck.catalog.collapsed, selected stems).
 
 import { storeGet, storeSet } from "./utils.js";
 
@@ -84,7 +84,7 @@ export function _detectDefault() {
 }
 
 export async function initI18n() {
-  const stored = await storeGet("stemdeck.language", null);
+  const stored = await storeGet("anystemdeck.language", null);
   _lang = stored && SUPPORTED_CODES.has(stored) ? stored : _detectDefault();
   document.documentElement.lang = _lang === "zh-Hans" ? "zh-Hans" : _lang;
   return _lang;
@@ -98,7 +98,7 @@ export async function setLanguage(code) {
   if (!SUPPORTED_CODES.has(code) || code === _lang) return;
   _lang = code;
   document.documentElement.lang = code === "zh-Hans" ? "zh-Hans" : code;
-  await storeSet("stemdeck.language", code);
+  await storeSet("anystemdeck.language", code);
   applyTranslations(document);
   for (const fn of _listeners) {
     try {
@@ -216,7 +216,7 @@ function applyStemRowAriaLabels(scope) {
 // ─────────────────────────────────────────────────────────────────────────
 
 const en = {
-  "doc.title": "StemDeck — split any track into stems",
+  "doc.title": "AnyStemDeck — split any track into stems",
 
   "topbar.urlPlaceholder": "Search, or paste a YouTube or SoundCloud link, or drop an audio file…",
   "topbar.removeFile": "Remove file",
@@ -414,7 +414,7 @@ const en = {
   "click.reason.unavailableOnPath": "Click track unavailable on this playback path",
   "click.reason.needsWebAudio": "Click track needs the Web Audio engine",
 
-  "about.title": "StemDeck",
+  "about.title": "AnyStemDeck",
   "about.tagline": "Open source. No subscriptions. Built by musicians, for musicians.",
   "about.closeAria": "Close about dialog",
   "about.website": "Website",
@@ -469,7 +469,7 @@ const en = {
   "settings.playlistLimit.title": "Playlist import limit",
   "settings.playlistLimit.desc": "Most tracks one playlist import will queue (max 200).",
   "settings.cookies.title": "YouTube cookies",
-  "settings.cookies.desc": "Optional. Path to a cookies.txt file, used only when YouTube asks StemDeck to confirm it is not a bot. Leave this empty unless imports are failing.",
+  "settings.cookies.desc": "Optional. Path to a cookies.txt file, used only when YouTube asks AnyStemDeck to confirm it is not a bot. Leave this empty unless imports are failing.",
   "settings.cookies.placeholder": "Path to cookies.txt",
   "settings.cookies.invalid": "File not found, or not readable.",
   "settings.stemsLocation.title": "StemData location",
@@ -485,15 +485,15 @@ const en = {
   "settings.stemsLocation.inSync": "All tracks are in sync.",
   "settings.stemsLocation.unavailable": "unavailable",
   "settings.stemsLocation.persistFailed": "Location updated but not saved — it will reset to the previous folder after a restart.",
-  "settings.stemsLocation.restartNote": "Restart StemDeck to finish switching over.",
+  "settings.stemsLocation.restartNote": "Restart AnyStemDeck to finish switching over.",
   "settings.stemsLocation.pickerFailed": "Could not open the folder picker.",
   "settings.stemsLocation.moving": "Moving stems… this can take a while for a large library.",
   "settings.stemsLocation.moveFailed": "Could not move the stems folder.",
   "settings.stemsLocation.serverUnreachable": "Could not reach the server.",
-  "settings.stemsLocation.movedPersistFailed.one": "Moved {count} item, but StemDeck could not save this as your new location (check that the folder is writable). Restarting now would revert to the old location. Try setting it again.",
-  "settings.stemsLocation.movedPersistFailed.other": "Moved {count} items, but StemDeck could not save this as your new location (check that the folder is writable). Restarting now would revert to the old location. Try setting it again.",
-  "settings.stemsLocation.movedOk.one": "Moved {count} item. Restart StemDeck to finish switching over.",
-  "settings.stemsLocation.movedOk.other": "Moved {count} items. Restart StemDeck to finish switching over.",
+  "settings.stemsLocation.movedPersistFailed.one": "Moved {count} item, but AnyStemDeck could not save this as your new location (check that the folder is writable). Restarting now would revert to the old location. Try setting it again.",
+  "settings.stemsLocation.movedPersistFailed.other": "Moved {count} items, but AnyStemDeck could not save this as your new location (check that the folder is writable). Restarting now would revert to the old location. Try setting it again.",
+  "settings.stemsLocation.movedOk.one": "Moved {count} item. Restart AnyStemDeck to finish switching over.",
+  "settings.stemsLocation.movedOk.other": "Moved {count} items. Restart AnyStemDeck to finish switching over.",
 
   "settings.device.title": "Compute device",
   "settings.device.desc": "Device used for stem separation. Applies to the next track{resolved}.",
@@ -564,11 +564,11 @@ const en = {
   "settings.resetData.desc": "Permanently deletes every track, job, and library entry. On a shared server this affects everyone who uses it. Cannot be undone.",
   "settings.resetData.button": "Reset app data…",
 
-  "settings.network.allowTitle": "Make StemDeck available on your network",
-  "settings.network.allowDesc": "Let other devices (like your phone) open StemDeck at the address below.",
-  "settings.network.lockNote": "Read-only when StemDeck is started in server mode — network access is then set by your server configuration.",
+  "settings.network.allowTitle": "Make AnyStemDeck available on your network",
+  "settings.network.allowDesc": "Let other devices (like your phone) open AnyStemDeck at the address below.",
+  "settings.network.lockNote": "Read-only when AnyStemDeck is started in server mode — network access is then set by your server configuration.",
   "settings.network.port.title": "Port",
-  "settings.network.port.desc": "Port StemDeck runs on. Restart to apply.",
+  "settings.network.port.desc": "Port AnyStemDeck runs on. Restart to apply.",
   "settings.network.noConnection": "No local network connection detected.",
   "settings.network.qrHint": "Blurred so your camera doesn't get too excited. Tap to reveal.",
   "settings.network.tapToUnblur": "Tap to unblur",
@@ -586,9 +586,9 @@ const en = {
   "settings.logs.refresh": "Refresh",
   "settings.logs.loading": "Loading…",
   "settings.logs.location.title": "Log location",
-  "settings.logs.location.desc": "Where StemDeck writes its logs on this machine. Read-only — open them in a file manager or use Export logs.",
+  "settings.logs.location.desc": "Where AnyStemDeck writes its logs on this machine. Read-only — open them in a file manager or use Export logs.",
   "settings.logs.application.title": "Application log",
-  "settings.logs.application.desc": "The last hour from <code>stemdeck.log</code> — pipeline, API and job activity. Read-only.",
+  "settings.logs.application.desc": "The last hour from <code>anystemdeck.log</code> — pipeline, API and job activity. Read-only.",
   "settings.logs.applicationAria": "Application log (read only)",
   "settings.logs.backend.title": "Backend log",
   "settings.logs.backend.desc": "The last hour from <code>backend.log</code> — raw output of the bundled Python process, including anything that crashed it before the application log could record it. Desktop app only. Read-only.",
@@ -744,7 +744,7 @@ const en = {
 };
 
 const pl = {
-  "doc.title": "StemDeck — rozdziel dowolny utwór na ścieżki",
+  "doc.title": "AnyStemDeck — rozdziel dowolny utwór na ścieżki",
 
   "topbar.urlPlaceholder": "Szukaj albo wklej link YouTube lub SoundCloud, albo upuść plik audio…",
   "topbar.removeFile": "Usuń plik",
@@ -940,7 +940,7 @@ const pl = {
   "click.reason.unavailableOnPath": "Metronom niedostępny w tym torze odtwarzania",
   "click.reason.needsWebAudio": "Metronom wymaga silnika Web Audio",
 
-  "about.title": "StemDeck",
+  "about.title": "AnyStemDeck",
   "about.tagline": "Open source. Bez subskrypcji. Stworzone przez muzyków dla muzyków.",
   "about.closeAria": "Zamknij okno informacji",
   "about.website": "Strona internetowa",
@@ -994,7 +994,7 @@ const pl = {
   "settings.playlistLimit.title": "Limit importu playlisty",
   "settings.playlistLimit.desc": "Ile utworów najwyżej zakolejkuje jeden import playlisty (maks. 200).",
   "settings.cookies.title": "Pliki cookie YouTube",
-  "settings.cookies.desc": "Opcjonalne. Ścieżka do pliku cookies.txt, używana tylko wtedy, gdy YouTube prosi StemDeck o potwierdzenie, że nie jest botem. Zostaw puste, chyba że importy zawodzą.",
+  "settings.cookies.desc": "Opcjonalne. Ścieżka do pliku cookies.txt, używana tylko wtedy, gdy YouTube prosi AnyStemDeck o potwierdzenie, że nie jest botem. Zostaw puste, chyba że importy zawodzą.",
   "settings.cookies.placeholder": "Ścieżka do cookies.txt",
   "settings.cookies.invalid": "Nie znaleziono pliku lub nie można go odczytać.",
   "settings.stemsLocation.title": "Lokalizacja StemData",
@@ -1010,17 +1010,17 @@ const pl = {
   "settings.stemsLocation.inSync": "Wszystkie utwory są zsynchronizowane.",
   "settings.stemsLocation.unavailable": "niedostępne",
   "settings.stemsLocation.persistFailed": "Lokalizacja zaktualizowana, ale nie zapisana — po restarcie wróci do poprzedniego folderu.",
-  "settings.stemsLocation.restartNote": "Uruchom ponownie StemDeck, aby dokończyć zmianę.",
+  "settings.stemsLocation.restartNote": "Uruchom ponownie AnyStemDeck, aby dokończyć zmianę.",
   "settings.stemsLocation.pickerFailed": "Nie udało się otworzyć okna wyboru folderu.",
   "settings.stemsLocation.moving": "Przenoszenie ścieżek… przy dużej bibliotece może to chwilę potrwać.",
   "settings.stemsLocation.moveFailed": "Nie udało się przenieść folderu ze ścieżkami.",
   "settings.stemsLocation.serverUnreachable": "Nie udało się połączyć z serwerem.",
-  "settings.stemsLocation.movedPersistFailed.one": "Przeniesiono {count} element, ale StemDeck nie mógł zapisać tego jako nowej lokalizacji (sprawdź, czy folder jest zapisywalny). Ponowne uruchomienie teraz przywróci starą lokalizację. Spróbuj ustawić ją ponownie.",
-  "settings.stemsLocation.movedPersistFailed.few": "Przeniesiono {count} elementy, ale StemDeck nie mógł zapisać tego jako nowej lokalizacji (sprawdź, czy folder jest zapisywalny). Ponowne uruchomienie teraz przywróci starą lokalizację. Spróbuj ustawić ją ponownie.",
-  "settings.stemsLocation.movedPersistFailed.many": "Przeniesiono {count} elementów, ale StemDeck nie mógł zapisać tego jako nowej lokalizacji (sprawdź, czy folder jest zapisywalny). Ponowne uruchomienie teraz przywróci starą lokalizację. Spróbuj ustawić ją ponownie.",
-  "settings.stemsLocation.movedOk.one": "Przeniesiono {count} element. Uruchom ponownie StemDeck, aby dokończyć zmianę.",
-  "settings.stemsLocation.movedOk.few": "Przeniesiono {count} elementy. Uruchom ponownie StemDeck, aby dokończyć zmianę.",
-  "settings.stemsLocation.movedOk.many": "Przeniesiono {count} elementów. Uruchom ponownie StemDeck, aby dokończyć zmianę.",
+  "settings.stemsLocation.movedPersistFailed.one": "Przeniesiono {count} element, ale AnyStemDeck nie mógł zapisać tego jako nowej lokalizacji (sprawdź, czy folder jest zapisywalny). Ponowne uruchomienie teraz przywróci starą lokalizację. Spróbuj ustawić ją ponownie.",
+  "settings.stemsLocation.movedPersistFailed.few": "Przeniesiono {count} elementy, ale AnyStemDeck nie mógł zapisać tego jako nowej lokalizacji (sprawdź, czy folder jest zapisywalny). Ponowne uruchomienie teraz przywróci starą lokalizację. Spróbuj ustawić ją ponownie.",
+  "settings.stemsLocation.movedPersistFailed.many": "Przeniesiono {count} elementów, ale AnyStemDeck nie mógł zapisać tego jako nowej lokalizacji (sprawdź, czy folder jest zapisywalny). Ponowne uruchomienie teraz przywróci starą lokalizację. Spróbuj ustawić ją ponownie.",
+  "settings.stemsLocation.movedOk.one": "Przeniesiono {count} element. Uruchom ponownie AnyStemDeck, aby dokończyć zmianę.",
+  "settings.stemsLocation.movedOk.few": "Przeniesiono {count} elementy. Uruchom ponownie AnyStemDeck, aby dokończyć zmianę.",
+  "settings.stemsLocation.movedOk.many": "Przeniesiono {count} elementów. Uruchom ponownie AnyStemDeck, aby dokończyć zmianę.",
 
   "settings.device.title": "Urządzenie przetwarzające",
   "settings.device.desc": "Urządzenie używane do rozdzielania ścieżek. Dotyczy następnego utworu{resolved}.",
@@ -1093,11 +1093,11 @@ const pl = {
   "settings.resetData.desc": "Trwale usuwa każdy utwór, zadanie i wpis biblioteki. Na współdzielonym serwerze dotyczy wszystkich użytkowników. Nie można cofnąć.",
   "settings.resetData.button": "Zresetuj dane aplikacji…",
 
-  "settings.network.allowTitle": "Udostępnij StemDeck w swojej sieci",
-  "settings.network.allowDesc": "Pozwala innym urządzeniom (np. telefonowi) otworzyć StemDeck pod adresem poniżej.",
-  "settings.network.lockNote": "Tylko do odczytu, gdy StemDeck jest uruchomiony w trybie serwera — dostęp sieciowy ustala wtedy konfiguracja serwera.",
+  "settings.network.allowTitle": "Udostępnij AnyStemDeck w swojej sieci",
+  "settings.network.allowDesc": "Pozwala innym urządzeniom (np. telefonowi) otworzyć AnyStemDeck pod adresem poniżej.",
+  "settings.network.lockNote": "Tylko do odczytu, gdy AnyStemDeck jest uruchomiony w trybie serwera — dostęp sieciowy ustala wtedy konfiguracja serwera.",
   "settings.network.port.title": "Port",
-  "settings.network.port.desc": "Port, na którym działa StemDeck. Uruchom ponownie, aby zastosować.",
+  "settings.network.port.desc": "Port, na którym działa AnyStemDeck. Uruchom ponownie, aby zastosować.",
   "settings.network.noConnection": "Nie wykryto lokalnego połączenia sieciowego.",
   "settings.network.qrHint": "Rozmyte, żeby kamera się nie podekscytowała. Dotknij, aby odsłonić.",
   "settings.network.tapToUnblur": "Dotknij, aby wyostrzyć",
@@ -1115,9 +1115,9 @@ const pl = {
   "settings.logs.refresh": "Odśwież",
   "settings.logs.loading": "Wczytywanie…",
   "settings.logs.location.title": "Lokalizacja logów",
-  "settings.logs.location.desc": "Gdzie StemDeck zapisuje logi na tym komputerze. Tylko do odczytu — otwórz je w menedżerze plików lub użyj Eksportuj logi.",
+  "settings.logs.location.desc": "Gdzie AnyStemDeck zapisuje logi na tym komputerze. Tylko do odczytu — otwórz je w menedżerze plików lub użyj Eksportuj logi.",
   "settings.logs.application.title": "Log aplikacji",
-  "settings.logs.application.desc": "Ostatnia godzina z <code>stemdeck.log</code> — potok przetwarzania, API i aktywność zadań. Tylko do odczytu.",
+  "settings.logs.application.desc": "Ostatnia godzina z <code>anystemdeck.log</code> — potok przetwarzania, API i aktywność zadań. Tylko do odczytu.",
   "settings.logs.applicationAria": "Log aplikacji (tylko do odczytu)",
   "settings.logs.backend.title": "Log backendu",
   "settings.logs.backend.desc": "Ostatnia godzina z <code>backend.log</code> — surowe wyjście dołączonego procesu Python, w tym wszystko, co spowodowało jego awarię, zanim log aplikacji zdążył to zapisać. Tylko aplikacja desktopowa. Tylko do odczytu.",
@@ -1262,7 +1262,7 @@ const pl = {
 };
 
 const ja = {
-  "doc.title": "StemDeck — トラックをパートごとに分離",
+  "doc.title": "AnyStemDeck — トラックをパートごとに分離",
 
   "topbar.urlPlaceholder": "検索するか、YouTube・SoundCloud のリンクを貼り付けるか、音声ファイルをドロップ…",
   "topbar.removeFile": "ファイルを削除",
@@ -1457,7 +1457,7 @@ const ja = {
   "click.reason.unavailableOnPath": "この再生方式ではクリックトラックを利用できません",
   "click.reason.needsWebAudio": "クリックトラックにはWeb Audioエンジンが必要です",
 
-  "about.title": "StemDeck",
+  "about.title": "AnyStemDeck",
   "about.tagline": "オープンソース。サブスクリプションなし。ミュージシャンによる、ミュージシャンのためのアプリ。",
   "about.closeAria": "情報ダイアログを閉じる",
   "about.website": "ウェブサイト",
@@ -1511,7 +1511,7 @@ const ja = {
   "settings.playlistLimit.title": "プレイリストインポート上限",
   "settings.playlistLimit.desc": "プレイリストのインポート1回でキューされる最大トラック数(最大200)。",
   "settings.cookies.title": "YouTube の Cookie",
-  "settings.cookies.desc": "任意。cookies.txt ファイルのパスです。YouTube が StemDeck にボットでないことの確認を求めた場合にのみ使われます。インポートが失敗しない限り空のままにしてください。",
+  "settings.cookies.desc": "任意。cookies.txt ファイルのパスです。YouTube が AnyStemDeck にボットでないことの確認を求めた場合にのみ使われます。インポートが失敗しない限り空のままにしてください。",
   "settings.cookies.placeholder": "cookies.txt のパス",
   "settings.cookies.invalid": "ファイルが見つからないか、読み取れません。",
   "settings.stemsLocation.title": "StemDataの保存場所",
@@ -1527,13 +1527,13 @@ const ja = {
   "settings.stemsLocation.inSync": "すべてのトラックが同期されています。",
   "settings.stemsLocation.unavailable": "利用不可",
   "settings.stemsLocation.persistFailed": "場所は更新されましたが保存されませんでした — 再起動すると以前のフォルダに戻ります。",
-  "settings.stemsLocation.restartNote": "切り替えを完了するにはStemDeckを再起動してください。",
+  "settings.stemsLocation.restartNote": "切り替えを完了するにはAnyStemDeckを再起動してください。",
   "settings.stemsLocation.pickerFailed": "フォルダ選択を開けませんでした。",
   "settings.stemsLocation.moving": "パートを移動中… ライブラリが大きい場合は時間がかかることがあります。",
   "settings.stemsLocation.moveFailed": "パートフォルダを移動できませんでした。",
   "settings.stemsLocation.serverUnreachable": "サーバーに接続できませんでした。",
-  "settings.stemsLocation.movedPersistFailed.other": "{count}件を移動しましたが、StemDeckは新しい場所として保存できませんでした(フォルダに書き込み権限があるか確認してください)。今再起動すると古い場所に戻ります。もう一度設定し直してください。",
-  "settings.stemsLocation.movedOk.other": "{count}件を移動しました。切り替えを完了するにはStemDeckを再起動してください。",
+  "settings.stemsLocation.movedPersistFailed.other": "{count}件を移動しましたが、AnyStemDeckは新しい場所として保存できませんでした(フォルダに書き込み権限があるか確認してください)。今再起動すると古い場所に戻ります。もう一度設定し直してください。",
+  "settings.stemsLocation.movedOk.other": "{count}件を移動しました。切り替えを完了するにはAnyStemDeckを再起動してください。",
 
   "settings.device.title": "処理デバイス",
   "settings.device.desc": "パート分離に使用するデバイス。次のトラックから適用されます{resolved}。",
@@ -1602,11 +1602,11 @@ const ja = {
   "settings.resetData.desc": "すべてのトラック、ジョブ、ライブラリ項目を完全に削除します。共有サーバーでは利用者全員に影響します。元に戻せません。",
   "settings.resetData.button": "アプリデータをリセット…",
 
-  "settings.network.allowTitle": "ネットワーク上でStemDeckを利用可能にする",
-  "settings.network.allowDesc": "他の端末(スマートフォンなど)が下記のアドレスでStemDeckを開けるようにします。",
+  "settings.network.allowTitle": "ネットワーク上でAnyStemDeckを利用可能にする",
+  "settings.network.allowDesc": "他の端末(スマートフォンなど)が下記のアドレスでAnyStemDeckを開けるようにします。",
   "settings.network.lockNote": "サーバーモードで起動している場合は読み取り専用です — ネットワークアクセスはサーバー設定で決まります。",
   "settings.network.port.title": "ポート",
-  "settings.network.port.desc": "StemDeckが動作するポート。適用するには再起動してください。",
+  "settings.network.port.desc": "AnyStemDeckが動作するポート。適用するには再起動してください。",
   "settings.network.noConnection": "ローカルネットワーク接続が検出されませんでした。",
   "settings.network.qrHint": "カメラが反応しすぎないようぼかしています。タップして表示。",
   "settings.network.tapToUnblur": "タップしてぼかしを解除",
@@ -1624,9 +1624,9 @@ const ja = {
   "settings.logs.refresh": "更新",
   "settings.logs.loading": "読み込み中…",
   "settings.logs.location.title": "ログの場所",
-  "settings.logs.location.desc": "StemDeckがこのマシンでログを書き込む場所。読み取り専用 — ファイルマネージャーで開くか、「ログをエクスポート」をご利用ください。",
+  "settings.logs.location.desc": "AnyStemDeckがこのマシンでログを書き込む場所。読み取り専用 — ファイルマネージャーで開くか、「ログをエクスポート」をご利用ください。",
   "settings.logs.application.title": "アプリケーションログ",
-  "settings.logs.application.desc": "<code>stemdeck.log</code>の直近1時間分 — パイプライン、API、ジョブの活動。読み取り専用。",
+  "settings.logs.application.desc": "<code>anystemdeck.log</code>の直近1時間分 — パイプライン、API、ジョブの活動。読み取り専用。",
   "settings.logs.applicationAria": "アプリケーションログ(読み取り専用)",
   "settings.logs.backend.title": "バックエンドログ",
   "settings.logs.backend.desc": "<code>backend.log</code>の直近1時間分 — 同梱のPythonプロセスの生の出力(アプリケーションログに記録される前にクラッシュした内容を含む)。デスクトップアプリのみ。読み取り専用。",
@@ -1755,7 +1755,7 @@ const ja = {
 };
 
 const zhHans = {
-  "doc.title": "StemDeck — 将任意曲目分离为音轨",
+  "doc.title": "AnyStemDeck — 将任意曲目分离为音轨",
 
   "topbar.urlPlaceholder": "搜索,或粘贴 YouTube 或 SoundCloud 链接,或拖放音频文件…",
   "topbar.removeFile": "移除文件",
@@ -1950,7 +1950,7 @@ const zhHans = {
   "click.reason.unavailableOnPath": "此播放模式下节拍器不可用",
   "click.reason.needsWebAudio": "节拍器需要 Web Audio 引擎",
 
-  "about.title": "StemDeck",
+  "about.title": "AnyStemDeck",
   "about.tagline": "开源。无需订阅。由音乐人为音乐人打造。",
   "about.closeAria": "关闭关于对话框",
   "about.website": "官网",
@@ -2004,7 +2004,7 @@ const zhHans = {
   "settings.playlistLimit.title": "播放列表导入上限",
   "settings.playlistLimit.desc": "单次播放列表导入最多排队的曲目数(最多200首)。",
   "settings.cookies.title": "YouTube Cookie",
-  "settings.cookies.desc": "可选。cookies.txt 文件的路径，仅在 YouTube 要求 StemDeck 确认自己不是机器人时使用。除非导入失败，否则请留空。",
+  "settings.cookies.desc": "可选。cookies.txt 文件的路径，仅在 YouTube 要求 AnyStemDeck 确认自己不是机器人时使用。除非导入失败，否则请留空。",
   "settings.cookies.placeholder": "cookies.txt 的路径",
   "settings.cookies.invalid": "找不到文件，或无法读取。",
   "settings.stemsLocation.title": "StemData 存储位置",
@@ -2020,13 +2020,13 @@ const zhHans = {
   "settings.stemsLocation.inSync": "所有曲目均已同步。",
   "settings.stemsLocation.unavailable": "不可用",
   "settings.stemsLocation.persistFailed": "位置已更新但未保存 — 重启后将恢复为之前的文件夹。",
-  "settings.stemsLocation.restartNote": "重启 StemDeck 以完成切换。",
+  "settings.stemsLocation.restartNote": "重启 AnyStemDeck 以完成切换。",
   "settings.stemsLocation.pickerFailed": "无法打开文件夹选择器。",
   "settings.stemsLocation.moving": "正在移动音轨… 资料库较大时可能需要一些时间。",
   "settings.stemsLocation.moveFailed": "无法移动音轨文件夹。",
   "settings.stemsLocation.serverUnreachable": "无法连接到服务器。",
-  "settings.stemsLocation.movedPersistFailed.other": "已移动 {count} 项,但 StemDeck 无法将其保存为新位置(请检查该文件夹是否可写)。现在重启会恢复为旧位置。请重新设置一次。",
-  "settings.stemsLocation.movedOk.other": "已移动 {count} 项。重启 StemDeck 以完成切换。",
+  "settings.stemsLocation.movedPersistFailed.other": "已移动 {count} 项,但 AnyStemDeck 无法将其保存为新位置(请检查该文件夹是否可写)。现在重启会恢复为旧位置。请重新设置一次。",
+  "settings.stemsLocation.movedOk.other": "已移动 {count} 项。重启 AnyStemDeck 以完成切换。",
 
   "settings.device.title": "处理设备",
   "settings.device.desc": "用于分离音轨的设备。从下一首曲目开始生效{resolved}。",
@@ -2095,11 +2095,11 @@ const zhHans = {
   "settings.resetData.desc": "永久删除每一首曲目、任务和资料库条目。在共享服务器上,这会影响所有使用者。此操作无法撤销。",
   "settings.resetData.button": "重置应用数据…",
 
-  "settings.network.allowTitle": "允许在你的网络中使用 StemDeck",
-  "settings.network.allowDesc": "允许其他设备(例如你的手机)通过下方地址打开 StemDeck。",
+  "settings.network.allowTitle": "允许在你的网络中使用 AnyStemDeck",
+  "settings.network.allowDesc": "允许其他设备(例如你的手机)通过下方地址打开 AnyStemDeck。",
   "settings.network.lockNote": "在服务器模式下启动时为只读 — 此时网络访问权限由服务器配置决定。",
   "settings.network.port.title": "端口",
-  "settings.network.port.desc": "StemDeck 运行所使用的端口。重启后生效。",
+  "settings.network.port.desc": "AnyStemDeck 运行所使用的端口。重启后生效。",
   "settings.network.noConnection": "未检测到本地网络连接。",
   "settings.network.qrHint": "已模糊处理,以免摄像头反应过度。点击可显示。",
   "settings.network.tapToUnblur": "点击以取消模糊",
@@ -2117,9 +2117,9 @@ const zhHans = {
   "settings.logs.refresh": "刷新",
   "settings.logs.loading": "加载中…",
   "settings.logs.location.title": "日志位置",
-  "settings.logs.location.desc": "StemDeck 在此机器上写入日志的位置。只读 — 请在文件管理器中打开,或使用「导出日志」。",
+  "settings.logs.location.desc": "AnyStemDeck 在此机器上写入日志的位置。只读 — 请在文件管理器中打开,或使用「导出日志」。",
   "settings.logs.application.title": "应用日志",
-  "settings.logs.application.desc": "<code>stemdeck.log</code> 最近一小时的内容 — 处理流程、API 及任务活动。只读。",
+  "settings.logs.application.desc": "<code>anystemdeck.log</code> 最近一小时的内容 — 处理流程、API 及任务活动。只读。",
   "settings.logs.applicationAria": "应用日志(只读)",
   "settings.logs.backend.title": "后端日志",
   "settings.logs.backend.desc": "<code>backend.log</code> 最近一小时的内容 — 内置 Python 进程的原始输出,包括在应用日志记录之前导致其崩溃的内容。仅限桌面应用。只读。",
@@ -2248,7 +2248,7 @@ const zhHans = {
 };
 
 const de = {
-  "doc.title": "StemDeck — jeden Track in Stems zerlegen",
+  "doc.title": "AnyStemDeck — jeden Track in Stems zerlegen",
 
   "topbar.urlPlaceholder": "Suchen, einen YouTube- oder SoundCloud-Link einfügen oder eine Audiodatei ablegen…",
   "topbar.removeFile": "Datei entfernen",
@@ -2444,7 +2444,7 @@ const de = {
   "click.reason.unavailableOnPath": "Click-Track auf diesem Wiedergabeweg nicht verfügbar",
   "click.reason.needsWebAudio": "Click-Track benötigt die Web-Audio-Engine",
 
-  "about.title": "StemDeck",
+  "about.title": "AnyStemDeck",
   "about.tagline": "Open Source. Keine Abos. Von Musikern für Musiker gemacht.",
   "about.closeAria": "Info-Dialog schließen",
   "about.website": "Website",
@@ -2498,7 +2498,7 @@ const de = {
   "settings.playlistLimit.title": "Playlist-Import-Limit",
   "settings.playlistLimit.desc": "Höchste Anzahl Tracks, die ein Playlist-Import einreiht (max. 200).",
   "settings.cookies.title": "YouTube-Cookies",
-  "settings.cookies.desc": "Optional. Pfad zu einer cookies.txt-Datei, die nur verwendet wird, wenn YouTube von StemDeck eine Bestätigung verlangt, dass es kein Bot ist. Leer lassen, solange Importe funktionieren.",
+  "settings.cookies.desc": "Optional. Pfad zu einer cookies.txt-Datei, die nur verwendet wird, wenn YouTube von AnyStemDeck eine Bestätigung verlangt, dass es kein Bot ist. Leer lassen, solange Importe funktionieren.",
   "settings.cookies.placeholder": "Pfad zu cookies.txt",
   "settings.cookies.invalid": "Datei nicht gefunden oder nicht lesbar.",
   "settings.stemsLocation.title": "StemData-Speicherort",
@@ -2514,15 +2514,15 @@ const de = {
   "settings.stemsLocation.inSync": "Alle Tracks sind synchron.",
   "settings.stemsLocation.unavailable": "nicht verfügbar",
   "settings.stemsLocation.persistFailed": "Speicherort aktualisiert, aber nicht gespeichert — er wird nach einem Neustart auf den vorherigen Ordner zurückgesetzt.",
-  "settings.stemsLocation.restartNote": "StemDeck neu starten, um den Wechsel abzuschließen.",
+  "settings.stemsLocation.restartNote": "AnyStemDeck neu starten, um den Wechsel abzuschließen.",
   "settings.stemsLocation.pickerFailed": "Ordnerauswahl konnte nicht geöffnet werden.",
   "settings.stemsLocation.moving": "Stems werden verschoben… bei einer großen Bibliothek kann das etwas dauern.",
   "settings.stemsLocation.moveFailed": "Stems-Ordner konnte nicht verschoben werden.",
   "settings.stemsLocation.serverUnreachable": "Server konnte nicht erreicht werden.",
-  "settings.stemsLocation.movedPersistFailed.one": "{count} Element verschoben, aber StemDeck konnte dies nicht als neuen Speicherort speichern (prüfe, ob der Ordner beschreibbar ist). Ein Neustart jetzt würde zum alten Speicherort zurückkehren. Bitte erneut versuchen.",
-  "settings.stemsLocation.movedPersistFailed.other": "{count} Elemente verschoben, aber StemDeck konnte dies nicht als neuen Speicherort speichern (prüfe, ob der Ordner beschreibbar ist). Ein Neustart jetzt würde zum alten Speicherort zurückkehren. Bitte erneut versuchen.",
-  "settings.stemsLocation.movedOk.one": "{count} Element verschoben. StemDeck neu starten, um den Wechsel abzuschließen.",
-  "settings.stemsLocation.movedOk.other": "{count} Elemente verschoben. StemDeck neu starten, um den Wechsel abzuschließen.",
+  "settings.stemsLocation.movedPersistFailed.one": "{count} Element verschoben, aber AnyStemDeck konnte dies nicht als neuen Speicherort speichern (prüfe, ob der Ordner beschreibbar ist). Ein Neustart jetzt würde zum alten Speicherort zurückkehren. Bitte erneut versuchen.",
+  "settings.stemsLocation.movedPersistFailed.other": "{count} Elemente verschoben, aber AnyStemDeck konnte dies nicht als neuen Speicherort speichern (prüfe, ob der Ordner beschreibbar ist). Ein Neustart jetzt würde zum alten Speicherort zurückkehren. Bitte erneut versuchen.",
+  "settings.stemsLocation.movedOk.one": "{count} Element verschoben. AnyStemDeck neu starten, um den Wechsel abzuschließen.",
+  "settings.stemsLocation.movedOk.other": "{count} Elemente verschoben. AnyStemDeck neu starten, um den Wechsel abzuschließen.",
 
   "settings.device.title": "Recheneinheit",
   "settings.device.desc": "Recheneinheit, die für die Stem-Trennung verwendet wird. Gilt ab dem nächsten Track{resolved}.",
@@ -2593,11 +2593,11 @@ const de = {
   "settings.resetData.desc": "Löscht dauerhaft jeden Track, Auftrag und Bibliothekseintrag. Auf einem gemeinsam genutzten Server betrifft dies alle Nutzer. Kann nicht rückgängig gemacht werden.",
   "settings.resetData.button": "App-Daten zurücksetzen…",
 
-  "settings.network.allowTitle": "StemDeck in deinem Netzwerk verfügbar machen",
-  "settings.network.allowDesc": "Ermöglicht anderen Geräten (z. B. deinem Handy), StemDeck unter der unten stehenden Adresse zu öffnen.",
-  "settings.network.lockNote": "Schreibgeschützt, wenn StemDeck im Servermodus gestartet wird — der Netzwerkzugriff wird dann durch deine Serverkonfiguration festgelegt.",
+  "settings.network.allowTitle": "AnyStemDeck in deinem Netzwerk verfügbar machen",
+  "settings.network.allowDesc": "Ermöglicht anderen Geräten (z. B. deinem Handy), AnyStemDeck unter der unten stehenden Adresse zu öffnen.",
+  "settings.network.lockNote": "Schreibgeschützt, wenn AnyStemDeck im Servermodus gestartet wird — der Netzwerkzugriff wird dann durch deine Serverkonfiguration festgelegt.",
   "settings.network.port.title": "Port",
-  "settings.network.port.desc": "Port, auf dem StemDeck läuft. Zum Anwenden neu starten.",
+  "settings.network.port.desc": "Port, auf dem AnyStemDeck läuft. Zum Anwenden neu starten.",
   "settings.network.noConnection": "Keine lokale Netzwerkverbindung erkannt.",
   "settings.network.qrHint": "Verschwommen dargestellt, damit die Kamera nicht zu aufgeregt wird. Zum Aufdecken tippen.",
   "settings.network.tapToUnblur": "Zum Scharfstellen tippen",
@@ -2615,9 +2615,9 @@ const de = {
   "settings.logs.refresh": "Aktualisieren",
   "settings.logs.loading": "Wird geladen…",
   "settings.logs.location.title": "Log-Speicherort",
-  "settings.logs.location.desc": "Wo StemDeck seine Logs auf diesem Rechner speichert. Schreibgeschützt — in einem Dateimanager öffnen oder „Logs exportieren“ verwenden.",
+  "settings.logs.location.desc": "Wo AnyStemDeck seine Logs auf diesem Rechner speichert. Schreibgeschützt — in einem Dateimanager öffnen oder „Logs exportieren“ verwenden.",
   "settings.logs.application.title": "Anwendungslog",
-  "settings.logs.application.desc": "Die letzte Stunde aus <code>stemdeck.log</code> — Pipeline-, API- und Auftragsaktivität. Schreibgeschützt.",
+  "settings.logs.application.desc": "Die letzte Stunde aus <code>anystemdeck.log</code> — Pipeline-, API- und Auftragsaktivität. Schreibgeschützt.",
   "settings.logs.applicationAria": "Anwendungslog (schreibgeschützt)",
   "settings.logs.backend.title": "Backend-Log",
   "settings.logs.backend.desc": "Die letzte Stunde aus <code>backend.log</code> — Rohausgabe des gebündelten Python-Prozesses, einschließlich allem, was ihn zum Absturz brachte, bevor das Anwendungslog es aufzeichnen konnte. Nur Desktop-App. Schreibgeschützt.",
@@ -2752,7 +2752,7 @@ const de = {
 };
 
 const pt = {
-  "doc.title": "StemDeck — separe qualquer faixa em stems",
+  "doc.title": "AnyStemDeck — separe qualquer faixa em stems",
 
   "topbar.urlPlaceholder": "Pesquise, ou cole um link do YouTube ou SoundCloud, ou solte um arquivo de áudio…",
   "topbar.removeFile": "Remover arquivo",
@@ -2948,7 +2948,7 @@ const pt = {
   "click.reason.unavailableOnPath": "Clique de referência indisponível neste caminho de reprodução",
   "click.reason.needsWebAudio": "O clique de referência precisa do motor Web Audio",
 
-  "about.title": "StemDeck",
+  "about.title": "AnyStemDeck",
   "about.tagline": "Código aberto. Sem assinaturas. Feito por músicos, para músicos.",
   "about.closeAria": "Fechar diálogo Sobre",
   "about.website": "Site",
@@ -3002,7 +3002,7 @@ const pt = {
   "settings.playlistLimit.title": "Limite de importação de playlist",
   "settings.playlistLimit.desc": "Máximo de faixas que uma importação de playlist enfileira (máx. 200).",
   "settings.cookies.title": "Cookies do YouTube",
-  "settings.cookies.desc": "Opcional. Caminho para um arquivo cookies.txt, usado apenas quando o YouTube pede ao StemDeck para confirmar que não é um robô. Deixe vazio a menos que as importações estejam falhando.",
+  "settings.cookies.desc": "Opcional. Caminho para um arquivo cookies.txt, usado apenas quando o YouTube pede ao AnyStemDeck para confirmar que não é um robô. Deixe vazio a menos que as importações estejam falhando.",
   "settings.cookies.placeholder": "Caminho para cookies.txt",
   "settings.cookies.invalid": "Arquivo não encontrado ou ilegível.",
   "settings.stemsLocation.title": "Local do StemData",
@@ -3018,15 +3018,15 @@ const pt = {
   "settings.stemsLocation.inSync": "Todas as faixas estão sincronizadas.",
   "settings.stemsLocation.unavailable": "indisponível",
   "settings.stemsLocation.persistFailed": "Local atualizado, mas não salvo — voltará à pasta anterior após reiniciar.",
-  "settings.stemsLocation.restartNote": "Reinicie o StemDeck para concluir a troca.",
+  "settings.stemsLocation.restartNote": "Reinicie o AnyStemDeck para concluir a troca.",
   "settings.stemsLocation.pickerFailed": "Não foi possível abrir o seletor de pastas.",
   "settings.stemsLocation.moving": "Movendo stems… isso pode demorar em uma biblioteca grande.",
   "settings.stemsLocation.moveFailed": "Não foi possível mover a pasta de stems.",
   "settings.stemsLocation.serverUnreachable": "Não foi possível conectar ao servidor.",
-  "settings.stemsLocation.movedPersistFailed.one": "{count} item movido, mas o StemDeck não conseguiu salvar isso como seu novo local (verifique se a pasta é gravável). Reiniciar agora reverteria para o local antigo. Tente configurar novamente.",
-  "settings.stemsLocation.movedPersistFailed.other": "{count} itens movidos, mas o StemDeck não conseguiu salvar isso como seu novo local (verifique se a pasta é gravável). Reiniciar agora reverteria para o local antigo. Tente configurar novamente.",
-  "settings.stemsLocation.movedOk.one": "{count} item movido. Reinicie o StemDeck para concluir a troca.",
-  "settings.stemsLocation.movedOk.other": "{count} itens movidos. Reinicie o StemDeck para concluir a troca.",
+  "settings.stemsLocation.movedPersistFailed.one": "{count} item movido, mas o AnyStemDeck não conseguiu salvar isso como seu novo local (verifique se a pasta é gravável). Reiniciar agora reverteria para o local antigo. Tente configurar novamente.",
+  "settings.stemsLocation.movedPersistFailed.other": "{count} itens movidos, mas o AnyStemDeck não conseguiu salvar isso como seu novo local (verifique se a pasta é gravável). Reiniciar agora reverteria para o local antigo. Tente configurar novamente.",
+  "settings.stemsLocation.movedOk.one": "{count} item movido. Reinicie o AnyStemDeck para concluir a troca.",
+  "settings.stemsLocation.movedOk.other": "{count} itens movidos. Reinicie o AnyStemDeck para concluir a troca.",
 
   "settings.device.title": "Dispositivo de processamento",
   "settings.device.desc": "Dispositivo usado para separar os stems. Aplica-se à próxima faixa{resolved}.",
@@ -3097,11 +3097,11 @@ const pt = {
   "settings.resetData.desc": "Exclui permanentemente cada faixa, tarefa e entrada da biblioteca. Em um servidor compartilhado, isso afeta todos que o usam. Não pode ser desfeito.",
   "settings.resetData.button": "Redefinir dados do app…",
 
-  "settings.network.allowTitle": "Disponibilizar o StemDeck na sua rede",
-  "settings.network.allowDesc": "Permite que outros dispositivos (como seu celular) abram o StemDeck no endereço abaixo.",
-  "settings.network.lockNote": "Somente leitura quando o StemDeck é iniciado em modo servidor — o acesso à rede é então definido pela configuração do seu servidor.",
+  "settings.network.allowTitle": "Disponibilizar o AnyStemDeck na sua rede",
+  "settings.network.allowDesc": "Permite que outros dispositivos (como seu celular) abram o AnyStemDeck no endereço abaixo.",
+  "settings.network.lockNote": "Somente leitura quando o AnyStemDeck é iniciado em modo servidor — o acesso à rede é então definido pela configuração do seu servidor.",
   "settings.network.port.title": "Porta",
-  "settings.network.port.desc": "Porta em que o StemDeck roda. Reinicie para aplicar.",
+  "settings.network.port.desc": "Porta em que o AnyStemDeck roda. Reinicie para aplicar.",
   "settings.network.noConnection": "Nenhuma conexão de rede local detectada.",
   "settings.network.qrHint": "Desfocado para a câmera não se empolgar demais. Toque para revelar.",
   "settings.network.tapToUnblur": "Toque para focar",
@@ -3119,9 +3119,9 @@ const pt = {
   "settings.logs.refresh": "Atualizar",
   "settings.logs.loading": "Carregando…",
   "settings.logs.location.title": "Local dos logs",
-  "settings.logs.location.desc": "Onde o StemDeck grava seus logs nesta máquina. Somente leitura — abra-os em um gerenciador de arquivos ou use Exportar logs.",
+  "settings.logs.location.desc": "Onde o AnyStemDeck grava seus logs nesta máquina. Somente leitura — abra-os em um gerenciador de arquivos ou use Exportar logs.",
   "settings.logs.application.title": "Log do aplicativo",
-  "settings.logs.application.desc": "A última hora de <code>stemdeck.log</code> — atividade de pipeline, API e tarefas. Somente leitura.",
+  "settings.logs.application.desc": "A última hora de <code>anystemdeck.log</code> — atividade de pipeline, API e tarefas. Somente leitura.",
   "settings.logs.applicationAria": "Log do aplicativo (somente leitura)",
   "settings.logs.backend.title": "Log do backend",
   "settings.logs.backend.desc": "A última hora de <code>backend.log</code> — saída bruta do processo Python embutido, incluindo qualquer coisa que o tenha travado antes que o log do aplicativo pudesse registrar. Apenas app desktop. Somente leitura.",
@@ -3258,7 +3258,7 @@ const pt = {
 };
 
 const id = {
-  "doc.title": "StemDeck — pisahkan trek apa pun menjadi stem",
+  "doc.title": "AnyStemDeck — pisahkan trek apa pun menjadi stem",
 
   "topbar.urlPlaceholder": "Cari, atau tempel tautan YouTube atau SoundCloud, atau seret file audio…",
   "topbar.removeFile": "Hapus file",
@@ -3453,7 +3453,7 @@ const id = {
   "click.reason.unavailableOnPath": "Click track tidak tersedia pada jalur pemutaran ini",
   "click.reason.needsWebAudio": "Click track memerlukan mesin Web Audio",
 
-  "about.title": "StemDeck",
+  "about.title": "AnyStemDeck",
   "about.tagline": "Sumber terbuka. Tanpa langganan. Dibuat oleh musisi, untuk musisi.",
   "about.closeAria": "Tutup dialog tentang",
   "about.website": "Situs web",
@@ -3507,7 +3507,7 @@ const id = {
   "settings.playlistLimit.title": "Batas impor playlist",
   "settings.playlistLimit.desc": "Jumlah trek terbanyak yang akan diantrekan satu kali impor playlist (maks. 200).",
   "settings.cookies.title": "Cookie YouTube",
-  "settings.cookies.desc": "Opsional. Jalur ke berkas cookies.txt, dipakai hanya ketika YouTube meminta StemDeck memastikan bahwa ia bukan bot. Biarkan kosong kecuali impor gagal.",
+  "settings.cookies.desc": "Opsional. Jalur ke berkas cookies.txt, dipakai hanya ketika YouTube meminta AnyStemDeck memastikan bahwa ia bukan bot. Biarkan kosong kecuali impor gagal.",
   "settings.cookies.placeholder": "Jalur ke cookies.txt",
   "settings.cookies.invalid": "Berkas tidak ditemukan atau tidak dapat dibaca.",
   "settings.stemsLocation.title": "Lokasi StemData",
@@ -3523,13 +3523,13 @@ const id = {
   "settings.stemsLocation.inSync": "Semua trek tersinkron.",
   "settings.stemsLocation.unavailable": "tidak tersedia",
   "settings.stemsLocation.persistFailed": "Lokasi diperbarui tetapi tidak disimpan — akan kembali ke folder sebelumnya setelah mulai ulang.",
-  "settings.stemsLocation.restartNote": "Mulai ulang StemDeck untuk menyelesaikan perpindahan.",
+  "settings.stemsLocation.restartNote": "Mulai ulang AnyStemDeck untuk menyelesaikan perpindahan.",
   "settings.stemsLocation.pickerFailed": "Tidak dapat membuka pemilih folder.",
   "settings.stemsLocation.moving": "Memindahkan stem… ini bisa memakan waktu untuk pustaka besar.",
   "settings.stemsLocation.moveFailed": "Tidak dapat memindahkan folder stem.",
   "settings.stemsLocation.serverUnreachable": "Tidak dapat menjangkau server.",
-  "settings.stemsLocation.movedPersistFailed.other": "{count} item dipindahkan, tetapi StemDeck tidak dapat menyimpannya sebagai lokasi baru Anda (periksa apakah folder dapat ditulisi). Memulai ulang sekarang akan kembali ke lokasi lama. Coba atur lagi.",
-  "settings.stemsLocation.movedOk.other": "{count} item dipindahkan. Mulai ulang StemDeck untuk menyelesaikan perpindahan.",
+  "settings.stemsLocation.movedPersistFailed.other": "{count} item dipindahkan, tetapi AnyStemDeck tidak dapat menyimpannya sebagai lokasi baru Anda (periksa apakah folder dapat ditulisi). Memulai ulang sekarang akan kembali ke lokasi lama. Coba atur lagi.",
+  "settings.stemsLocation.movedOk.other": "{count} item dipindahkan. Mulai ulang AnyStemDeck untuk menyelesaikan perpindahan.",
 
   "settings.device.title": "Perangkat pemrosesan",
   "settings.device.desc": "Perangkat yang digunakan untuk pemisahan stem. Berlaku mulai trek berikutnya{resolved}.",
@@ -3598,11 +3598,11 @@ const id = {
   "settings.resetData.desc": "Menghapus permanen setiap trek, tugas, dan entri pustaka. Di server bersama, ini memengaruhi semua penggunanya. Tidak dapat dibatalkan.",
   "settings.resetData.button": "Atur ulang data aplikasi…",
 
-  "settings.network.allowTitle": "Jadikan StemDeck tersedia di jaringan Anda",
-  "settings.network.allowDesc": "Memungkinkan perangkat lain (seperti ponsel Anda) membuka StemDeck di alamat berikut.",
-  "settings.network.lockNote": "Hanya-baca saat StemDeck dijalankan dalam mode server — akses jaringan kemudian ditentukan oleh konfigurasi server Anda.",
+  "settings.network.allowTitle": "Jadikan AnyStemDeck tersedia di jaringan Anda",
+  "settings.network.allowDesc": "Memungkinkan perangkat lain (seperti ponsel Anda) membuka AnyStemDeck di alamat berikut.",
+  "settings.network.lockNote": "Hanya-baca saat AnyStemDeck dijalankan dalam mode server — akses jaringan kemudian ditentukan oleh konfigurasi server Anda.",
   "settings.network.port.title": "Port",
-  "settings.network.port.desc": "Port tempat StemDeck berjalan. Mulai ulang untuk menerapkan.",
+  "settings.network.port.desc": "Port tempat AnyStemDeck berjalan. Mulai ulang untuk menerapkan.",
   "settings.network.noConnection": "Tidak ada koneksi jaringan lokal yang terdeteksi.",
   "settings.network.qrHint": "Diburamkan agar kamera Anda tidak terlalu bersemangat. Ketuk untuk menampilkan.",
   "settings.network.tapToUnblur": "Ketuk untuk menampilkan",
@@ -3620,9 +3620,9 @@ const id = {
   "settings.logs.refresh": "Segarkan",
   "settings.logs.loading": "Memuat…",
   "settings.logs.location.title": "Lokasi log",
-  "settings.logs.location.desc": "Tempat StemDeck menulis lognya di komputer ini. Hanya-baca — buka di pengelola file atau gunakan Ekspor log.",
+  "settings.logs.location.desc": "Tempat AnyStemDeck menulis lognya di komputer ini. Hanya-baca — buka di pengelola file atau gunakan Ekspor log.",
   "settings.logs.application.title": "Log aplikasi",
-  "settings.logs.application.desc": "Satu jam terakhir dari <code>stemdeck.log</code> — aktivitas pipeline, API, dan tugas. Hanya-baca.",
+  "settings.logs.application.desc": "Satu jam terakhir dari <code>anystemdeck.log</code> — aktivitas pipeline, API, dan tugas. Hanya-baca.",
   "settings.logs.applicationAria": "Log aplikasi (hanya-baca)",
   "settings.logs.backend.title": "Log backend",
   "settings.logs.backend.desc": "Satu jam terakhir dari <code>backend.log</code> — keluaran mentah proses Python yang dibundel, termasuk apa pun yang membuatnya crash sebelum log aplikasi sempat mencatatnya. Hanya aplikasi desktop. Hanya-baca.",
@@ -3751,7 +3751,7 @@ const id = {
 };
 
 const fr = {
-  "doc.title": "StemDeck — séparez n'importe quel morceau en pistes",
+  "doc.title": "AnyStemDeck — séparez n'importe quel morceau en pistes",
 
   "topbar.urlPlaceholder": "Recherchez, ou collez un lien YouTube ou SoundCloud, ou déposez un fichier audio…",
   "topbar.removeFile": "Retirer le fichier",
@@ -3947,7 +3947,7 @@ const fr = {
   "click.reason.unavailableOnPath": "Métronome indisponible sur ce mode de lecture",
   "click.reason.needsWebAudio": "Le métronome nécessite le moteur Web Audio",
 
-  "about.title": "StemDeck",
+  "about.title": "AnyStemDeck",
   "about.tagline": "Open source. Sans abonnement. Créé par des musiciens, pour des musiciens.",
   "about.closeAria": "Fermer la fenêtre À propos",
   "about.website": "Site web",
@@ -4002,7 +4002,7 @@ const fr = {
   "settings.playlistLimit.title": "Limite d'import de playlist",
   "settings.playlistLimit.desc": "Nombre maximal de morceaux mis en file lors d'un import de playlist (max. 200).",
   "settings.cookies.title": "Cookies YouTube",
-  "settings.cookies.desc": "Facultatif. Chemin vers un fichier cookies.txt, utilisé uniquement lorsque YouTube demande à StemDeck de confirmer qu'il n'est pas un robot. Laissez vide sauf si les imports échouent.",
+  "settings.cookies.desc": "Facultatif. Chemin vers un fichier cookies.txt, utilisé uniquement lorsque YouTube demande à AnyStemDeck de confirmer qu'il n'est pas un robot. Laissez vide sauf si les imports échouent.",
   "settings.cookies.placeholder": "Chemin vers cookies.txt",
   "settings.cookies.invalid": "Fichier introuvable ou illisible.",
   "settings.stemsLocation.title": "Emplacement des StemData",
@@ -4018,15 +4018,15 @@ const fr = {
   "settings.stemsLocation.inSync": "Tous les morceaux sont synchronisés.",
   "settings.stemsLocation.unavailable": "indisponible",
   "settings.stemsLocation.persistFailed": "Emplacement mis à jour mais non enregistré — il reviendra au dossier précédent après un redémarrage.",
-  "settings.stemsLocation.restartNote": "Redémarrez StemDeck pour terminer le changement.",
+  "settings.stemsLocation.restartNote": "Redémarrez AnyStemDeck pour terminer le changement.",
   "settings.stemsLocation.pickerFailed": "Impossible d'ouvrir le sélecteur de dossier.",
   "settings.stemsLocation.moving": "Déplacement des pistes… cela peut prendre du temps pour une grande bibliothèque.",
   "settings.stemsLocation.moveFailed": "Impossible de déplacer le dossier des pistes.",
   "settings.stemsLocation.serverUnreachable": "Impossible de joindre le serveur.",
-  "settings.stemsLocation.movedPersistFailed.one": "{count} élément déplacé, mais StemDeck n'a pas pu enregistrer ce nouvel emplacement (vérifiez que le dossier est accessible en écriture). Redémarrer maintenant reviendrait à l'ancien emplacement. Essayez de le définir à nouveau.",
-  "settings.stemsLocation.movedPersistFailed.other": "{count} éléments déplacés, mais StemDeck n'a pas pu enregistrer ce nouvel emplacement (vérifiez que le dossier est accessible en écriture). Redémarrer maintenant reviendrait à l'ancien emplacement. Essayez de le définir à nouveau.",
-  "settings.stemsLocation.movedOk.one": "{count} élément déplacé. Redémarrez StemDeck pour terminer le changement.",
-  "settings.stemsLocation.movedOk.other": "{count} éléments déplacés. Redémarrez StemDeck pour terminer le changement.",
+  "settings.stemsLocation.movedPersistFailed.one": "{count} élément déplacé, mais AnyStemDeck n'a pas pu enregistrer ce nouvel emplacement (vérifiez que le dossier est accessible en écriture). Redémarrer maintenant reviendrait à l'ancien emplacement. Essayez de le définir à nouveau.",
+  "settings.stemsLocation.movedPersistFailed.other": "{count} éléments déplacés, mais AnyStemDeck n'a pas pu enregistrer ce nouvel emplacement (vérifiez que le dossier est accessible en écriture). Redémarrer maintenant reviendrait à l'ancien emplacement. Essayez de le définir à nouveau.",
+  "settings.stemsLocation.movedOk.one": "{count} élément déplacé. Redémarrez AnyStemDeck pour terminer le changement.",
+  "settings.stemsLocation.movedOk.other": "{count} éléments déplacés. Redémarrez AnyStemDeck pour terminer le changement.",
 
   "settings.device.title": "Périphérique de calcul",
   "settings.device.desc": "Périphérique utilisé pour la séparation des pistes. S'applique au prochain morceau{resolved}.",
@@ -4096,11 +4096,11 @@ const fr = {
   "settings.resetData.desc": "Supprime définitivement tous les morceaux, tâches et entrées de la bibliothèque. Sur un serveur partagé, cela affecte tous les utilisateurs. Action irréversible.",
   "settings.resetData.button": "Réinitialiser les données…",
 
-  "settings.network.allowTitle": "Rendre StemDeck accessible sur votre réseau",
-  "settings.network.allowDesc": "Permet à d'autres appareils (comme votre téléphone) d'ouvrir StemDeck à l'adresse ci-dessous.",
-  "settings.network.lockNote": "En lecture seule lorsque StemDeck est lancé en mode serveur — l'accès réseau est alors défini par la configuration de votre serveur.",
+  "settings.network.allowTitle": "Rendre AnyStemDeck accessible sur votre réseau",
+  "settings.network.allowDesc": "Permet à d'autres appareils (comme votre téléphone) d'ouvrir AnyStemDeck à l'adresse ci-dessous.",
+  "settings.network.lockNote": "En lecture seule lorsque AnyStemDeck est lancé en mode serveur — l'accès réseau est alors défini par la configuration de votre serveur.",
   "settings.network.port.title": "Port",
-  "settings.network.port.desc": "Port utilisé par StemDeck. Redémarrez pour appliquer.",
+  "settings.network.port.desc": "Port utilisé par AnyStemDeck. Redémarrez pour appliquer.",
   "settings.network.noConnection": "Aucune connexion au réseau local détectée.",
   "settings.network.qrHint": "Flouté pour que votre appareil photo ne s'emballe pas. Touchez pour révéler.",
   "settings.network.tapToUnblur": "Touchez pour révéler",
@@ -4118,9 +4118,9 @@ const fr = {
   "settings.logs.refresh": "Actualiser",
   "settings.logs.loading": "Chargement…",
   "settings.logs.location.title": "Emplacement des journaux",
-  "settings.logs.location.desc": "Où StemDeck écrit ses journaux sur cette machine. Lecture seule — ouvrez-les dans un gestionnaire de fichiers ou utilisez Exporter les journaux.",
+  "settings.logs.location.desc": "Où AnyStemDeck écrit ses journaux sur cette machine. Lecture seule — ouvrez-les dans un gestionnaire de fichiers ou utilisez Exporter les journaux.",
   "settings.logs.application.title": "Journal de l'application",
-  "settings.logs.application.desc": "La dernière heure de <code>stemdeck.log</code> — activité du pipeline, de l'API et des tâches. Lecture seule.",
+  "settings.logs.application.desc": "La dernière heure de <code>anystemdeck.log</code> — activité du pipeline, de l'API et des tâches. Lecture seule.",
   "settings.logs.applicationAria": "Journal de l'application (lecture seule)",
   "settings.logs.backend.title": "Journal du backend",
   "settings.logs.backend.desc": "La dernière heure de <code>backend.log</code> — sortie brute du processus Python embarqué, y compris ce qui l'a fait planter avant que le journal de l'application ait pu l'enregistrer. Application de bureau uniquement. Lecture seule.",
@@ -4289,7 +4289,7 @@ const ptPT = {
   "settings.logs.application.title": "Log da aplicação",
   "settings.logs.applicationTab": "Log da aplicação",
   "settings.logs.applicationAria": "Log da aplicação (só de leitura)",
-  "settings.logs.application.desc": "A última hora de <code>stemdeck.log</code>, atividade de pipeline, API e tarefas. Só de leitura.",
+  "settings.logs.application.desc": "A última hora de <code>anystemdeck.log</code>, atividade de pipeline, API e tarefas. Só de leitura.",
   "settings.logs.backendAria": "Log do backend (só de leitura)",
   "settings.logs.backend.desc": "A última hora de <code>backend.log</code>, saída bruta do processo Python incorporado, incluindo qualquer coisa que o tenha bloqueado antes de o log da aplicação conseguir registar. Apenas app desktop. Só de leitura.",
   "library.syncFailed": "Falha na sincronização, verifique a sua ligação.",
@@ -4319,7 +4319,7 @@ const ptPT = {
   "upload.skippedFiles.one": "{count} ficheiro ignorado ({reason}).",
   "upload.skippedFiles.other": "{count} ficheiros ignorados ({reason}).",
   "settings.logs.noFilesYet": "Ainda não há ficheiros de log{folderNote}. O registo começa na primeira mensagem após o arranque.",
-  "settings.logs.location.desc": "Onde o StemDeck grava os logs nesta máquina. Só de leitura, abra-os num gestor de ficheiros ou use Exportar logs.",
+  "settings.logs.location.desc": "Onde o AnyStemDeck grava os logs nesta máquina. Só de leitura, abra-os num gestor de ficheiros ou use Exportar logs.",
   "nav.settings": "Definições",
   "settings.title": "Definições",
   "settings.closeAria": "Fechar definições",
@@ -4340,21 +4340,21 @@ const ptPT = {
   "failure.fetchingLogs": "A obter logs…",
   "job.processingTrackTitle": "A processar faixa",
   "settings.stemsLocation.moving": "A mover stems, isto pode demorar numa biblioteca grande.",
-  "settings.cookies.desc": "Opcional. Caminho para um ficheiro cookies.txt, usado apenas quando o YouTube pede ao StemDeck para confirmar que não é um robô. Deixe vazio a menos que as importações estejam a falhar.",
+  "settings.cookies.desc": "Opcional. Caminho para um ficheiro cookies.txt, usado apenas quando o YouTube pede ao AnyStemDeck para confirmar que não é um robô. Deixe vazio a menos que as importações estejam a falhar.",
   "search.preview": "Pré-escuta",
   "search.previewFailed": "Pré-escuta indisponível",
   "export.includeClickTitle": "Misturar o clique de referência no ficheiro exportado",
-  "settings.network.allowDesc": "Permite que outros dispositivos (como o seu telemóvel) abram o StemDeck no endereço abaixo.",
-  "settings.network.lockNote": "Só de leitura quando o StemDeck é iniciado em modo servidor, o acesso à rede é então definido pela configuração do seu servidor.",
+  "settings.network.allowDesc": "Permite que outros dispositivos (como o seu telemóvel) abram o AnyStemDeck no endereço abaixo.",
+  "settings.network.lockNote": "Só de leitura quando o AnyStemDeck é iniciado em modo servidor, o acesso à rede é então definido pela configuração do seu servidor.",
   "settings.logs.setupAria": "Log de configuração (só de leitura)",
   "settings.logs.setup.desc": "A última hora de <code>setup.log</code>, configuração inicial e instalação do runtime de GPU. Apenas app desktop. Só de leitura.",
-  "settings.stemsLocation.movedPersistFailed.one": "{count} item movido, mas o StemDeck não conseguiu guardar isto como o novo local (verifique se a pasta é gravável). Reiniciar agora reverteria para o local antigo. Tente definir novamente.",
-  "settings.stemsLocation.movedPersistFailed.other": "{count} itens movidos, mas o StemDeck não conseguiu guardar isto como o novo local (verifique se a pasta é gravável). Reiniciar agora reverteria para o local antigo. Tente definir novamente.",
+  "settings.stemsLocation.movedPersistFailed.one": "{count} item movido, mas o AnyStemDeck não conseguiu guardar isto como o novo local (verifique se a pasta é gravável). Reiniciar agora reverteria para o local antigo. Tente definir novamente.",
+  "settings.stemsLocation.movedPersistFailed.other": "{count} itens movidos, mas o AnyStemDeck não conseguiu guardar isto como o novo local (verifique se a pasta é gravável). Reiniciar agora reverteria para o local antigo. Tente definir novamente.",
   "failure.hint": "Estes detalhes vão para o relatório. O título da faixa e o link de origem não são incluídos, adicione-os se ajudar. Clicar num botão abaixo copia isto para a área de transferência.",
 };
 
 const es = {
-  "doc.title": "StemDeck — separa cualquier pista en stems",
+  "doc.title": "AnyStemDeck — separa cualquier pista en stems",
 
   "topbar.urlPlaceholder": "Busca, pega un enlace de YouTube o SoundCloud, o suelta un archivo de audio…",
   "topbar.removeFile": "Quitar archivo",
@@ -4550,7 +4550,7 @@ const es = {
   "click.reason.unavailableOnPath": "El click no está disponible en esta ruta de reproducción",
   "click.reason.needsWebAudio": "El click necesita el motor Web Audio",
 
-  "about.title": "StemDeck",
+  "about.title": "AnyStemDeck",
   "about.tagline": "Código abierto. Sin suscripciones. Hecho por músicos, para músicos.",
   "about.closeAria": "Cerrar el diálogo Acerca de",
   "about.website": "Sitio web",
@@ -4605,7 +4605,7 @@ const es = {
   "settings.playlistLimit.title": "Límite de importación de listas",
   "settings.playlistLimit.desc": "Número máximo de pistas que se pondrán en cola al importar una lista (máx. 200).",
   "settings.cookies.title": "Cookies de YouTube",
-  "settings.cookies.desc": "Opcional. Ruta a un archivo cookies.txt, que se usa solo cuando YouTube le pide a StemDeck que confirme que no es un bot. Déjalo vacío salvo que las importaciones estén fallando.",
+  "settings.cookies.desc": "Opcional. Ruta a un archivo cookies.txt, que se usa solo cuando YouTube le pide a AnyStemDeck que confirme que no es un bot. Déjalo vacío salvo que las importaciones estén fallando.",
   "settings.cookies.placeholder": "Ruta al archivo cookies.txt",
   "settings.cookies.invalid": "No se encontró el archivo, o no se puede leer.",
   "settings.stemsLocation.title": "Ubicación de StemData",
@@ -4621,15 +4621,15 @@ const es = {
   "settings.stemsLocation.inSync": "Todas las pistas están sincronizadas.",
   "settings.stemsLocation.unavailable": "no disponible",
   "settings.stemsLocation.persistFailed": "La ubicación se actualizó pero no se guardó: volverá a la carpeta anterior tras reiniciar.",
-  "settings.stemsLocation.restartNote": "Reinicia StemDeck para terminar el cambio.",
+  "settings.stemsLocation.restartNote": "Reinicia AnyStemDeck para terminar el cambio.",
   "settings.stemsLocation.pickerFailed": "No se pudo abrir el selector de carpetas.",
   "settings.stemsLocation.moving": "Moviendo los stems… puede tardar un rato si la biblioteca es grande.",
   "settings.stemsLocation.moveFailed": "No se pudo mover la carpeta de stems.",
   "settings.stemsLocation.serverUnreachable": "No se pudo contactar con el servidor.",
-  "settings.stemsLocation.movedPersistFailed.one": "Se movió {count} elemento, pero StemDeck no pudo guardar esta ubicación como la nueva (comprueba que se pueda escribir en la carpeta). Si reinicias ahora volverá a la anterior. Prueba a configurarla de nuevo.",
-  "settings.stemsLocation.movedPersistFailed.other": "Se movieron {count} elementos, pero StemDeck no pudo guardar esta ubicación como la nueva (comprueba que se pueda escribir en la carpeta). Si reinicias ahora volverá a la anterior. Prueba a configurarla de nuevo.",
-  "settings.stemsLocation.movedOk.one": "Se movió {count} elemento. Reinicia StemDeck para terminar el cambio.",
-  "settings.stemsLocation.movedOk.other": "Se movieron {count} elementos. Reinicia StemDeck para terminar el cambio.",
+  "settings.stemsLocation.movedPersistFailed.one": "Se movió {count} elemento, pero AnyStemDeck no pudo guardar esta ubicación como la nueva (comprueba que se pueda escribir en la carpeta). Si reinicias ahora volverá a la anterior. Prueba a configurarla de nuevo.",
+  "settings.stemsLocation.movedPersistFailed.other": "Se movieron {count} elementos, pero AnyStemDeck no pudo guardar esta ubicación como la nueva (comprueba que se pueda escribir en la carpeta). Si reinicias ahora volverá a la anterior. Prueba a configurarla de nuevo.",
+  "settings.stemsLocation.movedOk.one": "Se movió {count} elemento. Reinicia AnyStemDeck para terminar el cambio.",
+  "settings.stemsLocation.movedOk.other": "Se movieron {count} elementos. Reinicia AnyStemDeck para terminar el cambio.",
 
   "settings.device.title": "Dispositivo de cálculo",
   "settings.device.desc": "Dispositivo usado para separar los stems. Se aplica a la siguiente pista{resolved}.",
@@ -4700,11 +4700,11 @@ const es = {
   "settings.resetData.desc": "Elimina de forma permanente todas las pistas, tareas y entradas de la biblioteca. En un servidor compartido esto afecta a todos los que lo usan. No se puede deshacer.",
   "settings.resetData.button": "Restablecer los datos…",
 
-  "settings.network.allowTitle": "Hacer que StemDeck esté disponible en tu red",
-  "settings.network.allowDesc": "Permite que otros dispositivos (como tu teléfono) abran StemDeck en la dirección de abajo.",
-  "settings.network.lockNote": "De solo lectura cuando StemDeck se inicia en modo servidor: en ese caso el acceso a la red lo define la configuración de tu servidor.",
+  "settings.network.allowTitle": "Hacer que AnyStemDeck esté disponible en tu red",
+  "settings.network.allowDesc": "Permite que otros dispositivos (como tu teléfono) abran AnyStemDeck en la dirección de abajo.",
+  "settings.network.lockNote": "De solo lectura cuando AnyStemDeck se inicia en modo servidor: en ese caso el acceso a la red lo define la configuración de tu servidor.",
   "settings.network.port.title": "Puerto",
-  "settings.network.port.desc": "Puerto en el que funciona StemDeck. Reinicia para aplicarlo.",
+  "settings.network.port.desc": "Puerto en el que funciona AnyStemDeck. Reinicia para aplicarlo.",
   "settings.network.noConnection": "No se detectó ninguna conexión de red local.",
   "settings.network.qrHint": "Desenfocado para que tu cámara no se emocione de más. Toca para mostrarlo.",
   "settings.network.tapToUnblur": "Toca para desenfocar",
@@ -4722,9 +4722,9 @@ const es = {
   "settings.logs.refresh": "Actualizar",
   "settings.logs.loading": "Cargando…",
   "settings.logs.location.title": "Ubicación de los registros",
-  "settings.logs.location.desc": "Dónde escribe StemDeck sus registros en este equipo. Solo lectura: ábrelos en un explorador de archivos o usa Exportar registros.",
+  "settings.logs.location.desc": "Dónde escribe AnyStemDeck sus registros en este equipo. Solo lectura: ábrelos en un explorador de archivos o usa Exportar registros.",
   "settings.logs.application.title": "Registro de la aplicación",
-  "settings.logs.application.desc": "La última hora de <code>stemdeck.log</code>: actividad del pipeline, la API y las tareas. Solo lectura.",
+  "settings.logs.application.desc": "La última hora de <code>anystemdeck.log</code>: actividad del pipeline, la API y las tareas. Solo lectura.",
   "settings.logs.applicationAria": "Registro de la aplicación (solo lectura)",
   "settings.logs.backend.title": "Registro del backend",
   "settings.logs.backend.desc": "La última hora de <code>backend.log</code>: salida en bruto del proceso de Python incluido, con todo lo que lo haya hecho fallar antes de que el registro de la aplicación pudiera anotarlo. Solo en la aplicación de escritorio. Solo lectura.",

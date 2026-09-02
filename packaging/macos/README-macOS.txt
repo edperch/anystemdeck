@@ -1,28 +1,28 @@
-StemDeck for macOS
+AnyStemDeck for macOS
 ==================
 
 Install:
 
-1. Open the StemDeck DMG.
-2. Drag StemDeck.app to Applications.
-3. Open StemDeck from Applications.
+1. Open the AnyStemDeck DMG.
+2. Drag AnyStemDeck.app to Applications.
+3. Open AnyStemDeck from Applications.
 
 First launch:
 
-- StemDeck is a thin native app. It downloads a pinned, checksummed StemDeck
+- AnyStemDeck is a thin native app. It downloads a pinned, checksummed AnyStemDeck
   runtime pack on first launch.
 - The runtime installs to:
-  ~/Library/Application Support/StemDeck/runtime
+  ~/Library/Application Support/AnyStemDeck/runtime
 - FFmpeg and ffprobe install to:
-  ~/Library/Application Support/StemDeck/ffmpeg
+  ~/Library/Application Support/AnyStemDeck/ffmpeg
 - Demucs model weights download on first use and are cached under:
-  ~/Library/Application Support/StemDeck/models
+  ~/Library/Application Support/AnyStemDeck/models
 
 Uninstall:
 
-1. Delete /Applications/StemDeck.app.
+1. Delete /Applications/AnyStemDeck.app.
 2. To remove runtime files, jobs, caches, models, and logs, delete:
-   ~/Library/Application Support/StemDeck
+   ~/Library/Application Support/AnyStemDeck
 
 Notes:
 

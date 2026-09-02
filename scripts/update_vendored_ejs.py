@@ -12,7 +12,7 @@ Why the package is vendored at all rather than declared as a dependency: the
 desktop updater derives runtimeId from sha256(uv.lock) and stands down when it
 changes, because it can replace backend/ but never python/. Adding a dependency
 would have sent every existing desktop install to a manual reinstall. This is a
-53 KB pure-Python payload that StemDeck never imports and yt-dlp discovers at
+53 KB pure-Python payload that AnyStemDeck never imports and yt-dlp discovers at
 runtime, so it belongs in the app layer the updater does replace.
 """
 

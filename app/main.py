@@ -81,13 +81,13 @@ from app.core.stems_location import (
 )
 from app.pipeline.collect import sweep_failed_jobs, sweep_old_jobs
 
-# Set the stemdeck logger level (Python's default root level of WARNING would
+# Set the anystemdeck logger level (Python's default root level of WARNING would
 # silently drop every logger.info(...) call) and attach the rotating file log
-# at LOGS_DIR/stemdeck.log. The analyze diagnostics ("chroma:", "key
+# at LOGS_DIR/anystemdeck.log. The analyze diagnostics ("chroma:", "key
 # candidates:") are DEBUG-level -- set STEMDECK_DEBUG=1 (or
 # STEMDECK_LOG_LEVEL=DEBUG) to see them.
 configure_logging()
-logging.getLogger("stemdeck").info(
+logging.getLogger("anystemdeck").info(
     "demucs config: model=%s device=%s", DEMUCS_MODEL, get_demucs_device()
 )
 
@@ -102,7 +102,7 @@ try:
 except ImportError:
     pass
 
-_log = logging.getLogger("stemdeck")
+_log = logging.getLogger("anystemdeck")
 
 # Last time /api/desktop/heartbeat was called, per time.monotonic() -- read and
 # written across tasks/requests, so it lives at module scope rather than as a
@@ -139,7 +139,7 @@ def app_version() -> str:
     # Installed package metadata (set at install/build from the tag); then the
     # generated app/_version.py for non-installed runs, then a dev placeholder.
     try:
-        return package_version("stemdeck")
+        return package_version("anystemdeck")
     except PackageNotFoundError:
         pass
     try:
@@ -230,7 +230,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     #
     # Deliberately paused: opening the app must not start separating on its own.
     # A restored queue can be dozens of tracks and hours of GPU, and the user
-    # may well have opened StemDeck to do something else entirely. They press
+    # may well have opened AnyStemDeck to do something else entirely. They press
     # Start (or simply import something new, which lifts the pause).
     resumed = take_pending_resume()
     if resumed:
@@ -290,7 +290,7 @@ def _is_mobile_ua(user_agent: str) -> bool:
 
 
 app = FastAPI(
-    title="StemDeck",
+    title="AnyStemDeck",
     description="Paste a YouTube URL or upload an audio file, get audio stems split into a DAW-style player.",
     version=app_version(),
     lifespan=lifespan,
@@ -322,7 +322,7 @@ def health_root() -> dict[str, object]:
 @app.get("/api/health", tags=["health"])
 def health() -> dict[str, object]:
     return {
-        "name": "StemDeck",
+        "name": "AnyStemDeck",
         "status": "ok",
         "version": app_version(),
         "ffmpeg_configured": FFMPEG_BIN.is_file(),
@@ -331,7 +331,7 @@ def health() -> dict[str, object]:
         # Who is answering. The desktop shell spawns this backend and then polls
         # this endpoint to know it came up -- but a 200 alone only proves
         # *something* is listening on that port, not that it is the backend the
-        # shell just started. When a second StemDeck was launched, the new
+        # shell just started. When a second AnyStemDeck was launched, the new
         # window adopted the already-running instance's backend, and with it
         # that instance's data directory and library (#424).
         #
@@ -362,7 +362,7 @@ def _check_instance_token(request: Request) -> None:
     rejected rather than silently accepted.
     """
     expected = os.environ.get("STEMDECK_INSTANCE_TOKEN", "")
-    provided = request.headers.get("x-stemdeck-token", "")
+    provided = request.headers.get("x-anystemdeck-token", "")
     if not expected or not secrets.compare_digest(provided, expected):
         raise HTTPException(status_code=403, detail="invalid or missing instance token")
 
@@ -646,7 +646,7 @@ def reset_app_data() -> dict[str, object]:
     """Factory reset (Settings -> General -> "Reset app data"): delete every
     job directory and the registry, so no old work session can resurface
     across package reinstalls -- on desktop, the runtime state that actually
-    persists (~/Documents/StemDeck, not the extracted package's own bundled
+    persists (~/Documents/AnyStemDeck, not the extracted package's own bundled
     data/ folder) survives a fresh install otherwise. The browser-side
     library index is a separate store the frontend clears itself (the Tauri
     reset_user_data command on desktop, localStorage directly in server/
@@ -688,12 +688,12 @@ def get_registry_raw() -> PlainTextResponse:
 # rather than promising files that will never appear.
 _LOG_FILES: tuple[tuple[str, str], ...] = (
     (
-        "stemdeck.log",
+        "anystemdeck.log",
         "Application log: the pipeline, API and job activity. Rotates at 5 MB, 3 kept.",
     ),
-    ("stemdeck.log.1", "Older application log."),
-    ("stemdeck.log.2", "Older application log."),
-    ("stemdeck.log.3", "Oldest kept application log."),
+    ("anystemdeck.log.1", "Older application log."),
+    ("anystemdeck.log.2", "Older application log."),
+    ("anystemdeck.log.3", "Oldest kept application log."),
     ("backend.log", "Desktop only: raw output of the bundled Python backend process."),
     ("backend.log.1", "Desktop only: older backend output."),
     ("backend.log.2", "Desktop only: oldest kept backend output."),
@@ -739,11 +739,11 @@ def get_logs_info() -> dict[str, object]:
 # the backup immediately before it -- a rotation inside the window would
 # otherwise make a busy log look empty.
 _LOG_VIEWS: dict[str, tuple[str, ...]] = {
-    "application": ("stemdeck.log", "stemdeck.log.1"),
+    "application": ("anystemdeck.log", "anystemdeck.log.1"),
     # The backend's raw stdout/stderr. Worth a view of its own because it holds
     # what the application log cannot: anything the process printed before
     # logging was configured, and anything that killed it before a handler ran.
-    # A backend that dies at startup leaves stemdeck.log empty and the answer
+    # A backend that dies at startup leaves anystemdeck.log empty and the answer
     # here.
     "backend": ("backend.log", "backend.log.1", "backend.log.2"),
     "setup": ("setup.log",),
@@ -753,9 +753,9 @@ _LOG_VIEWS: dict[str, tuple[str, ...]] = {
 _LOG_TAIL_BYTES = 1_500_000
 _LOG_TAIL_LINES = 4000
 
-# "2026-07-18 12:43:42 I stemdeck ..." -- the file handler's datefmt.
+# "2026-07-18 12:43:42 I anystemdeck ..." -- the file handler's datefmt.
 _PY_LOG_TS = re.compile(r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) ")
-# "[1786205373] [stemdeck] ..." -- setup.log, epoch seconds (see the Rust
+# "[1786205373] [anystemdeck] ..." -- setup.log, epoch seconds (see the Rust
 # writer; the crate has no date library).
 _SETUP_LOG_TS = re.compile(r"^\[(\d{9,})\] ")
 
@@ -882,7 +882,7 @@ def download_logs_zip() -> StreamingResponse:
     return StreamingResponse(
         buf,
         media_type="application/zip",
-        headers={"Content-Disposition": f'attachment; filename="stemdeck-logs-{stamp}.zip"'},
+        headers={"Content-Disposition": f'attachment; filename="anystemdeck-logs-{stamp}.zip"'},
     )
 
 
@@ -958,7 +958,7 @@ def _local_ips() -> frozenset[str]:
 
 
 def _is_host_request(host: str | None) -> bool:
-    """True when the request originates from the machine StemDeck runs on —
+    """True when the request originates from the machine AnyStemDeck runs on —
     whether via loopback or one of its own interface addresses."""
     if _is_loopback(host):
         return True
@@ -968,7 +968,7 @@ def _is_host_request(host: str | None) -> bool:
     return h in _local_ips()
 
 
-# Network availability gate (Settings → "Make StemDeck available on your
+# Network availability gate (Settings → "Make AnyStemDeck available on your
 # network"). Added after the headers middleware so it is the OUTERMOST layer and
 # short-circuits before anything else. It NEVER stops the server — it only
 # refuses requests from OTHER devices when availability is off. The host machine
@@ -980,7 +980,7 @@ async def network_gate(request: Request, call_next):
         client_host = request.client.host if request.client else None
         if not _is_host_request(client_host):
             return PlainTextResponse(
-                "StemDeck is not available on the network. Enable it in Settings on the host machine.",
+                "AnyStemDeck is not available on the network. Enable it in Settings on the host machine.",
                 status_code=403,
             )
     return await call_next(request)

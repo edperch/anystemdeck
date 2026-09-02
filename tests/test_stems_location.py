@@ -84,7 +84,7 @@ def test_rejects_a_folder_full_of_the_users_own_files(tmp_path):
         validate_target(target, current)
 
 
-def test_accepts_a_folder_stemdeck_already_uses(tmp_path):
+def test_accepts_a_folder_anystemdeck_already_uses(tmp_path):
     """Retrying an interrupted move must not be blocked by its own progress."""
     current = tmp_path / "old"
     current.mkdir()
@@ -449,7 +449,7 @@ def test_a_configured_folder_that_is_gone_falls_back(tmp_path):
     got = _resolve_jobs_dir(
         tmp_path,
         {"STEMDECK_DEFAULT_JOBS_DIR": str(default)},
-        {"jobs_dir": str(tmp_path / "unplugged-drive" / "StemDeck")},
+        {"jobs_dir": str(tmp_path / "unplugged-drive" / "AnyStemDeck")},
     )
     assert got == str(default)
     assert not (tmp_path / "unplugged-drive").exists(), "must not create the missing path"

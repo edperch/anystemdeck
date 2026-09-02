@@ -22,7 +22,7 @@ from app.core.registry import remove as registry_remove
 from app.core.registry import set_proc
 from app.pipeline.audio_stats import scan_stem
 
-logger = logging.getLogger("stemdeck.collect")
+logger = logging.getLogger("anystemdeck.collect")
 
 
 def _rmtree(path: Path) -> None:

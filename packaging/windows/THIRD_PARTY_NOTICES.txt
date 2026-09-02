@@ -1,7 +1,7 @@
 THIRD-PARTY NOTICES
 ===================
 
-StemDeck includes third-party open-source software. Each component is
+AnyStemDeck includes third-party open-source software. Each component is
 copyrighted by its respective authors and distributed under its own license.
 
 This starter notice is not a substitute for the full license inventory that
@@ -58,13 +58,13 @@ Website: https://github.com/bastibe/python-soundfile
 Downloaded During First-Run Setup
 ---------------------------------
 
-FFmpeg binaries are not bundled in the StemDeck alpha zip. They are downloaded
+FFmpeg binaries are not bundled in the AnyStemDeck alpha zip. They are downloaded
 during first-run setup. FFmpeg builds may be distributed under LGPL or GPL
-terms depending on how they are compiled. StemDeck should display the selected
+terms depending on how they are compiled. AnyStemDeck should display the selected
 FFmpeg build source and license before or during download.
 
-Demucs model weights are not bundled in the StemDeck alpha zip. They are
-downloaded during first use. StemDeck should display the model source and
+Demucs model weights are not bundled in the AnyStemDeck alpha zip. They are
+downloaded during first use. AnyStemDeck should display the model source and
 license/usage terms before or during download.
 
 Disclaimer

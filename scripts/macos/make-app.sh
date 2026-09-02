@@ -48,12 +48,12 @@ else
   TARGET_DIR="$REPO_ROOT/desktop/src-tauri/target/x86_64-apple-darwin/release"
 fi
 
-APP_DIR="${TARGET_DIR}/bundle/macos/StemDeck.app"
+APP_DIR="${TARGET_DIR}/bundle/macos/AnyStemDeck.app"
 if [[ ! -d "$APP_DIR" ]]; then
-  APP_DIR="$(find "$REPO_ROOT/desktop/src-tauri/target" -path '*/bundle/macos/StemDeck.app' -type d | head -1)"
+  APP_DIR="$(find "$REPO_ROOT/desktop/src-tauri/target" -path '*/bundle/macos/AnyStemDeck.app' -type d | head -1)"
 fi
 if [[ -z "$APP_DIR" || ! -d "$APP_DIR" ]]; then
-  echo "ERROR: could not find built StemDeck.app" >&2
+  echo "ERROR: could not find built AnyStemDeck.app" >&2
   exit 1
 fi
 

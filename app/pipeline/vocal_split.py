@@ -27,7 +27,7 @@ from app.core.registry import set_proc
 from app.core.settings import get_demucs_device
 from app.pipeline.errors import SeparationError
 
-logger = logging.getLogger("stemdeck.pipeline")
+logger = logging.getLogger("anystemdeck.pipeline")
 
 
 def _spawn_cmd(device: str, vocals_path: Path, out_dir: Path) -> list[str]:

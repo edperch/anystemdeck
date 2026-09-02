@@ -2247,7 +2247,7 @@ wheels = [
 ]
 
 [[package]]
-name = "stemdeck"
+name = "anystemdeck"
 source = { editable = "." }
 dependencies = [
     { name = "audio-separator", marker = "platform_machine != 'x86_64' or sys_platform != 'darwin'" },

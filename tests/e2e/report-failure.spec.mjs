@@ -59,7 +59,7 @@ test.describe("failure notifications", () => {
     await expect(page.locator("#failureDialog")).not.toHaveClass(/hidden/);
     await expect(page.locator("#failureTitle")).toHaveText("Export failed");
     // The user can read every technical detail before sending anything.
-    await expect(page.locator("#failureTech")).toContainText("StemDeck:");
+    await expect(page.locator("#failureTech")).toContainText("AnyStemDeck:");
 
     const href = await page.locator("#failureReport").getAttribute("href");
     const url = new URL(href);

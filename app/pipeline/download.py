@@ -12,7 +12,7 @@ from app.core.config import FFMPEG_DIR, bundled_js_runtime, js_solver_available
 from app.core.models import Job, JobCancelled, _set
 from app.core.settings import get_cookies_file, get_max_duration_sec, get_video_max_height
 
-logger = logging.getLogger("stemdeck.download")
+logger = logging.getLogger("anystemdeck.download")
 
 _MAX_RETRIES = 3
 _RETRY_BACKOFF = (2, 4, 8)  # seconds between attempts

@@ -2,7 +2,7 @@ name: Docker Publish
 
 # Builds the server container (build/Dockerfile) and pushes it to GHCR so it can
 # be pulled by self-hosted deployments and the Unraid Community Applications app
-# (ghcr.io/stemdeckapp/stemdeck). The image keeps the default Linux x86_64 torch
+# (ghcr.io/anystemdeckapp/anystemdeck). The image keeps the default Linux x86_64 torch
 # wheel, which is the CUDA build -- so the same image runs on CPU by default and
 # uses the GPU automatically when started with `--runtime=nvidia` (see the
 # Unraid template in templates/unraid/).
@@ -37,7 +37,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  IMAGE: ghcr.io/${{ github.repository_owner }}/stemdeck
+  IMAGE: ghcr.io/${{ github.repository_owner }}/anystemdeck
 
 jobs:
   build-and-push:

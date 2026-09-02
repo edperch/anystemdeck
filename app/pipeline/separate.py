@@ -17,7 +17,7 @@ from app.core.registry import set_proc
 from app.core.settings import get_demucs_device, get_separation_quality
 from app.pipeline.errors import SeparationError, classify_failure
 
-logger = logging.getLogger("stemdeck.pipeline")
+logger = logging.getLogger("anystemdeck.pipeline")
 
 _PCT_RE = re.compile(r"(\d{1,3})%")
 # Terminate demucs if stderr produces no output for this many seconds.

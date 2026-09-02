@@ -19,7 +19,7 @@ import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
-logger = logging.getLogger("stemdeck.stems_location")
+logger = logging.getLogger("anystemdeck.stems_location")
 
 
 class StemsLocationError(ValueError):
@@ -106,11 +106,11 @@ def validate_target(target: Path, current: Path) -> Path:
         entries = list(target.iterdir())
         # user-data.json (#403): the library metadata store now lives inside
         # the jobs folder too (see desktop/src-tauri/src/main.rs's
-        # documents_store_path), so re-selecting a folder StemDeck already
+        # documents_store_path), so re-selecting a folder AnyStemDeck already
         # used must recognize it as "ours", same as registry.json.
         ours = {"registry.json", "failed", "user-data.json"}
         if entries and not all(e.name in ours or _looks_like_job_dir(e) for e in entries):
-            raise StemsLocationError("Pick an empty folder, or one StemDeck already uses.")
+            raise StemsLocationError("Pick an empty folder, or one AnyStemDeck already uses.")
     else:
         try:
             target.mkdir(parents=True, exist_ok=True)

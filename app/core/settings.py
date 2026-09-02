@@ -3,7 +3,7 @@
 These are read live (unlike the env-var constants in config.py, which are fixed
 at startup), so the Settings UI can change them without a restart:
 
-- `allow_network`     — whether StemDeck answers requests from other devices.
+- `allow_network`     — whether AnyStemDeck answers requests from other devices.
 - `max_duration_sec`  — longest track accepted for processing.
 - `jobs_dir`          — where extracted stems are written (needs a restart).
 - `playlist_max_items` — how many tracks one playlist import may queue.
@@ -38,7 +38,7 @@ from app.core.config import (
     detect_compute_device,
 )
 
-_log = logging.getLogger("stemdeck.settings")
+_log = logging.getLogger("anystemdeck.settings")
 
 _SETTINGS_PATH = DATA_DIR / "settings.json"
 _LOCK = threading.RLock()
@@ -90,7 +90,7 @@ def _ensure() -> dict:
     if _state is None:
         _state = _load()
         # Seed the per-user copy from settings that already exist. Mirroring
-        # only on _save() would protect nobody who configured StemDeck before
+        # only on _save() would protect nobody who configured AnyStemDeck before
         # this shipped and never opens Settings again -- their next install
         # would still start empty. Safe against recursion (_state is assigned
         # first) and against clobbering: an empty dict means a genuine first
@@ -178,13 +178,13 @@ def set_allow_network(value: bool) -> bool:
 # Deleting a finished separation destroys work that cannot be recovered, so the
 # behaviour of an install nobody has configured has to be "keep it". It used to
 # be the reverse: the sweep ran unless an environment variable switched it off,
-# which meant every documented way of starting StemDeck set that variable and
+# which meant every documented way of starting AnyStemDeck set that variable and
 # anyone who started the backend directly silently lost their library within a
 # day (#459).
 #
 # The stored setting wins over the environment, unlike jobs_dir where the env
 # pin wins. A mounted volume is not the user's to relocate; how long their own
-# work is kept is exactly their call, and StemDeck is single-user with no
+# work is kept is exactly their call, and AnyStemDeck is single-user with no
 # separate operator to protect.
 _AUTO_DELETE_DAYS_MIN, _AUTO_DELETE_DAYS_MAX = 1, 365
 AUTO_DELETE_DAYS_MIN, AUTO_DELETE_DAYS_MAX = _AUTO_DELETE_DAYS_MIN, _AUTO_DELETE_DAYS_MAX

@@ -28,7 +28,7 @@ from app.core.stems_location import is_relocating
 from app.pipeline import jobqueue
 from app.pipeline.download import InvalidPlaylistURL, expand_playlist
 
-logger = logging.getLogger("stemdeck.api")
+logger = logging.getLogger("anystemdeck.api")
 
 router = APIRouter(tags=["playlist"])
 
@@ -125,7 +125,7 @@ async def create_playlist_jobs(request: Request) -> dict[str, Any]:
     if is_relocating():
         raise HTTPException(
             status_code=409,
-            detail="Restart StemDeck to finish moving your stems folder before importing",
+            detail="Restart AnyStemDeck to finish moving your stems folder before importing",
         )
 
     selected = [s for s in payload.stems if s in STEM_NAMES] if payload.stems else list(STEM_NAMES)
