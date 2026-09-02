@@ -29,6 +29,7 @@ from app.core.config import (
     JOBS_DIR,
     LOGS_DIR,
     STATIC_DIR,
+    available_onnx_providers,
     available_torch_devices,
     configure_portable_environment,
     ensure_runtime_dirs,
@@ -438,7 +439,11 @@ def _settings_payload() -> dict[str, object]:
         # available lets the UI gray out devices this machine can't use.
         "demucs_device": get_demucs_device_choice(),
         "demucs_device_resolved": get_demucs_device(),
-        "demucs_devices_available": available_torch_devices(),
+        # torch devices (cuda/mps/cpu) plus "dml" when this machine has a
+        # working DirectML execution provider -- see available_onnx_providers.
+        # Without this, the Settings UI could never offer DirectML at all: it
+        # greys out any device missing from this list.
+        "demucs_devices_available": [*available_torch_devices(), *available_onnx_providers()],
     }
 
 

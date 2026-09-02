@@ -154,10 +154,27 @@ def test_demucs_device_rejects_unknown_choice(_isolated_settings):
         settings_mod.set_demucs_device("bogus")
 
 
+def test_demucs_devices_available_includes_dml_when_present(monkeypatch, _isolated_settings):
+    # demucs_devices_available drives the Settings UI's greying-out of device
+    # options (static/js/catalog.js) -- it used to report torch devices only,
+    # which meant DirectML could never appear even on a machine where it
+    # genuinely works, since app.main built the list from
+    # available_torch_devices() alone. Regression test for that gap.
+    monkeypatch.setattr("app.main.available_torch_devices", lambda: ["cpu"])
+    monkeypatch.setattr("app.main.available_onnx_providers", lambda: ["dml"])
+    with TestClient(app) as c:
+        body = c.get("/api/settings").json()
+        assert body["demucs_devices_available"] == ["cpu", "dml"]
+
+
 def test_demucs_device_api_round_trip_and_422(monkeypatch, _isolated_settings):
     monkeypatch.setattr(config_mod, "available_torch_devices", lambda: ["cpu"])
     monkeypatch.setattr(settings_mod, "available_torch_devices", lambda: ["cpu"])
     monkeypatch.setattr("app.main.available_torch_devices", lambda: ["cpu"])
+    # No real machine here has a DirectML provider -- pin it explicitly rather
+    # than relying on that being true, so this test doesn't depend on what
+    # onnxruntime happens to report in whatever environment runs it.
+    monkeypatch.setattr("app.main.available_onnx_providers", lambda: [])
     with TestClient(app) as c:
         body = c.get("/api/settings").json()
         assert body["demucs_device"] == "auto"

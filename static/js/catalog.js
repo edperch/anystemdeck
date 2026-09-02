@@ -3110,6 +3110,22 @@ async function wireGeneralSettings(overlay) {
       const resolved = d.demucs_device_resolved ? i18nT("settings.device.currently", { device: d.demucs_device_resolved }) : "";
       deviceDesc.textContent = i18nT("settings.device.desc", { resolved });
     }
+    if (qualitySel) {
+      // "Best" (2x shift-averaging) has no demucs-onnx equivalent yet -- the
+      // server already silently caps it back to standard at job time when
+      // the resolved device is "dml" (app/pipeline/separate.py), but that
+      // means nothing to a user who picked "Best" and just gets standard
+      // quality with no explanation. Grey it out here instead, the same way
+      // an unavailable device is greyed out above. Keyed off the *resolved*
+      // device, not the raw select value -- "auto" can resolve to "dml" too.
+      const dmlActive = d.demucs_device_resolved === "dml";
+      for (const opt of qualitySel.options) {
+        if (opt.value !== "best") continue;
+        if (opt.dataset.baseLabel === undefined) opt.dataset.baseLabel = opt.textContent;
+        opt.disabled = dmlActive;
+        opt.textContent = dmlActive ? `${opt.dataset.baseLabel}${i18nT("settings.device.notAvailable")}` : opt.dataset.baseLabel;
+      }
+    }
   };
 
   // Keep the text inputs digit-only as the user types (maxlength caps the rest).
@@ -3609,9 +3625,10 @@ function openLibraryEditor() {
             </div>
             <select class="settings-select settings-select-wide set-demucs-device" aria-label="Compute device" data-i18n-aria-label="settings.device.title">
               <option value="auto" data-i18n="settings.device.auto">Auto</option>
-              <option value="cuda">CUDA (NVIDIA)</option>
-              <option value="mps">MPS (Apple Silicon)</option>
-              <option value="cpu">CPU</option>
+              <option value="cuda" data-i18n="settings.device.cuda">CUDA (NVIDIA)</option>
+              <option value="mps" data-i18n="settings.device.mps">MPS (Apple Silicon)</option>
+              <option value="dml" data-i18n="settings.device.dml">DirectML (AMD/Intel/NVIDIA)</option>
+              <option value="cpu" data-i18n="settings.device.cpu">CPU</option>
             </select>
           </div>
         </div>
