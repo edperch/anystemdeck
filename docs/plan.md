@@ -420,3 +420,48 @@ Decision #6 above settled the *shape* of this early on ("semi-automated: detect,
 16. **Exact package versions are pinned to what `README.md`'s Setup section documents as working today, not discovered dynamically at install time.** AMD's ROCm-matched wheel filenames on `repo.radeon.com` include a git-hash suffix that isn't predictable or safely scrapable, so the script hardcodes the same versions the README does. This is a real, recurring maintenance cost — the pin will need a manual bump whenever AMD ships a new ROCm release the way this session had to work through ROCm 7.2.1 by hand — not a one-time decision. Worth a line in `CONTRIBUTING.md` once the script exists, so this doesn't get rediscovered from scratch next time it goes stale.
 
 Not yet implemented — this is the design, not the code. Actual implementation is its own next task.
+
+### Wordmark/logo redesign done — and a correction: it was never vector-drawn letterforms
+
+The backlog note above ("real GitHub URL wired in, wordmark redesign added to backlog")
+said the SVG wordmark/logo artwork was "vector-drawn letterforms, not text" — checked
+more carefully this session, and that's wrong. All three files (`anystemdeck-wordmark.svg`,
+`anystemdeck-logo-horizontal.svg`, `anystemdeck-logo-stacked.svg`) render "StemDeck" as
+literal SVG `<text>`/`<tspan>` elements, `font-family="Inter, Geist, Manrope, Arial, sans-serif"`
+— only `anystemdeck-icon.svg` and the tray/waveform-symbol files are actual vector shapes
+(rounded-rect bars, no text at all). The earlier claim had been repeated uncorrected into
+`ROADMAP.md`; fixed there alongside this entry. Worth remembering for next time: check a
+file's actual contents before describing what would be needed to change it, not just its
+rendered appearance.
+
+Turned out to make the redesign simpler than planned — a text and layout change, not a
+redraw. Checked `static/css/variables.css` first to see what the app's real UI font is,
+since matching it (rather than picking something new) was the more defensible choice for
+a wordmark representing the app: `--font-sans: 'Inter', -apple-system, system-ui, ...` —
+Inter is already first in the wordmark's existing font stack (`Inter, Geist, Manrope,
+Arial, sans-serif`), so it needed no revisiting.
+
+Two decisions run past Ed before starting (he'd asked "do you have any questions before
+you begin"), both picked from his answers:
+- **All three brand files redone**, not just the standalone wordmark, so the wordmark,
+  the icon+text horizontal lockup, and the icon+text stacked lockup stay in sync.
+- **Color split: "Any" in gold (`#F2B53D`), "StemDeck" in the existing near-white
+  (`#F4F6F8`)** — puts the visual emphasis on what actually distinguishes this fork (any
+  GPU vendor) while keeping "StemDeck" itself as one visually unified block, closest in
+  spirit to the original two-tone split.
+
+Measured actual glyph widths against the real Inter Bold/Medium fonts (via `fontTools`,
+not eyeballed) to place "Any"/"StemDeck" precisely and size each canvas to fit the three
+extra letters without shrinking the type: wordmark 820→728px wide, horizontal lockup
+1200→1230px, stacked lockup 720→780px (heights unchanged — vertical layout wasn't
+affected by the longer word). Also dropped a stray space in the stacked lockup's original
+markup (`"Stem "` + `"Deck"`, rendering as two words with a gap) that the wordmark and
+horizontal files never had — "StemDeck"/"AnyStemDeck" is one word everywhere now,
+consistent across all three. Rendered all three to PNG with the real Inter font installed
+before committing, to check spacing and legibility rather than trusting the markup blind.
+None of the three files are referenced anywhere in the app's code or `README.md` yet
+(confirmed by grep) — still unwired brand assets, so this was a freer redesign than
+editing a file something else depends on.
+
+Also updated: `ROADMAP.md`'s wordmark/logo redesign backlog item, moved from
+"In flight / next" to "Shipped" now that it's done.

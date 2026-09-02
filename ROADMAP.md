@@ -56,6 +56,20 @@ with `pyproject.toml`'s torch version bump — it was silently making CI test
 the wrong PyTorch build, and very likely breaking the browser-test job's
 startup outright by triggering a multi-gigabyte re-download mid-run.
 
+### Wordmark refresh · 2026-09 · the logos actually say "AnyStemDeck" now
+
+The three brand SVGs (`anystemdeck-wordmark.svg`, `anystemdeck-logo-horizontal.svg`,
+`anystemdeck-logo-stacked.svg`, plus the `static/imgs/` duplicate) were renamed
+during the fork's file-level rename pass but still visually rendered "StemDeck" —
+the rename pass fixed filenames and accessibility metadata (`<title>`/`<desc>`), not
+the text itself. For the record, correcting something this file and `docs/plan.md`
+both said earlier: the wordmark was never vector-drawn letterforms — it's literal SVG
+`<text>`, set in Inter (the app's own UI font, via `--font-sans`), which is why this
+was a text and layout change, not a redraw. "Any" reads in the same gold (`#F2B53D`)
+the brand already used for emphasis; "StemDeck" stays the near-white (`#F4F6F8`) the
+rest of the wordmark always was. Canvases grew slightly (728/1230/780px wide, up from
+820/1200/720) to fit the three extra letters without shrinking the type.
+
 ## In flight / next
 
 No formal issue tracker yet for fork-specific work (unlike StemDeck's own
@@ -73,9 +87,6 @@ were AnyStemDeck's). Current list, roughly in the order it's likely to matter:
   `onnxruntime-directml` needs a forced-reinstall step added to the Windows
   packaging script — not yet written. Also unresolved: `demucs-onnx` needs
   Python ≥3.11, while `pyproject.toml`'s floor is still 3.10.
-- **Wordmark/logo redesign.** The SVG artwork is vector-drawn letterforms
-  still spelling "StemDeck" — a rename pass can fix filenames and
-  accessibility metadata but not drawn art. Needs an actual design pass.
 - **DirectML parity testing.** Numerical and speed parity against the
   CPU/CUDA path on the same input hasn't been verified on real hardware yet.
 
