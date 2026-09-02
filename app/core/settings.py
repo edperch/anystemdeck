@@ -451,8 +451,9 @@ def get_demucs_device_choice() -> str:
 
 def get_demucs_device() -> str:
     """The device the next separation job will actually use: the forced choice,
-    or a fresh hardware probe when the choice is "auto" (cuda > mps > dml > cpu;
-    see detect_compute_device)."""
+    or a fresh hardware probe when the choice is "auto" (cuda > mps > cpu --
+    "dml" is deliberately excluded from auto-resolution, see
+    detect_compute_device)."""
     choice = get_demucs_device_choice()
     return detect_compute_device() if choice == "auto" else choice
 

@@ -573,3 +573,97 @@ verified: an actual Windows build run, since nothing in this environment can
 do that -- worth a real smoke test next time a Windows package is built for
 real, particularly the CPU torch wheel's exact filename on
 `download.pytorch.org` (unreachable from this sandbox to check directly).
+
+### Two real-machine bug reports from the first packaged AMD build, and a correctness bug they surfaced in the process
+
+Ed ran the just-fixed `make-portable.ps1` end to end on real Windows hardware for
+the first time and reported two things from the running app: the first-run wizard
+still said "No NVIDIA GPU - stem separation will use CPU" (misleading on a fork
+whose whole point is non-NVIDIA hardware), and the topbar still showed the old
+two-tone "Stem"/"Deck" split instead of "AnyStemDeck".
+
+**The topbar was a literal miss from the original rename pass.** `static/index.html`
+had `<span class="fg">Stem</span><span class="accent">Deck</span>` -- the three
+standalone SVG assets fixed earlier this session are confirmed unreferenced
+anywhere in the app, so this markup is the actual in-app brand element and was
+simply never touched. Fixed to `<span class="accent">Any</span><span
+class="fg">StemDeck</span>`, reusing the existing `.fg`/`.accent` CSS classes (no
+CSS changes needed) and matching the "Any" gold / "StemDeck" white split the
+wordmark redesign already established -- just via the app's own `--accent`/`--fg`
+variables rather than the SVGs' specific hex values, which is the more
+maintainable choice for something theme-driven.
+
+**The onboarding message led to a bigger finding.** `desktop/ui/setup.js`'s "no
+GPU" branch is genuinely NVIDIA-specific -- `ensure_torch_device` (`main.rs`) only
+ever probes `nvidia-smi`, non-mac -- so on this AMD-fork the message was always
+going to fire for the exact hardware the fork exists for. The literal fix is a
+one-line wording change (below). But before making it, checked what the message's
+"will use CPU" claim actually resolves to at job time, since `detect_compute_device()`
+(`auto`'s hardware probe) ranks `cuda > mps > dml > cpu` -- and `dml` (DirectML) was
+just wired into both the Settings UI (Phase 3, this session) and, critically, into
+*every* Windows package's Python install (the packaging fix, also this session:
+`make-portable.ps1` now force-installs `onnxruntime-directml` unconditionally, not
+just for one build variant). That combination means an AMD/Intel-on-Windows user
+on the default "auto" setting would no longer get CPU when no NVIDIA GPU is found --
+they'd get `dml`, automatically, the moment `onnxruntime-directml` is present.
+
+That would be fine if `dml` worked. It doesn't, and this repo's own history already
+proved it, at length: Phase 1/1.5 above found `demucs-onnx` under DirectML
+reproducibly crashes on a `ConvTranspose` node (confirmed on a real RX 7800 XT),
+and a from-scratch split-graph export written specifically to route around that
+crash then hit a second, worse bug -- `InstanceNormalization` silently returning
+numerically wrong output, amplified downstream through the very next ops. That's
+exactly why Phase 1.6 above is titled "pivot: DirectML parked, investigating
+WSL2 + ROCm instead", and why `ROADMAP.md`'s own Shipped entry for v0.1.0 already
+says DirectML was "shelved after DirectML's `InstanceNormalization` operator
+produced numerically wrong output on real hardware." The shipped
+`app/pipeline/demucs_onnx_worker.py` calls `demucs_onnx.separate()` directly --
+the original, un-split graph -- so a job actually dispatched to `dml` in
+production is expected to hit the Phase 1 crash, not silently corrupt audio; still
+a broken, user-visible failure, just not the more dangerous silent-corruption
+outcome initially worried about while tracing this through. Either way, "auto"
+routing AMD/Intel-on-Windows users into a known-broken device by default,
+the moment packaging installs `onnxruntime-directml` everywhere, is a real
+regression this session's own earlier two commits combined to create without
+anyone connecting them at the time.
+
+**Fix**: `detect_compute_device()` no longer falls through to `dml` -- auto
+resolution is now `cuda > mps > cpu` only. `dml` remains fully selectable by
+hand in Settings (`set_demucs_device()` unchanged, still validates it against
+`available_onnx_providers()`) for anyone who wants to try it anyway, or once the
+upstream ConvTranspose/InstanceNormalization bugs are fixed -- it's excluded from
+*auto* specifically, not removed. Updated the docstrings on
+`detect_compute_device()` and `get_demucs_device()` to record why, so this isn't
+rediscovered from scratch later. Added
+`test_detect_compute_device_never_auto_selects_dml` (`tests/test_config.py`),
+which fails the old way if this regresses: it stubs a working `dml` provider
+and asserts `auto` still resolves to `cpu`.
+
+With that fixed, the onboarding message is now actually accurate as a literal
+wording change: `desktop/ui/setup.js`'s no-GPU branch now reads "No compatible
+GPU found - stem separation will use CPU" -- true again, since `auto` really
+does mean CPU here now. (An earlier pass at this fix went further -- probing
+DirectML availability in `ensure_torch_device`/`main.rs` and reporting "DirectML
+acceleration available" when found -- and was reverted once the auto-routing bug
+above came to light: that message would have been actively wrong, promising
+working acceleration on a path known not to work.)
+
+**Verified**: full pytest suite (840/840, including the new test) green on a
+clean clone with the patch applied; `ruff check`/`format --check` clean on every
+Python file touched; `node --check` clean on `setup.js`. The Rust change (the
+reverted `ensure_torch_device`/`GpuSetup` DirectML-probe attempt) was also
+independently compile-checked, `clippy -D warnings`-clean, and `cargo test`-clean
+before being reverted, for what that's worth -- it wasn't a syntax problem, it was
+a correctness-of-claim problem once the auto-routing bug was found.
+
+**Not yet checked**: whether Ed's actual first real separation job (the one that
+produced the 6-stem result confirming the packaging fix works) ran on `dml` or
+`cpu` -- the packaged build's own `data/logs/stemdeck.log` from that run wasn't
+found in the connected folder (the `dist/` there now looks like a fresh,
+not-yet-run rebuild). Worth Ed checking that job's log line
+(`stemdeck.pipeline [...] separating on device=...`) if he still has access to
+it, mostly out of curiosity now that auto no longer routes through `dml` for
+future jobs -- if that job did use `dml`, per the analysis above it likely means
+that job actually failed/errored rather than silently corrupting output, which
+doesn't match "6 stems produced and played back fine," so `cpu` is the more
+consistent explanation, but it's worth confirming rather than assuming.

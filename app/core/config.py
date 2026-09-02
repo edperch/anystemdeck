@@ -71,17 +71,28 @@ def available_onnx_providers() -> list[str]:
 
 
 def detect_compute_device() -> str:
-    """Best available compute device for separation, torch or ONNX combined:
-    cuda > mps > dml > cpu. cuda/mps win over dml deliberately -- a machine
-    with a real NVIDIA or Apple GPU already gets full, well-tested PyTorch
-    acceleration and should not be downgraded to the newer DirectML path.
-    dml only matters on the hardware PyTorch can't accelerate at all: AMD and
-    Intel GPUs on Windows."""
+    """Best available compute device for separation via automatic ("auto")
+    resolution: cuda > mps > cpu. Deliberately does NOT auto-select "dml",
+    even when available_onnx_providers() reports it -- see docs/plan.md's
+    Phase 1/1.5 notes: DirectML through demucs-onnx hits a reproducible
+    ConvTranspose crash on real hardware (an RX 7800 XT) that the worker's
+    own session patch does not fix, and a from-scratch export written to
+    route around that crash then surfaced a second, worse bug --
+    InstanceNormalization silently returning numerically wrong results.
+    Both are why the project parked the DirectML path (ROADMAP.md) in
+    favor of WSL2+ROCm, which needs no device value here at all -- ROCm
+    presents to PyTorch as an ordinary "cuda" device once the backend is
+    actually running inside WSL2. Auto-selecting "dml" here would mean
+    every AMD/Intel-on-Windows user with the default "auto" setting gets
+    routed into a known-broken path instead of the reliable CPU fallback,
+    the moment onnxruntime-directml is installed (which packaging now does
+    unconditionally on Windows). "dml" stays force-selectable in Settings
+    for anyone who wants to try it anyway or once the upstream bug is
+    fixed -- see set_demucs_device() -- it is only excluded from auto.
+    """
     torch_device = detect_torch_device()
     if torch_device != "cpu":
         return torch_device
-    if "dml" in available_onnx_providers():
-        return "dml"
     return "cpu"
 
 

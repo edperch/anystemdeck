@@ -81,6 +81,10 @@ a real gap this surfaced: the API endpoint the UI reads device availability
 from only ever reported PyTorch devices, so DirectML could never have shown
 up as available even on a machine where it genuinely works.
 
+**Correction, same week**: this option combined with the packaging fix below to
+silently route AMD/Intel-on-Windows users into a known-broken device by
+default. Fixed — see the entry after Packaging.
+
 ### Packaging · 2026-09 · the onnxruntime/onnxruntime-directml conflict is resolved
 
 `scripts/windows/make-portable.ps1` now force-reinstalls `onnxruntime-directml`
@@ -94,6 +98,26 @@ nothing else in the project (CI, CONTRIBUTING.md, this same packaging script)
 exercises anything below 3.12 anyway. Caught and fixed a second, unrelated
 drift in the same script while in there: its CPU-only torch pin was still
 2.6.0, left behind when `pyproject.toml`'s own torch floor moved to 2.9.
+
+### Two bug reports from the first real AMD build, and the auto-device regression they surfaced
+
+Ed's first real run of a packaged build (the wordmark, Settings UI, and packaging
+work above, actually built and launched on his machine) surfaced two UI misses —
+the in-app topbar still read the old two-tone "Stem"/"Deck", and first-run setup
+still said "No NVIDIA GPU" — plus a real correctness bug found while fixing the
+second one. The topbar was simply missed by the original rename pass; fixed to
+match the wordmark's "Any" gold / "StemDeck" white split. The GPU message,
+though, led somewhere more important: with DirectML now Settings-selectable
+*and* bundled into every Windows package (the two changes just above, combined),
+"auto" device resolution would have started silently routing AMD/Intel-on-Windows
+users — exactly this fork's audience — into `dml`, a path this project's own
+Phase 1/1.5 research (see `docs/plan.md`) already proved is broken on real
+hardware (a DirectML `ConvTranspose` crash, and a numerically-wrong-output
+`InstanceNormalization` bug found while trying to route around it). Auto
+resolution no longer falls through to `dml` — it stays `cuda > mps > cpu`, with
+`dml` still manually selectable in Settings for anyone who wants it. Onboarding's
+"no GPU" message is now simply "No compatible GPU found — stem separation will
+use CPU", which is accurate again now that CPU is genuinely where auto lands.
 
 ## In flight / next
 

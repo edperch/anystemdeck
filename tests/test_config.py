@@ -127,3 +127,20 @@ def test_a_backend_without_a_data_sibling_is_not_a_package(tmp_path, monkeypatch
     backend.mkdir(parents=True)
     monkeypatch.setattr(config, "ROOT", backend)
     assert config._packaged_data_dir() is None
+
+
+def test_detect_compute_device_never_auto_selects_dml(monkeypatch):
+    """ "auto" must fall through to cpu, not dml, when no torch device is
+    available -- even when a working DirectML provider is installed and
+    detected. dml is force-selectable in Settings but excluded from auto
+    because the shipped ONNX/DirectML worker is known-broken on real
+    hardware (docs/plan.md's Phase 1/1.5: a reproducible ConvTranspose
+    crash, and a from-scratch export written to route around it then hit
+    a numerically-wrong-output InstanceNormalization bug instead). Auto-
+    selecting it would silently break separation for exactly the
+    AMD/Intel-on-Windows users it was meant to help."""
+    from app.core import config
+
+    monkeypatch.setattr(config, "detect_torch_device", lambda: "cpu")
+    monkeypatch.setattr(config, "available_onnx_providers", lambda: ["dml"])
+    assert config.detect_compute_device() == "cpu"

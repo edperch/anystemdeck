@@ -392,7 +392,7 @@ async function runSetup() {
             ? gpu.cudaVerified
               ? `${gpu.gpuName} - CUDA ${gpu.cudaVersion} enabled`
               : `${gpu.gpuName} found - falling back to CPU (CUDA unverified)`
-            : "No NVIDIA GPU - stem separation will use CPU";
+            : "No compatible GPU found - stem separation will use CPU";
         }
         return gpu;
       } finally {
