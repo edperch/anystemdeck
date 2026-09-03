@@ -33,6 +33,16 @@ and open `http://localhost:8000`.
 
 This is the whole reason this fork exists. The recipe below is the exact one confirmed working end-to-end on an RX 7800 XT; expect some of the specific package versions to drift over time — check [AMD's ROCm-on-WSL install guide](https://rocm.docs.amd.com/projects/radeon-ryzen/en/latest/docs/install/installrad/wsl/install-radeon.html) for whatever's current, and match it to the torch version this project pins in `pyproject.toml`.
 
+**Check your card first.** ROCm's WSL2 support (AMD's `librocdxg` driver stack, current as of ROCm 7.2.1 / late 2026) covers a specific, AMD-published list of GPUs — narrower than what works on native Linux ROCm, and it grows with every ROCm release, so treat the list below as a snapshot rather than permanent and check [AMD's live WSL compatibility matrix](https://rocm.docs.amd.com/projects/radeon-ryzen/en/latest/docs/compatibility/compatibilityrad/wsl/wsl_compatibility.html) if your card isn't on it yet:
+
+- **RDNA4** (RX 9000 series): RX 9070 XT, RX 9070, RX 9070 GRE, RX 9060 XT, plus the workstation Radeon AI PRO R9700 and R9600D.
+- **RDNA3** (RX 7000 series) — this project's own confirmed-working card, an RX 7800 XT, is here: RX 7900 XTX, RX 7900 XT, RX 7900 GRE, RX 7800 XT, RX 7700 XT, RX 7700, plus the workstation Radeon PRO W7900, W7800, and W7700.
+- **RDNA3.5 integrated** (Ryzen AI Max/HX "Strix Halo" APUs): AI Max+ 395, AI Max 390, AI Max 385, AI 9 HX 375, AI 9 HX 370, AI 9 365 — newly added in ROCm 7.2.1, the first WSL2 support for an integrated GPU family.
+
+**Not supported on WSL2**, even though some of these work fine on native Linux ROCm: RDNA2 (RX 6000 / Radeon PRO W6000 series, e.g. RX 6800/6900) has never appeared in AMD's WSL2 matrix at any ROCm version checked; RDNA1 (RX 5000 series) and Polaris/Vega (RX 500/Vega series) were never ROCm-supported architectures at all, on WSL2 or otherwise. The `HSA_OVERRIDE_GFX_VERSION` trick some Linux guides use to force an unlisted-but-architecturally-similar card to report as a supported one is a documented native-Linux workaround — community reports of trying it under WSL2 specifically describe the GPU getting detected but operations then hanging or failing outright, so don't count on it rescuing an unsupported card here.
+
+Also needs Windows 11 (Windows 10 isn't supported for this path), AMD Software: Adrenalin Edition 26.1.1 or newer (26.2.2+ if you're on a Strix/Strix Halo APU), and WSL2 running Ubuntu 22.04, 24.04.2, or 25.10.1.
+
 1. **Install WSL2 with Ubuntu 24.04**, from an elevated PowerShell:
    ```powershell
    wsl --install -d Ubuntu-24.04

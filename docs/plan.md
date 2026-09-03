@@ -856,3 +856,46 @@ doesn't otherwise have.
 Frontend-only change (no Rust/Python touched) -- verified with `node --check`
 on the two edited JS files and the full `tests/js/*.test.mjs` suite (all
 green) against a fresh clone with these files layered on top.
+
+### README: which AMD GPUs actually work on the WSL2/ROCm path
+
+Ed asked two things: whether a built `.exe` still needs the manual WSL2/ROCm
+setup (yes -- `scripts/windows/make-portable.ps1` bundles a native-Windows
+Python runtime and the Tauri build only; it never touches WSL2, ROCm, or the
+separate Linux-side Python environment the README's AMD section walks
+through installing by hand. The desktop app can *launch and manage* an
+already-set-up WSL2 backend (the `wsl2BackendEnabled` toggle from earlier
+this week), but setting that backend up in the first place -- steps 1-8 of
+the README's AMD section -- is unaffected by whether you run from source or
+a packaged `.exe`. A guided in-app setup flow that could someday automate
+this is still open, tracked in ROADMAP.md's "In flight / next"), and to add
+the actual list of AMD GPUs the WSL2 path supports to the README, since
+"which cards work" wasn't documented anywhere before this -- only this
+project's own confirmed RX 7800 XT was mentioned.
+
+Researched against AMD's current compatibility matrix (ROCm 7.2.1 /
+`librocdxg`, the from-scratch WSL driver stack that replaced the earlier
+ROCm-on-WSL preview): RDNA3 (RX 7000 / PRO W7000 series) and RDNA4 (RX 9000 /
+PRO R9000 series) are covered, plus -- new in 7.2.1 -- Strix/Strix Halo
+RDNA3.5 integrated GPUs (Ryzen AI Max/HX APUs), the first WSL2 support for
+an integrated part. RDNA2 (RX 6000/W6000) has never been added to AMD's WSL2
+matrix at any version despite working on native Linux ROCm; RDNA1 and
+Polaris/Vega were never ROCm architectures at all. Checked whether the
+`HSA_OVERRIDE_GFX_VERSION` trick (commonly used on native Linux to force an
+unlisted-but-similar card to identify as a supported `gfx` target) rescues
+an unsupported card under WSL2 specifically -- community reports (GitHub
+issues on ROCm/ROCm) describe it detecting the GPU but then hanging or
+failing under WSL2's driver stack, so the README says not to count on it.
+
+Left one item out deliberately: AMD's docs matrix listed a plain "RX 9060"
+(non-XT) as WSL2-supported in one fetch but the separate native-Windows
+matrix only shows "RX 9060 XT" -- an unresolved discrepancy between AMD's
+own pages, not something to assert either way in the README. Only RX 9060 XT
+is listed.
+
+This list is explicitly framed in the README as a snapshot (dated to ROCm
+7.2.1 / late 2026), with a link to AMD's live matrix, given how fast it's
+grown already (6.1.3 to 7.2.1 added roughly 15 SKUs and a whole new
+integrated-GPU family) -- matching this project's existing practice of
+linking to "whatever's current" for the install-guide steps rather than
+pinning exact package versions in prose.

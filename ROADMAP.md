@@ -143,13 +143,32 @@ and its staleness handling if the toggle is later turned back off.
 ### In-app status · 2026-09 · GPU/acceleration status is now visible while the app is running
 
 Onboarding's message was always transient (the window navigates away to the
-main app right after). Now the Settings rail button carries a small accent
-dot whenever the next job will use a GPU (silent for CPU, so it never reads
-as a warning), and the notification panel carries the full device name — "AMD
-GPU (WSL2 + ROCm)", "NVIDIA GPU (CUDA)", etc. — pinned above the notification
-list. Both read `/api/settings`'s live `demucs_device_resolved` plus the
+main app right after). Now the Settings rail button carries a small status
+dot — green whenever the next job will use a GPU (native CUDA or
+AMD-via-WSL2+ROCm alike), grey for CPU — and the notification panel carries
+the full device name — "AMD GPU (WSL2 + ROCm)", "NVIDIA GPU (CUDA)", etc. —
+pinned above the notification list. (Originally shipped with the dot hidden
+entirely for CPU rather than colored grey; changed on Ed's follow-up request
+so the dot is always present and just changes color.) Both read
+`/api/settings`'s live `demucs_device_resolved` plus the
 Tauri-store `wsl2BackendEnabled` flag on desktop, so it always matches what
 will actually run, including a device changed in Settings with no restart.
+
+### README · 2026-09 · which AMD GPUs the WSL2/ROCm path actually supports
+
+Answering two questions from Ed: a built `.exe` still needs the full manual
+WSL2/ROCm setup — packaging (`make-portable.ps1`) only ever bundles a
+native-Windows Python runtime and the Tauri build, never WSL2, ROCm, or the
+separate Linux-side Python environment; the desktop app can launch and
+manage an already-set-up WSL2 backend, but setting one up in the first place
+is unaffected by source vs. `.exe`. And "which cards work" wasn't documented
+anywhere before — only this project's own RX 7800 XT was ever mentioned. The
+README's AMD section now lists AMD's currently WSL2-supported GPUs (RDNA3 +
+RDNA4, plus newly-added Strix/Strix Halo RDNA3.5 iGPUs), explicitly what
+isn't supported there (RDNA2, RDNA1, Polaris/Vega — even though some of
+those work on native Linux ROCm), and a note that the `HSA_OVERRIDE_GFX_VERSION`
+trick doesn't reliably rescue an unsupported card specifically under WSL2.
+Framed as a snapshot with a link to AMD's live matrix, not a permanent list.
 
 ## In flight / next
 
