@@ -377,7 +377,15 @@ async function runSetup() {
 
       try {
         const gpu = await invoke("ensure_torch_device");
-        if (macGPU) {
+        if (gpu.wsl2Enabled) {
+          // AMD GPU via WSL2 + ROCm (Settings toggle): a different result
+          // shape than the native probe below -- gpuDetected/cudaVerified
+          // describe THAT probe and don't apply here (see the wsl2Enabled
+          // doc comment on the Rust GpuSetup struct), so this is checked
+          // before either the mac or native/CUDA branches to avoid
+          // misreading it as a failed CUDA verification.
+          gpuSummary = `${gpu.gpuName} enabled`;
+        } else if (macGPU) {
           gpuSummary =
             gpu.torchDevice === "mps"
               ? `${gpu.gpuName} acceleration enabled`

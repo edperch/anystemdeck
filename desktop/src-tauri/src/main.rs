@@ -344,6 +344,12 @@ struct GpuSetup {
     cuda_verified: bool,
     /// Why this device was chosen; mirrors the persisted torchDeviceReason.
     reason: String,
+    /// True when this result came from the WSL2 + ROCm toggle (Settings),
+    /// not the native NVIDIA probe below -- gpu_detected/cuda_verified
+    /// describe that native probe specifically and don't apply here, so
+    /// setup.js checks this field first to pick the right onboarding
+    /// message instead of misreading it as a failed CUDA verification.
+    wsl2_enabled: bool,
 }
 
 fn main() {
@@ -685,7 +691,7 @@ fn clear_webkit_data() {
 
 /// Returns current runtime state: Python path, FFmpeg path, and persisted torch device.
 #[tauri::command]
-fn probe_runtime() -> Result<RuntimeProbe, String> {
+fn probe_runtime(app_handle: tauri::AppHandle) -> Result<RuntimeProbe, String> {
     let root = app_root()?;
     let data_dir = local_data_dir()?;
     let python = python_path(&root);
@@ -697,6 +703,7 @@ fn probe_runtime() -> Result<RuntimeProbe, String> {
     let torch_device_reason = effective_device_reason(
         read_config_str(&data_dir, "torchDeviceReason"),
         is_cpu_only_package(&root),
+        wsl2_backend_enabled(&app_handle),
     );
     Ok(RuntimeProbe {
         app_root: root.display().to_string(),
@@ -2089,7 +2096,10 @@ fn local_ip() -> Option<String> {
 
 /// Detects GPU hardware, installs CUDA torch if needed, and persists the chosen device.
 #[tauri::command]
-fn ensure_torch_device(state: tauri::State<BackendState>) -> Result<GpuSetup, String> {
+fn ensure_torch_device(
+    app_handle: tauri::AppHandle,
+    state: tauri::State<BackendState>,
+) -> Result<GpuSetup, String> {
     let root = app_root()?;
     let data_dir = local_data_dir()?;
 
@@ -2107,7 +2117,37 @@ fn ensure_torch_device(state: tauri::State<BackendState>) -> Result<GpuSetup, St
             torch_device: "cpu".to_string(),
             cuda_verified: false,
             reason: "cpu-only-package".to_string(),
+            wsl2_enabled: false,
         });
+    }
+
+    // AMD GPU via WSL2 + ROCm: the native probe below only ever looks for an
+    // NVIDIA GPU (detect_nvidia_gpu shells out to nvidia-smi), so on a WSL2/
+    // ROCm setup it always -- correctly, but misleadingly -- concludes
+    // "no GPU". The GPU that will actually be used is invisible to it: it
+    // only exists inside the WSL2 Linux environment, and the Python process
+    // that will run there (and report device=cuda itself, since ROCm
+    // presents to PyTorch as plain torch.cuda) hasn't even started yet --
+    // this command runs before start_backend. So once the toggle is on,
+    // skip the native probe/install entirely rather than let it run to a
+    // false-negative conclusion that overwrites gpuSummary with "no
+    // compatible GPU found".
+    if wsl2_backend_enabled(&app_handle) {
+        let setup = GpuSetup {
+            gpu_detected: true,
+            gpu_name: Some("AMD GPU (WSL2 + ROCm)".to_string()),
+            cuda_version: None,
+            torch_device: "cuda".to_string(),
+            cuda_verified: false,
+            reason: "wsl2-rocm-enabled".to_string(),
+            wsl2_enabled: true,
+        };
+        persist_torch_device(&data_dir, &setup.torch_device, &setup.reason);
+        append_to_setup_log(
+            &data_dir,
+            "GPU setup decision: wsl2BackendEnabled is on, skipping native NVIDIA probe",
+        );
+        return Ok(setup);
     }
 
     let python = python_path(&root)
@@ -2135,6 +2175,7 @@ fn ensure_torch_device(state: tauri::State<BackendState>) -> Result<GpuSetup, St
             torch_device: device.to_string(),
             cuda_verified: false,
             reason: reason.to_string(),
+            wsl2_enabled: false,
         })
     }
 
@@ -2171,6 +2212,7 @@ fn ensure_torch_device(state: tauri::State<BackendState>) -> Result<GpuSetup, St
                     torch_device: if cuda_verified { "cuda" } else { "cpu" }.to_string(),
                     cuda_verified,
                     reason: reason.to_string(),
+                    wsl2_enabled: false,
                 }
             }
             None => GpuSetup {
@@ -2180,6 +2222,7 @@ fn ensure_torch_device(state: tauri::State<BackendState>) -> Result<GpuSetup, St
                 torch_device: "cpu".to_string(),
                 cuda_verified: false,
                 reason: "no-gpu-detected".to_string(),
+                wsl2_enabled: false,
             },
         };
         // Persist device + reason. The setup gate only treats "cuda"/"mps" (or
@@ -2224,9 +2267,21 @@ fn is_portable_package(root: &Path) -> bool {
 /// unsettled so setup re-runs `ensure_torch_device` (which clears the stale
 /// marker and re-probes the GPU). Other reasons pass through unchanged; the
 /// existing #247 "unknown reason = unsettled" path handles the rest. (#316)
-fn effective_device_reason(persisted: Option<String>, cpu_only_package: bool) -> Option<String> {
+fn effective_device_reason(
+    persisted: Option<String>,
+    cpu_only_package: bool,
+    wsl2_enabled: bool,
+) -> Option<String> {
     match persisted.as_deref() {
         Some("cpu-only-package") if !cpu_only_package => None,
+        // Mirrors the cpu-only-package rule above: a "wsl2-rocm-enabled"
+        // reason is only trustworthy while the toggle is still on. If the
+        // user turns it off in Settings, the leftover reason would otherwise
+        // make the setup gate treat "cuda" as settled forever -- dropping it
+        // marks the device unsettled so ensure_torch_device runs the native
+        // probe again on the next launch instead of leaving a WSL2-era
+        // reading in place indefinitely.
+        Some("wsl2-rocm-enabled") if !wsl2_enabled => None,
         _ => persisted,
     }
 }
@@ -5195,6 +5250,7 @@ mod tests {
         let got = super::effective_device_reason(
             Some("cpu-only-package".to_string()),
             /* cpu_only */ false,
+            /* wsl2_enabled */ false,
         );
         assert_eq!(got, None);
     }
@@ -5206,25 +5262,51 @@ mod tests {
         let got = super::effective_device_reason(
             Some("cpu-only-package".to_string()),
             /* cpu_only */ true,
+            /* wsl2_enabled */ false,
         );
         assert_eq!(got.as_deref(), Some("cpu-only-package"));
+    }
+
+    #[test]
+    fn stale_wsl2_reason_dropped_when_toggle_is_off() {
+        // WSL2 toggle disabled after being enabled: the leftover
+        // "wsl2-rocm-enabled" reason must be invalidated so the setup gate
+        // treats the device as unsettled and ensure_torch_device re-runs the
+        // native probe on the next launch, instead of leaving a WSL2-era
+        // "cuda" reading in place indefinitely.
+        let got = super::effective_device_reason(
+            Some("wsl2-rocm-enabled".to_string()),
+            /* cpu_only */ false,
+            /* wsl2_enabled */ false,
+        );
+        assert_eq!(got, None);
+    }
+
+    #[test]
+    fn wsl2_reason_kept_while_toggle_is_still_on() {
+        let got = super::effective_device_reason(
+            Some("wsl2-rocm-enabled".to_string()),
+            /* cpu_only */ false,
+            /* wsl2_enabled */ true,
+        );
+        assert_eq!(got.as_deref(), Some("wsl2-rocm-enabled"));
     }
 
     #[test]
     fn other_device_reasons_pass_through_unchanged() {
         for reason in ["verified", "no-gpu-detected", "cuda-verify-failed", "mps"] {
             assert_eq!(
-                super::effective_device_reason(Some(reason.to_string()), false).as_deref(),
+                super::effective_device_reason(Some(reason.to_string()), false, false).as_deref(),
                 Some(reason),
             );
             assert_eq!(
-                super::effective_device_reason(Some(reason.to_string()), true).as_deref(),
+                super::effective_device_reason(Some(reason.to_string()), true, false).as_deref(),
                 Some(reason),
             );
         }
         // Absent reason stays absent (already unsettled) in both package kinds.
-        assert_eq!(super::effective_device_reason(None, false), None);
-        assert_eq!(super::effective_device_reason(None, true), None);
+        assert_eq!(super::effective_device_reason(None, false, false), None);
+        assert_eq!(super::effective_device_reason(None, true, false), None);
     }
 
     #[cfg(target_os = "macos")]

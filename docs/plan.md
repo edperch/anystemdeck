@@ -741,3 +741,62 @@ awareness of `wsl2BackendEnabled` (the "wizard runs unconditionally before
 `start_backend`" finding from the manual smoke test above still applies) --
 this toggle changes how a *restart* launches, not the setup screen a user
 already mid-flow is looking at.
+
+### Onboarding message: the "no GPU found" text was still wrong for WSL2/ROCm users
+
+The Settings toggle above (previous entry) fixed *reaching* the WSL2/ROCm path
+-- but `ensure_torch_device()` in `main.rs` had no idea it existed. It always
+ran the native NVIDIA probe (`detect_nvidia_gpu`, `nvidia-smi`), regardless of
+`wsl2BackendEnabled`, and that probe correctly finds nothing on an AMD machine
+-- so an AMD user who had just turned the new toggle on and restarted would
+*still* see "No compatible GPU found - stem separation will use CPU" on the
+onboarding screen, exactly backwards from what was about to happen (this is
+also the gap ROADMAP.md flagged, two entries up, as "onboarding wizard still
+has zero awareness of wsl2BackendEnabled").
+
+Root cause was structural, not a missed string: `ensure_torch_device` ran
+*before* `start_backend`, had no `tauri::AppHandle` parameter, and so had no
+way to call the already-existing `wsl2_backend_enabled()` helper at all.
+
+**Fix**: `ensure_torch_device` now takes `app_handle: tauri::AppHandle` and
+checks `wsl2_backend_enabled(&app_handle)` first, before touching the native
+probe. When it's on, the native NVIDIA probe/install is skipped entirely --
+running it would only ever produce a false "no GPU" (the AMD GPU only becomes
+visible once the backend is actually started inside WSL2, which hasn't
+happened yet at this point in setup) -- and `ensure_torch_device` returns a
+new kind of `GpuSetup` result carrying `wsl2Enabled: true` and
+`gpuName: "AMD GPU (WSL2 + ROCm)"` instead. `setup.js` checks `wsl2Enabled`
+before either of the existing mac/native branches, so it can't be misread as
+a failed CUDA verification (`gpuDetected`/`cudaVerified` describe the native
+probe specifically and don't apply to this path) -- the onboarding screen now
+says "AMD GPU (WSL2 + ROCm) enabled" instead of the misleading CPU-fallback
+message.
+
+**Staleness, handled the same way the existing `cpu-only-package` reason
+already is (#316):** the decision is persisted (`torchDevice: "cuda"`,
+`torchDeviceReason: "wsl2-rocm-enabled"`) so the fast-path setup gate can skip
+re-probing on later launches, same as a verified native CUDA result. But
+unlike a graphics card, `wsl2BackendEnabled` is a Settings toggle a user can
+flip off again -- so `effective_device_reason()` gained a third parameter
+(`wsl2_enabled`) and now drops a stale `"wsl2-rocm-enabled"` reason the same
+way it already drops a stale `"cpu-only-package"` one, when the toggle no
+longer matches. Without this, disabling the toggle and restarting would leave
+the onboarding gate believing "cuda" was still settled and skip re-probing,
+even though nothing about the actual running device is affected either way --
+`app/core/config.py`'s own `detect_compute_device()` does a fully independent
+live probe every job and never reads this Rust-side cache at all, so this
+staleness was only ever a display/gate-freshness concern, not a functional
+one.
+
+**Verified**: `cargo check`/`cargo test`/`cargo clippy -- -D warnings`/
+`cargo fmt --check` all clean against a fresh clone (two new tests --
+`stale_wsl2_reason_dropped_when_toggle_is_off`,
+`wsl2_reason_kept_while_toggle_is_still_on` -- plus the three existing
+`effective_device_reason` tests updated for the new parameter); `node --check`
+on `setup.js`; full `tests/js/*.test.mjs` suite green.
+
+**Still open**: part two of the same question -- making GPU/acceleration
+status visible somewhere in the *running* app, not just transiently during
+onboarding -- is a separate, larger UI decision (placement, live source of
+truth) tracked separately below / in ROADMAP.md rather than folded into this
+fix.
