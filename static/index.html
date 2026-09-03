@@ -209,12 +209,12 @@
                 <path d="M12 2v2 M12 20v2 M4 12H2 M22 12h-2 M5 5l1.5 1.5 M17.5 17.5 19 19 M5 19l1.5-1.5 M17.5 6.5 19 5"/>
               </svg>
               <span data-i18n="nav.settings">Settings</span>
-              <!-- GPU/acceleration status: shown (accent-colored) only when the
-                   next job will actually use a GPU, so its absence reads as
-                   "nothing to report" rather than a CPU warning. Kept in sync
-                   with the fuller device-name line in the notification panel
-                   below by ui-chrome.js's refreshGpuStatus(). -->
-              <span class="gpu-status-dot hidden" id="gpuStatusDot" aria-hidden="true"></span>
+              <!-- GPU/acceleration status: always shown once ui-chrome.js's
+                   refreshGpuStatus() has an answer -- grey for CPU, green for
+                   a real GPU (native CUDA or AMD-via-WSL2+ROCm alike). Kept
+                   in sync with the fuller device-name line in the
+                   notification panel below. -->
+              <span class="gpu-status-dot" id="gpuStatusDot" aria-hidden="true"></span>
             </button>
             <button class="rail-btn rail-recommend" id="friendsBtn" type="button" title="We Recommend" aria-label="We Recommend" aria-haspopup="dialog" data-i18n-title="nav.weRecommend" data-i18n-aria-label="nav.weRecommend">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">

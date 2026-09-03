@@ -375,8 +375,8 @@ input, textarea { font-family: inherit; }
    the scrollable notification list so it can't be pushed down or cleared by
    ordinary notifications (see notifDevice in index.html / refreshGpuStatus()
    in ui-chrome.js). Neutral by default; the -accelerated modifier picks up
-   the app's existing accent color, the same tint .daw-notif-release already
-   uses for its icon, rather than introducing a separate "success" color. */
+   the app's existing --success green (Settings rail dot, above) for the
+   accelerated state, and its default grey/muted otherwise. */
 .daw-notif-device {
   display: flex;
   gap: 10px;
@@ -392,8 +392,8 @@ input, textarea { font-family: inherit; }
   color: var(--muted);
 }
 .daw-notif-device-accelerated .daw-notif-device-icon {
-  background: rgba(244,183,64,0.12);
-  color: var(--accent);
+  background: rgba(63,191,114,0.14);
+  color: var(--success);
 }
 .daw-notif-device-body { flex: 1; min-width: 0; }
 .daw-notif-device-title {
@@ -534,20 +534,20 @@ input, textarea { font-family: inherit; }
 .rail-btn.rail-recommend span { white-space: normal; text-align: center; line-height: 1.1; }
 
 /* Settings rail button: GPU/acceleration status dot, same positioning
-   pattern as .rail-queue/.rail-badge above. Hidden by default -- it only
-   appears (accent-colored) once refreshGpuStatus() (ui-chrome.js) confirms
-   the next job will actually use a GPU, so a quiet dot means "nothing to
-   report" rather than reading as a CPU warning. The button's title attribute
-   (set by the same function) carries the full device name on hover either
-   way, dot or no dot. */
+   pattern as .rail-queue/.rail-badge above. Always shown once
+   refreshGpuStatus() (ui-chrome.js) has an answer -- grey/muted for CPU,
+   green (--success) once a real GPU (native CUDA or AMD-via-WSL2+ROCm
+   alike) is confirmed. The button's title attribute (set by the same
+   function) always carries the full device name on hover too. */
 .rail-settings { position: relative; }
 .gpu-status-dot {
   position: absolute; top: 4px; right: 6px;
   width: 8px; height: 8px;
-  background: var(--accent);
+  background: var(--muted);
   border-radius: 50%;
   pointer-events: none;
 }
+.gpu-status-dot-accelerated { background: var(--success); }
 
 /* Sidebar body */
 .sidebar-body {

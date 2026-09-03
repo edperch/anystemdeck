@@ -35,13 +35,13 @@ document.addEventListener("click", (e) => {
 });
 
 // Persistent GPU/acceleration status: a dot on the Settings rail button
-// (accent-colored only when the next job will actually use a GPU, hidden for
-// CPU) plus a fuller device-name line pinned at the top of the notification
-// panel. Both read the same live source of truth the Settings device
-// dropdown itself uses -- GET /api/settings's demucs_device_resolved -- so
-// this always matches what will actually run, not whatever onboarding
-// decided at launch (which can go stale the moment someone changes the
-// device in Settings, with no restart involved).
+// (green once a real GPU -- native CUDA or AMD-via-WSL2+ROCm alike -- is
+// confirmed, grey for CPU) plus a fuller device-name line pinned at the top
+// of the notification panel. Both read the same live source of truth the
+// Settings device dropdown itself uses -- GET /api/settings's
+// demucs_device_resolved -- so this always matches what will actually run,
+// not whatever onboarding decided at launch (which can go stale the moment
+// someone changes the device in Settings, with no restart involved).
 //
 // On desktop, demucs_device_resolved alone can't tell a real NVIDIA card
 // apart from AMD-via-WSL2+ROCm -- both report "cuda" once ROCm is presenting
@@ -89,7 +89,9 @@ async function refreshGpuStatus() {
     const label = gpuStatusLabel(device, wsl2Enabled);
 
     settingsBtn.title = label;
-    gpuStatusDot?.classList.toggle("hidden", !accelerated);
+    // Always shown, grey (default) for CPU, green once a real GPU -- native
+    // CUDA or AMD-via-WSL2+ROCm alike -- is confirmed.
+    gpuStatusDot?.classList.toggle("gpu-status-dot-accelerated", accelerated);
     if (notifDevice && notifDeviceLabel) {
       notifDeviceLabel.textContent = label;
       notifDevice.classList.toggle("daw-notif-device-accelerated", accelerated);

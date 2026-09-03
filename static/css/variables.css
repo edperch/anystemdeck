@@ -41,6 +41,10 @@
   --line-strong: var(--border-strong);
   --glass-line:  var(--border);
   --danger:      #d65a4a;
+  /* GPU-accelerated status only (Settings rail dot, notification panel) --
+     the rest of the app has no other use for green, so this stays scoped to
+     that one meaning rather than becoming a general "success" color. */
+  --success:     #3fbf72;
   --focus-ring:  rgba(236,236,236,0.55);
 
   /* Typography */
