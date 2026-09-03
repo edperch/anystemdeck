@@ -140,6 +140,17 @@ running its native NVIDIA-only probe, and skips straight to an honest "AMD GPU
 (WSL2 + ROCm) enabled" message when it's on. See `docs/plan.md` for the fix
 and its staleness handling if the toggle is later turned back off.
 
+### In-app status · 2026-09 · GPU/acceleration status is now visible while the app is running
+
+Onboarding's message was always transient (the window navigates away to the
+main app right after). Now the Settings rail button carries a small accent
+dot whenever the next job will use a GPU (silent for CPU, so it never reads
+as a warning), and the notification panel carries the full device name — "AMD
+GPU (WSL2 + ROCm)", "NVIDIA GPU (CUDA)", etc. — pinned above the notification
+list. Both read `/api/settings`'s live `demucs_device_resolved` plus the
+Tauri-store `wsl2BackendEnabled` flag on desktop, so it always matches what
+will actually run, including a device changed in Settings with no restart.
+
 ## In flight / next
 
 No formal issue tracker yet for fork-specific work (unlike StemDeck's own
@@ -150,10 +161,6 @@ were AnyStemDeck's). Current list, roughly in the order it's likely to matter:
   terminal steps ([README](README.md#amd-gpu-on-windows-via-wsl2--rocm)).
   Decision #6 and its follow-ups in `docs/plan.md`'s Decisions section settle
   the shape of the script that will replace them.
-- **A persistent in-app GPU/acceleration indicator.** Onboarding's message is
-  transient (the window navigates away to the main app right after) and the
-  main app currently shows device status nowhere at all. Placement and design
-  still open.
 - **DirectML parity testing.** Numerical and speed parity against the
   CPU/CUDA path on the same input hasn't been verified on real hardware yet.
 

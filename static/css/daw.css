@@ -370,6 +370,38 @@ input, textarea { font-family: inherit; }
   font-family: inherit; font-size: 11px;
 }
 .daw-notif-clear:hover { color: var(--fg); text-decoration: underline; }
+
+/* Persistent GPU/acceleration status strip -- pinned between the header and
+   the scrollable notification list so it can't be pushed down or cleared by
+   ordinary notifications (see notifDevice in index.html / refreshGpuStatus()
+   in ui-chrome.js). Neutral by default; the -accelerated modifier picks up
+   the app's existing accent color, the same tint .daw-notif-release already
+   uses for its icon, rather than introducing a separate "success" color. */
+.daw-notif-device {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.daw-notif-device-icon {
+  width: 24px; height: 24px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--panel);
+  border-radius: 6px;
+  color: var(--muted);
+}
+.daw-notif-device-accelerated .daw-notif-device-icon {
+  background: rgba(244,183,64,0.12);
+  color: var(--accent);
+}
+.daw-notif-device-body { flex: 1; min-width: 0; }
+.daw-notif-device-title {
+  font-size: 10px; font-weight: 600; color: var(--muted);
+  text-transform: uppercase; letter-spacing: 0.04em;
+}
+.daw-notif-device-desc { font-size: 12px; font-weight: 500; color: var(--fg); margin-top: 2px; }
+
 .daw-notif-list { padding: 8px; display: flex; flex-direction: column; gap: 6px; }
 .daw-notif-card {
   display: flex;
@@ -500,6 +532,22 @@ input, textarea { font-family: inherit; }
    two centered lines; let the button grow so the second line + icon aren't clipped. */
 .rail-btn.rail-recommend { height: auto; min-height: 40px; padding: 3px 0; }
 .rail-btn.rail-recommend span { white-space: normal; text-align: center; line-height: 1.1; }
+
+/* Settings rail button: GPU/acceleration status dot, same positioning
+   pattern as .rail-queue/.rail-badge above. Hidden by default -- it only
+   appears (accent-colored) once refreshGpuStatus() (ui-chrome.js) confirms
+   the next job will actually use a GPU, so a quiet dot means "nothing to
+   report" rather than reading as a CPU warning. The button's title attribute
+   (set by the same function) carries the full device name on hover either
+   way, dot or no dot. */
+.rail-settings { position: relative; }
+.gpu-status-dot {
+  position: absolute; top: 4px; right: 6px;
+  width: 8px; height: 8px;
+  background: var(--accent);
+  border-radius: 50%;
+  pointer-events: none;
+}
 
 /* Sidebar body */
 .sidebar-body {

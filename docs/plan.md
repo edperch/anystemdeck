@@ -800,3 +800,59 @@ status visible somewhere in the *running* app, not just transiently during
 onboarding -- is a separate, larger UI decision (placement, live source of
 truth) tracked separately below / in ROADMAP.md rather than folded into this
 fix.
+
+### Persistent in-app GPU/acceleration status: a dot on Settings + a line in the notification panel
+
+Part two of Ed's question, held back deliberately from the onboarding-message
+fix above until placement was settled: onboarding's message is transient (the
+window navigates away to the main app right after), and the main app itself
+showed device status nowhere at all. Asked Ed where it should live, given
+real trade-offs -- a topbar chip (always visible, but this app deliberately
+keeps its topbar minimal today, e.g. the version number is hidden there on
+purpose), the notification panel alone (matches that minimal-topbar instinct,
+but needs a click), or something on the Settings rail button itself (low
+visual weight, sits where the user would actually go to check or change it).
+Ed picked a hybrid: a status dot on the Settings rail button, plus the fuller
+device name in the notification panel.
+
+**Implementation**: a single `refreshGpuStatus()` in the new
+`static/js/ui-chrome.js` addition reads the same live source of truth the
+Settings device dropdown itself uses -- `GET /api/settings`'s
+`demucs_device_resolved` -- so this can never go stale relative to what the
+next job will actually do, including a live device change made in Settings
+with no restart. On desktop, that field alone can't distinguish a real
+NVIDIA card from AMD-via-WSL2+ROCm (both report `"cuda"`, since ROCm
+presents to PyTorch as plain `torch.cuda`) -- disambiguating reuses the same
+`wsl2BackendEnabled` Tauri-store flag `wireWsl2Setting` (catalog.js) already
+reads, gated behind `getBuildTarget().os === "windows"` the same way that
+function gates its own Windows-only section.
+
+Two surfaces, one function:
+- **Settings rail button** (`#settingsBtn`, now `.rail-settings` for
+  positioning): a small accent-colored dot (`#gpuStatusDot`, styled like the
+  existing `.rail-badge` pattern) that only appears when the resolved device
+  is not `"cpu"` -- deliberately absence-means-nothing rather than a visible
+  "CPU warning" dot, so it can't read as an error state for the common case.
+  The button's `title` always carries the full device text on hover either
+  way, dot or no dot.
+- **Notification panel** (`#notifDevice`, between the header and the
+  scrollable list): a persistent, non-dismissible status strip -- kept
+  deliberately outside `notifList`/`notifEmpty`'s failure+release
+  bookkeeping (`notifications.js`'s `render()`) since it isn't a
+  notification that gets cleared, just always-current status. Placed as a
+  header-level strip rather than a list card specifically to avoid
+  interacting with `render()`'s anchor-based card-insertion logic.
+
+Refreshed on load, every time the notification panel is opened (cheap fetch,
+no polling), and on a language change (three new i18n keys --
+`gpu.status.title`, `gpu.status.accelerated` with a `{device}` placeholder,
+`gpu.status.cpu` -- added to all 9 non-`pt-PT` locale blocks; the device
+names themselves stay English, matching this project's existing precedent
+for WSL2/ROCm/DirectML). No new accent color -- both surfaces reuse the
+app's existing gold `--accent`, the same tint `.daw-notif-release` already
+uses, rather than introducing a separate "success" green the app's palette
+doesn't otherwise have.
+
+Frontend-only change (no Rust/Python touched) -- verified with `node --check`
+on the two edited JS files and the full `tests/js/*.test.mjs` suite (all
+green) against a fresh clone with these files layered on top.
