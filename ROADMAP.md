@@ -119,6 +119,17 @@ resolution no longer falls through to `dml` — it stays `cuda > mps > cpu`, wit
 "no GPU" message is now simply "No compatible GPU found — stem separation will
 use CPU", which is accurate again now that CPU is genuinely where auto lands.
 
+### Settings UI · 2026-09 · a real "Enable AMD GPU (WSL2 + ROCm)" toggle
+
+The WSL2/ROCm backend (shipped as v0.1.0, above) previously had no UI at all —
+enabling it meant hand-editing the app's config file, the workaround this
+project's own manual smoke test used before the guided-setup flow existed.
+Settings now has a real toggle plus an optional WSL distro field, wired to the
+same store keys `start_backend` already reads at launch. Windows-desktop-only,
+hidden everywhere else. Deliberately narrow: it flips the switch to what
+already works, but does not install or verify WSL2/ROCm itself — that's still
+the guided-setup flow below.
+
 ## In flight / next
 
 No formal issue tracker yet for fork-specific work (unlike StemDeck's own

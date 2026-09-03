@@ -998,6 +998,10 @@ input, textarea { font-family: inherit; }
 .qr-label { font-size: 9.5px; color: var(--muted); text-align: center; max-width: 130px; word-break: break-all; }
 .settings-server-note { font-size: 10.5px; color: var(--muted); margin: 0 0 12px; line-height: 1.5; }
 .settings-subhead { font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); font-weight: 600; margin: 4px 0 7px; }
+/* AMD GPU (WSL2 + ROCm) toggle: JS-gated to Windows desktop only, so it
+   starts hidden and is revealed after that check -- same reasoning as
+   .settings-net.hidden above, .hidden itself doesn't reach this overlay. */
+.settings-wsl2-section.hidden { display: none; }
 
 /* Settings → registry (read-only viewer) */
 .settings-registry-refresh { flex-shrink: 0; min-height: 28px; border-radius: 6px; border: 1px solid var(--border-strong); background: rgba(10,17,24,0.6); color: var(--fg-2); font-family: var(--font-mono); font-size: 11px; padding: 0 12px; cursor: pointer; }

@@ -667,3 +667,77 @@ future jobs -- if that job did use `dml`, per the analysis above it likely means
 that job actually failed/errored rather than silently corrupting output, which
 doesn't match "6 stems produced and played back fine," so `cpu` is the more
 consistent explanation, but it's worth confirming rather than assuming.
+
+### Settings toggle for the WSL2/ROCm backend, replacing the hand-edit-the-store-file workaround
+
+Ed asked to build a real "Enable AMD GPU (WSL2 + ROCm)" Settings control rather than
+keep hand-editing `user-data.json` to set `wsl2BackendEnabled`/`wsl2Distro` (the
+workaround this doc's own manual smoke test above used, since Decision #6's guided
+setup flow -- which was meant to own this -- is still unbuilt).
+
+**Scope, deliberately narrow.** This adds the toggle and a distro field, nothing
+else: no ROCm/WSL2 installation, no validation that the distro named actually has
+ROCm+PyTorch working, no first-run wizard integration. It's the same "no silent
+guessing" posture Decision #6 itself already commits to for the guided-setup
+script -- a raw switch to what already works at the Rust level
+(`wsl2_backend_enabled()`, `start_backend`'s WSL2 branch, all shipped and
+real-hardware-verified earlier in this doc), described honestly as needing WSL2
+and ROCm already set up by hand (README's existing AMD GPU section) rather than
+implying this button does that setup.
+
+**New Settings section** (`static/js/catalog.js`, `openLibraryEditor`'s template,
+right after the compute-device/quality sections): a toggle ("Enable AMD GPU
+(WSL2 + ROCm)") and an optional "WSL distro" text field, in a
+`.settings-wsl2-section` that starts `hidden` in the markup and is only revealed
+by `wireWsl2Setting()` once two things are confirmed -- desktop (`window.__TAURI__`
+present) and Windows (`getBuildTarget().os === "windows"`) -- so it never flashes
+on a platform (macOS, Linux, server/browser mode) where WSL2 doesn't exist or the
+Tauri store isn't reachable.
+
+**Different plumbing from every other control in this modal, deliberately.** The
+compute-device select and everything else here round-trips through
+`/api/settings` (Python, live, applies to the next job). `wsl2BackendEnabled` is
+read once by Rust's `start_backend`, before the Python backend has even started
+-- there is no live equivalent to push a change into. So this goes through the
+Tauri store (`storeGet`/`storeSet` from `utils.js`) instead, the same path the
+language picker already uses for exactly this reason (see that function's own
+comment). A change here only takes effect on the next launch; the description
+text says so rather than the UI pretending otherwise.
+
+**`wsl2Distro` semantics matched exactly to what `main.rs`'s own `wsl2_distro()`
+already does with it** (`.filter(|s| !s.trim().is_empty())` -- empty/whitespace
+means "let wsl.exe use its own default distro"): the JS side trims on blur and
+stores `null` rather than `""` for an empty field, so the persisted value stays
+meaningful (`null` = unset) instead of accumulating stray empty strings, though
+either would have worked given the Rust-side filter.
+
+**i18n**: six new keys (`settings.wsl2.subhead`/`enable.title`/`enable.desc`/
+`distro.title`/`distro.desc`/`distro.placeholder`) added identically to all 9
+locale blocks in `static/js/i18n.js`, left in English everywhere -- matching the
+existing precedent for this exact kind of string (`settings.device.dml` is also
+identical English text in all 9 blocks): "WSL2", "ROCm", and "AMD GPU" are
+technical/brand terms, the same category CUDA/DirectML/MPS's option labels
+already are.
+
+**CSS**: one new rule, `.settings-wsl2-section.hidden { display: none; }` --
+*not* the generic `.hidden` utility class, which is scoped to `.daw` and (per
+the existing comment right above where this was added) doesn't reach the
+settings overlay at all, since that's appended to `document.body`. Same
+reasoning `.settings-net.hidden` already uses one row up.
+
+**Verified**: `node --check` clean on every touched JS file, the full
+`tests/js/*.test.mjs` suite still green (i18n-detect unaffected: it tests locale
+*detection*, not per-key coverage, and no LANGUAGES/detection logic changed).
+No Rust changed -- `wsl2_backend_enabled()`/`wsl2_distro()`/`start_backend`'s
+WSL2 branch were already shipped and real-hardware-verified earlier in this doc;
+this only adds a way to reach the store keys they already read, from the UI
+instead of by hand.
+
+**Not done, and worth being upfront about**: the toggle doesn't verify WSL2/ROCm
+actually works before letting itself be switched on -- if the guided-setup
+script (still unbuilt) later exists, wiring a real check in here first is
+straightforward. Also not done: the ONBOARDING/first-run wizard still has zero
+awareness of `wsl2BackendEnabled` (the "wizard runs unconditionally before
+`start_backend`" finding from the manual smoke test above still applies) --
+this toggle changes how a *restart* launches, not the setup screen a user
+already mid-flow is looking at.

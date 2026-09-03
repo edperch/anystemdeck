@@ -3251,6 +3251,50 @@ async function wireGeneralSettings(overlay) {
   });
 }
 
+// AMD GPU via WSL2 + ROCm: a different kind of "device" setting from the
+// compute-device select above. That one (including "dml") is read live by
+// the Python backend, per job. This one decides which backend *process*
+// launches at all -- native Windows vs. inside WSL2 -- a Rust-level,
+// launch-time choice (wsl2_backend_enabled() in main.rs, read once before
+// the Python backend even starts). So it goes through the Tauri store
+// (storeGet/storeSet), the same as the language setting, not the
+// /api/settings round trip the rest of this modal uses, and a change here
+// only takes effect on the next launch -- there is no live equivalent to
+// apply it to the process that is already running.
+//
+// Windows-only (WSL2 doesn't exist elsewhere) and desktop-only (there is no
+// Tauri store in server/browser mode) -- the section starts hidden in the
+// markup and is only revealed once both are confirmed, so it never flashes
+// on a platform where it does nothing.
+async function wireWsl2Setting(overlay) {
+  const section = overlay.querySelector(".settings-wsl2-section");
+  const enableInput = overlay.querySelector(".wsl2-enable-input");
+  const distroInput = overlay.querySelector(".set-wsl2-distro");
+  if (!section || !enableInput) return;
+  if (!window.__TAURI__?.core?.invoke) return;
+
+  const target = await getBuildTarget();
+  if (target.os !== "windows") return;
+  section.classList.remove("hidden");
+
+  const [enabled, distro] = await Promise.all([
+    storeGet("wsl2BackendEnabled", false),
+    storeGet("wsl2Distro", null),
+  ]);
+  enableInput.checked = enabled === true;
+  if (distroInput) distroInput.value = distro || "";
+
+  enableInput.addEventListener("change", () => {
+    storeSet("wsl2BackendEnabled", enableInput.checked);
+  });
+
+  distroInput?.addEventListener("change", () => {
+    const val = distroInput.value.trim();
+    distroInput.value = val;
+    storeSet("wsl2Distro", val || null);
+  });
+}
+
 async function wireNetworkSetting(overlay) {
   const input = overlay.querySelector(".net-access-input");
   const netWrap = overlay.querySelector(".settings-net");
@@ -3644,6 +3688,26 @@ function openLibraryEditor() {
             </select>
           </div>
         </div>
+        <div class="settings-section settings-wsl2-section hidden">
+          <div class="settings-subhead" data-i18n="settings.wsl2.subhead">AMD GPU (WSL2 + ROCm)</div>
+          <div class="settings-row">
+            <div class="settings-row-text">
+              <div class="settings-row-title" data-i18n="settings.wsl2.enable.title">Enable AMD GPU (WSL2 + ROCm)</div>
+              <div class="settings-row-desc" data-i18n="settings.wsl2.enable.desc">Runs stem separation inside WSL2 with ROCm, for GPU acceleration on AMD graphics cards. Requires WSL2 and ROCm already installed — see the README's AMD GPU section. Restart AnyStemDeck after changing this.</div>
+            </div>
+            <label class="settings-switch">
+              <input type="checkbox" class="wsl2-enable-input" />
+              <span class="settings-switch-track"><span class="settings-switch-thumb"></span></span>
+            </label>
+          </div>
+          <div class="settings-row settings-row-stack">
+            <div class="settings-row-text">
+              <div class="settings-row-title" data-i18n="settings.wsl2.distro.title">WSL distro</div>
+              <div class="settings-row-desc" data-i18n="settings.wsl2.distro.desc">Leave blank to use your default WSL distro.</div>
+            </div>
+            <input type="text" class="settings-text-input set-wsl2-distro" spellcheck="false" autocomplete="off" placeholder="e.g. Ubuntu-24.04" data-i18n-placeholder="settings.wsl2.distro.placeholder" aria-label="WSL distro" data-i18n-aria-label="settings.wsl2.distro.title" />
+          </div>
+        </div>
         <div class="settings-subhead" data-i18n="settings.outOfSync.subhead">Out of sync tracks</div>
         <div class="library-editor-table-wrap">
           <table class="library-editor-table">
@@ -3827,6 +3891,7 @@ function openLibraryEditor() {
   wireGeneralSettings(overlay);
   wireStemsLocation(overlay);
   wireNetworkSetting(overlay);
+  wireWsl2Setting(overlay);
   if (!isDesktop) {
     overlay.querySelector(".net-access-input")?.setAttribute("disabled", "");
     overlay.querySelector(".set-port")?.setAttribute("readonly", "");
