@@ -865,7 +865,7 @@ Python runtime and the Tauri build only; it never touches WSL2, ROCm, or the
 separate Linux-side Python environment the README's AMD section walks
 through installing by hand. The desktop app can *launch and manage* an
 already-set-up WSL2 backend (the `wsl2BackendEnabled` toggle from earlier
-this week), but setting that backend up in the first place -- steps 1-8 of
+this week), but setting that backend up in the first place -- steps 1-9 of
 the README's AMD section -- is unaffected by whether you run from source or
 a packaged `.exe`. A guided in-app setup flow that could someday automate
 this is still open, tracked in ROADMAP.md's "In flight / next"), and to add
@@ -899,3 +899,22 @@ grown already (6.1.3 to 7.2.1 added roughly 15 SKUs and a whole new
 integrated-GPU family) -- matching this project's existing practice of
 linking to "whatever's current" for the install-guide steps rather than
 pinning exact package versions in prose.
+
+### README: an explicit "how do I get into WSL2" step, and PowerShell/WSL2 labels on every command
+
+Ed's follow-up on the GPU-list addition: the setup steps assumed the reader
+already knew how to open a WSL2 shell (several just said "inside WSL2" with
+no instruction for actually getting there), and didn't say which environment
+-- Windows PowerShell or a WSL2 shell -- each command belonged in.
+
+Inserted a new step 2, **Open a WSL2 shell** (`wsl -d Ubuntu-24.04` from
+PowerShell, or launching "Ubuntu 24.04" from the Start menu; also covers the
+one-time UNIX username/password prompt on first use), and labeled every
+step from there on with **[PowerShell]**, **[WSL2 -- see step 2]**, or, for
+the optional final step's config-file edit, **[Windows -- any text editor]**
+-- that one doesn't run in either shell at all, it's just editing a JSON
+file, so labeling it PowerShell or WSL2 would have been actively wrong. Old
+steps 2-9 shifted to 3-10 to make room; the two "nine manual steps" /
+"steps 1-8" cross-references (ROADMAP.md, the previous README entry above)
+updated to match the new count (ten steps total, nine required + the
+optional desktop-management one, formerly split at eight).

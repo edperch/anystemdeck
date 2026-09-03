@@ -176,8 +176,8 @@ No formal issue tracker yet for fork-specific work (unlike StemDeck's own
 numbered issues, which this file used to — incorrectly — link to as if they
 were AnyStemDeck's). Current list, roughly in the order it's likely to matter:
 
-- **The WSL2/ROCm guided-setup flow.** Today's AMD setup is nine manual
-  terminal steps ([README](README.md#amd-gpu-on-windows-via-wsl2--rocm)).
+- **The WSL2/ROCm guided-setup flow.** Today's AMD setup is ten manual
+  steps ([README](README.md#amd-gpu-on-windows-via-wsl2--rocm)).
   Decision #6 and its follow-ups in `docs/plan.md`'s Decisions section settle
   the shape of the script that will replace them.
 - **DirectML parity testing.** Numerical and speed parity against the
