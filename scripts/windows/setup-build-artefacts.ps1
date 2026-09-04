@@ -60,7 +60,16 @@ $Targets = @(
 function Test-IsJunction([string]$Path) {
   if (-not (Test-Path -LiteralPath $Path)) { return $false }
   $item = Get-Item -LiteralPath $Path -Force
-  return [bool]($item.Attributes -band [IO.FileAttributes]::ReparsePoint)
+  # Checking the ReparsePoint attribute bit alone is NOT enough: OneDrive's
+  # Files On-Demand / cloud-filter driver tags directories under its own
+  # sync root as reparse points too, even ordinary, fully-hydrated, never-
+  # linked folders -- so a checkout that lives inside OneDrive (like this
+  # one usually does) would have every target folder here misread as
+  # "already a junction" on the very first run. PowerShell's own -LinkType
+  # property only populates for reparse points it recognizes as an actual
+  # symlink or junction, so checking that specifically (rather than the raw
+  # attribute bit) tells the two apart correctly.
+  return $item.LinkType -eq "Junction"
 }
 
 foreach ($rel in $Targets) {
