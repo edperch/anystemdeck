@@ -918,3 +918,71 @@ steps 2-9 shifted to 3-10 to make room; the two "nine manual steps" /
 "steps 1-8" cross-references (ROADMAP.md, the previous README entry above)
 updated to match the new count (ten steps total, nine required + the
 optional desktop-management one, formerly split at eight).
+
+### `scripts/windows/setup-build-artefacts.ps1`: OneDrive sync scare, resolved with NTFS junctions
+
+Ed's checkout lives inside OneDrive, and hit exactly the risk `.gitignore`
+can't cover: OneDrive prompted to delete/upload over 7,000 files in one
+sync pass, alarming on its own, and made worse by `dist/`'s bundled Python
+environment surfacing `yt-dlp/extractor/youporn.py` in the file list --
+`.gitignore` only stops *git* from tracking `dist/`, `.venv/`, and the
+`desktop/src-tauri/target|gen`/`node_modules` build outputs; it does nothing
+for a filesystem-level sync tool, which uploads whatever's physically on
+disk regardless. Confirmed nothing was actually wrong: `git ls-files dist`
+returns zero tracked files (the `.gitignore` entry was always doing its job
+git-side), and `youporn.py` is a completely ordinary yt-dlp extractor module
+-- yt-dlp ships one such module per supported site, `pyproject.toml` lists
+`yt-dlp>=2026.7.4` as a real direct dependency (used for the app's
+URL-import "Composer pill" feature), and an adult-site extractor is just
+alphabetically one of many, not a sign of compromise.
+
+Asked what to do about it going forward. Ed's answer: redirect these folders
+out to `D:\Build Artefacts\$project-name\<same relative path>` (e.g. this
+repo's `dist/` becomes a junction pointing at
+`D:\Build Artefacts\AnyStemDeck\dist`), covering "the big offenders" (`dist`,
+`.venv`, `desktop/src-tauri/target`, `desktop/src-tauri/gen`,
+`desktop/node_modules` -- smaller tool caches like `.ruff_cache` left alone,
+nowhere near the same scale), and packaged as a reusable
+`scripts/windows/setup-build-artefacts.ps1` rather than a one-off manual fix.
+
+NTFS junctions over symlinks, deliberately: junctions need no admin rights
+or Developer Mode (symlinks on Windows do, for a non-elevated user), and
+OneDrive is documented to skip junctions during sync entirely rather than
+attempting to traverse into them -- symlinks don't get the same treatment
+reliably. The script is idempotent (an already-correct junction is left
+alone on re-run), moves existing real content to the artefacts location
+before linking rather than discarding it, and deliberately refuses to guess
+when both the source and destination already hold real, differing content
+-- same "never silently provision, never silently overwrite" instinct
+already established for the WSL2 setup script design (Decision #6, above).
+Pre-provisions the destination and links immediately for folders that don't
+exist yet, so whatever creates them later (`cargo`, `npm`, `uv`,
+`make-portable.ps1`) writes straight to the artefacts location and never
+touches the synced checkout even transiently.
+
+Verified the script's logic (not just a syntax check) before touching Ed's
+real repo: installed PowerShell 7.4.6 standalone in the sandbox specifically
+for this (no apt/snap package available), confirmed
+`[System.Management.Automation.Language.Parser]::ParseFile()` reports clean
+parses, then ran the script against a synthetic mock tree
+(`dist/` with a real file, `.venv/lib`, `desktop/src-tauri/`, `desktop/`)
+under both `-WhatIf` and a real run, with the Windows-only guard temporarily
+stripped for the test. Surfaced one real, Linux-only PowerShell Core quirk
+in the process: `New-Item -ItemType Junction` silently no-ops there --
+`Move-Item` correctly relocated content, but the junction creation call
+neither threw (despite `$ErrorActionPreference = "Stop"`) nor created
+anything, leaving the moved content with nothing pointing back to it.
+Junctions aren't a native ext4 concept, so this is expected to not occur on
+real Windows -- but added a defensive `Test-IsJunction` check immediately
+after every `New-Item -ItemType Junction` call regardless, throwing loudly
+if it ever fails silently for any reason, on any platform, rather than
+leaving content moved with no link back to it.
+
+One real constraint surfaced while finishing this: the device bridge used
+to reach Ed's actual machine is a Linux VM shell (`device_bash`), not native
+Windows PowerShell or cmd -- Windows-native operations like junction
+creation genuinely cannot be executed through it, and `D:\Build Artefacts`
+isn't among the folders connected to this session regardless. Writing the
+script's own text content to the repo is a plain file write and works fine
+this way; actually running it against Ed's real folders does not, and has
+to happen in a native PowerShell window on his end.

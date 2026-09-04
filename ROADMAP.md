@@ -170,6 +170,28 @@ those work on native Linux ROCm), and a note that the `HSA_OVERRIDE_GFX_VERSION`
 trick doesn't reliably rescue an unsupported card specifically under WSL2.
 Framed as a snapshot with a link to AMD's live matrix, not a permanent list.
 
+### Dev tooling · 2026-09 · a checkout inside OneDrive no longer syncs build output
+
+Not a fix, a housekeeping addition: Ed's checkout lives inside OneDrive, and
+`dist/`, `.venv/`, `desktop/src-tauri/target/`, `desktop/src-tauri/gen/`, and
+`desktop/node_modules/` — all real, all gitignored, none of that stops a
+sync tool from uploading them anyway, since sync tools work off what's
+physically on disk, not `.gitignore`. On one sync pass OneDrive queued over
+7,000 files for upload/delete, alarming enough on its own, made worse by
+`dist/`'s bundled Python environment containing `yt-dlp`'s per-site
+extractor modules — one of which is literally named after an adult site,
+`youporn.py`, a real and legitimate part of yt-dlp (it's a direct
+`pyproject.toml` dependency, used for the app's URL-import feature) rather
+than any sign of compromise, but alarming to see mid-sync regardless. New
+`scripts/windows/setup-build-artefacts.ps1` redirects those five folders to
+`D:\Build Artefacts\<project>\` (configurable) via NTFS junctions — chosen
+over symlinks specifically because junctions need no admin rights or
+Developer Mode, and OneDrive skips them outright rather than trying to sync
+through them. Idempotent (safe to re-run any time), moves existing content
+rather than discarding it, and refuses to touch anything if both the source
+and destination already have real, differing content rather than guessing
+which to keep. Documented in `CONTRIBUTING.md`.
+
 ## In flight / next
 
 No formal issue tracker yet for fork-specific work (unlike StemDeck's own

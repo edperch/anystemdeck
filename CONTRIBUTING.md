@@ -44,6 +44,17 @@ Other helpers:
 Open `http://localhost:8000` in your browser to use the app. Frontend changes are picked up on
 reload (no build step).
 
+### Checkout inside a cloud-sync folder (OneDrive, Dropbox, Google Drive...)
+
+If your clone lives inside a folder one of these tools syncs, `dist/`, `.venv/`,
+`desktop/src-tauri/target/`, `desktop/src-tauri/gen/`, and `desktop/node_modules/` all get
+synced too -- these tools sync whatever's physically on disk, `.gitignore` doesn't apply to
+them. That's thousands of files and multiple GB of churn for folders that are pure build
+output. On Windows, `scripts/windows/setup-build-artefacts.ps1` redirects those folders out
+to `D:\Build Artefacts\<project>\` (configurable) via NTFS junctions, so your tools keep
+writing to the same relative paths but the sync tool never sees the content. Idempotent and
+safe to re-run; try `-WhatIf` first to preview what it would do.
+
 ## Before you open a pull request
 
 Please run the same checks CI runs:
