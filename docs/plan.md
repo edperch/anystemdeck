@@ -191,7 +191,7 @@ Nothing in the WSL2 launch path has run against real WSL2/Windows yet — the sa
 1. **✅ done — Provision the WSL2 Python environment** (7a/7b) — inside the same `Ubuntu-24.04` instance where `torch.cuda.is_available()` already returns `True`:
    ```
    sudo apt install -y ffmpeg
-   cd "/mnt/d/OneDrive/Git/Stem Separation/AnyStemDeck"   # the repo lives on D:, not C:
+   cd "<repo-root>"   # the repo lives on D:, not C:
    SETUPTOOLS_SCM_PRETEND_VERSION=0.0.0.dev0 pip install --user --break-system-packages -e .
    ```
    Two real, worth-recording snags, neither a bug in this project's code:
@@ -216,7 +216,7 @@ Nothing in the WSL2 launch path has run against real WSL2/Windows yet — the sa
 
 ### A new bug found doing step 2: `user-data.json` loses the `wsl2*` keys between being written and the app reading them
 
-Ran step 2 for real and it didn't work the way it should have. Sequence: with StemDeck fully closed, `user-data.json` (`D:\OneDrive\Documents\StemDeck\jobs\user-data.json` — the real Documents location turned out to be OneDrive-redirected, not the plain `%USERPROFILE%\Documents` the runbook originally assumed) was written with `wsl2BackendEnabled: true` and `wsl2Distro: "Ubuntu-24.04"` merged in alongside the existing `stemdeck.folders` library data, confirmed on disk via a direct read right after the write. StemDeck was then relaunched. Result: `wsl.exe -d Ubuntu-24.04 -- pgrep -af uvicorn` found nothing, `backend.log` shows an ordinary native-Windows uvicorn startup (new PID each run, no WSL2 involvement visible), and `stemdeck.log`/`setup.log` both show `device=cpu` — the actual signal that matters, since that line is written by the same Python code (`available_torch_devices()`) regardless of whether it's running natively or inside WSL2, and the WSL2/ROCm environment independently verified `torch.cuda.is_available() == True` weeks earlier. All of this says `start_backend()` took the native branch, meaning `wsl2_backend_enabled()` read `false` (or nothing) despite the keys being on disk moments before launch.
+Ran step 2 for real and it didn't work the way it should have. Sequence: with StemDeck fully closed, `user-data.json` (`<Documents>\StemDeck\jobs\user-data.json` — the real Documents location turned out to be OneDrive-redirected, not the plain `%USERPROFILE%\Documents` the runbook originally assumed) was written with `wsl2BackendEnabled: true` and `wsl2Distro: "Ubuntu-24.04"` merged in alongside the existing `stemdeck.folders` library data, confirmed on disk via a direct read right after the write. StemDeck was then relaunched. Result: `wsl.exe -d Ubuntu-24.04 -- pgrep -af uvicorn` found nothing, `backend.log` shows an ordinary native-Windows uvicorn startup (new PID each run, no WSL2 involvement visible), and `stemdeck.log`/`setup.log` both show `device=cpu` — the actual signal that matters, since that line is written by the same Python code (`available_torch_devices()`) regardless of whether it's running natively or inside WSL2, and the WSL2/ROCm environment independently verified `torch.cuda.is_available() == True` weeks earlier. All of this says `start_backend()` took the native branch, meaning `wsl2_backend_enabled()` read `false` (or nothing) despite the keys being on disk moments before launch.
 
 Checked `user-data.json` again after that run: **the `wsl2*` keys were gone. Only `stemdeck.folders` remained** (with a `parentId` field added that wasn't there before — clearly the app's own library-init code touching that key, so the store was written to during this run). This isn't a one-off — it happened on both attempts so far. Rust's `store_set()` (`store.set(key, value); store.save()`) should never drop an untouched key; `.save()` persists the *entire* in-memory map, not just the key that changed. Two keys vanishing while a third, unrelated key survives (and gets modified) rules out a simple "wrong file path" explanation — the app clearly is reading and writing *this* file, just apparently without the two keys ever being in its in-memory copy of it.
 
@@ -369,7 +369,7 @@ Ed asked what needed to happen before publishing this repo to GitHub as AnyStemD
 
 ### Git history: `tmp_split.onnx` + `smoke_out/` stripped, ~690 MB removed
 
-A single commit (`ff8cdcd`, the pre-merge commit that swept up long-uncommitted local work — see above) had accidentally committed `tmp_split.onnx` (177 MB) and twelve `smoke_out/**/*.wav` files (~43 MB each) plus `smoke_test_tone.wav`, none of which belong in the repo. `git-filter-repo` isn't installed on Ed's machine or in its WSL2 environment, so `pip install --user git-filter-repo` first. The mounted folder (`D:\OneDrive\Git\Stem Separation`) doesn't allow file deletion by default from this session's device-bridge access — `git-filter-repo` needs to unlink both working-tree files and its own lock files mid-rewrite, so the first attempt failed partway through with `Operation not permitted` on several unlinks, including `.git/HEAD.lock`. Requested and got delete permission for that folder, then re-verified state: despite the error, the object rewrite and ref update had actually completed (`git log -1` showed the new, rewritten commit hash); only the final `git reset --hard` cleanup step had failed. Cleared the stray `HEAD.lock`, ran `git reset --hard` and removed the leftover untracked files by hand, then `git reflog expire --all --expire=now --expire-unreachable=now` + `git gc --prune=now` to actually reclaim the space.
+A single commit (`ff8cdcd`, the pre-merge commit that swept up long-uncommitted local work — see above) had accidentally committed `tmp_split.onnx` (177 MB) and twelve `smoke_out/**/*.wav` files (~43 MB each) plus `smoke_test_tone.wav`, none of which belong in the repo. `git-filter-repo` isn't installed on Ed's machine or in its WSL2 environment, so `pip install --user git-filter-repo` first. The mounted folder containing the checkout doesn't allow file deletion by default from this session's device-bridge access — `git-filter-repo` needs to unlink both working-tree files and its own lock files mid-rewrite, so the first attempt failed partway through with `Operation not permitted` on several unlinks, including `.git/HEAD.lock`. Requested and got delete permission for that folder, then re-verified state: despite the error, the object rewrite and ref update had actually completed (`git log -1` showed the new, rewritten commit hash); only the final `git reset --hard` cleanup step had failed. Cleared the stray `HEAD.lock`, ran `git reset --hard` and removed the leftover untracked files by hand, then `git reflog expire --all --expire=now --expire-unreachable=now` + `git gc --prune=now` to actually reclaim the space.
 
 Before any of this, took a full raw copy of `.git` (`cp -r .git ../AnyStemDeck-git-backup-pre-rewrite`, 592 MB, ~85s over the mount) as a safety net — `git bundle create` was tried first but reliably timed out over the mount's I/O speed, so a plain directory copy instead. **That backup directory is still sitting on disk next to the repo and should be deleted once Ed has confirmed everything looks right after pushing.**
 
@@ -986,3 +986,52 @@ isn't among the folders connected to this session regardless. Writing the
 script's own text content to the repo is a plain file write and works fine
 this way; actually running it against Ed's real folders does not, and has
 to happen in a native PowerShell window on his end.
+
+### Correction: the "OneDrive skips junctions" premise was wrong, and the checkout is moving out of OneDrive entirely
+
+The build-artefacts entry above claimed OneDrive "is documented to skip
+junctions during sync entirely rather than trying to sync through them."
+That turned out to be the common assumption, not a documented fact --
+Microsoft's own support answer says the opposite ("OneDrive will sync the
+actual file or folder pointed to by the symlink or junction, not the
+symlink or junction itself"), and a community report on the same thread
+describes OneDrive grabbing 3.7 GB of data through a symlink it should
+never have touched. Ed's first real run confirmed it directly: OneDrive's
+Activity Center showed live uploads of `.o` files straight out of
+`desktop\src-tauri\target`'s junction target, and both `.venv` and
+`desktop` carried active sync-arrow icons in Explorer. Junctions do not
+reliably stop OneDrive from walking into a folder, at least not on Ed's
+client version -- the whole premise the redirect script was built on
+doesn't hold. (One unrelated real bug did get fixed along the way, while
+this was still being debugged: `Test-IsJunction` was checking the generic
+`ReparsePoint` attribute bit, which OneDrive's own Files On-Demand driver
+also sets on ordinary directories under its sync root -- so every target
+folder was misread as "already linked" on the very first run, before the
+tunnelling problem was even visible. Fixed by checking `-LinkType`
+instead, which only populates for a reparse point PowerShell recognizes as
+an actual symlink/junction. Correct, but moot once the premise above fell
+through.)
+
+Also ruled out: unchecking the parent folder in OneDrive's "Choose
+folders" settings, which sounds like it should stop sync without moving
+anything. Per Microsoft's own docs, unchecking a folder there deletes it
+from local disk (cloud-only until re-downloaded) -- not something to do to
+a live working checkout.
+
+Rather than keep patching this per-folder -- Cargo's target dir and the
+venv location are cleanly relocatable via native config, but plain `npm`
+has no equivalent for `node_modules`, and Tauri's `desktop/src-tauri/gen`
+likely has no relocation option either, so any tool-level fix stays
+incomplete, and `.git/` itself stays exposed to OneDrive's watcher
+regardless of any of this -- the decision is to move the whole checkout
+out of OneDrive's tree entirely: `D:\OneDrive\Git` (both AnyStemDeck and
+stemdeck together, same underlying anti-pattern applies to both) to
+`D:\Git`. Confirmed via `git grep -i` across every tracked file first that
+nothing hardcodes the OneDrive path anywhere in code, config, or build
+scripts -- the only literal path references anywhere in the tracked tree
+were in this file's own earlier entries on this topic (now generalized to
+`<repo-root>` / `<Documents>` above, at Ed's request, since this file is
+public) and unrelated Windows-path example values inside Rust unit-test
+fixtures. So the move itself is safe -- nothing else needs updating for it
+to keep working. `scripts/windows/setup-build-artefacts.ps1` and its
+junctions become unnecessary once the move lands and will be retired.

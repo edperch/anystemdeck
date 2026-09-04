@@ -192,6 +192,31 @@ rather than discarding it, and refuses to touch anything if both the source
 and destination already have real, differing content rather than guessing
 which to keep. Documented in `CONTRIBUTING.md`.
 
+**Correction, same day**: the "OneDrive skips junctions" premise above was
+wrong — Ed's first real run showed OneDrive actively uploading straight
+through a junction's target folder. Junctions don't reliably stop OneDrive
+from syncing on his client version, so this approach doesn't work. See the
+entry right below for the actual fix. `docs/plan.md` has the full trail,
+including a real (separate, now-fixed) bug in the script found while
+debugging this.
+
+### Dev tooling · 2026-09 · moving the checkout out of OneDrive instead
+
+The junction-based redirect above didn't hold up — no reliable, officially
+supported way exists to keep a nested subfolder out of OneDrive's sync
+while its parent stays synced (junctions included, per the correction
+above), so patching this folder-by-folder was a dead end. The actual fix:
+move the whole checkout out of OneDrive's tree — `D:\OneDrive\Git` (both
+AnyStemDeck and stemdeck) to `D:\Git` — which needs no per-folder tricks at
+all, since nothing under a non-synced path is ever exposed to OneDrive's
+watcher in the first place. Also closes a related risk `setup-build-artefacts.ps1`
+never addressed: `.git/` itself living inside a cloud-sync folder, exposed
+to the same kind of mass-file-churn behavior on any large git operation, not
+just build output. Checked first that nothing in the tracked source tree
+hardcodes the OneDrive path, so the move needs no code or config changes to
+go with it. `scripts/windows/setup-build-artefacts.ps1` and its junctions
+are retired once this lands.
+
 ## In flight / next
 
 No formal issue tracker yet for fork-specific work (unlike StemDeck's own
