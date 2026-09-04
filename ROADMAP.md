@@ -217,6 +217,13 @@ hardcodes the OneDrive path, so the move needs no code or config changes to
 go with it. `scripts/windows/setup-build-artefacts.ps1` and its junctions
 are retired once this lands.
 
+Done: the checkout now lives at `D:\Git\Stem Separation\AnyStemDeck` (and
+`D:\Git\stemdeck`), history and remotes intact. `dist`, `.venv`, both Tauri
+build folders, and `desktop/node_modules` were unlinked and their real
+content moved back in beside the checkout, so they're ordinary local
+folders again — `scripts/windows/setup-build-artefacts.ps1` has been
+removed from the repo along with its `CONTRIBUTING.md` section.
+
 ## In flight / next
 
 No formal issue tracker yet for fork-specific work (unlike StemDeck's own

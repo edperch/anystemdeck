@@ -50,10 +50,12 @@ If your clone lives inside a folder one of these tools syncs, `dist/`, `.venv/`,
 `desktop/src-tauri/target/`, `desktop/src-tauri/gen/`, and `desktop/node_modules/` all get
 synced too -- these tools sync whatever's physically on disk, `.gitignore` doesn't apply to
 them. That's thousands of files and multiple GB of churn for folders that are pure build
-output. On Windows, `scripts/windows/setup-build-artefacts.ps1` redirects those folders out
-to `D:\Build Artefacts\<project>\` (configurable) via NTFS junctions, so your tools keep
-writing to the same relative paths but the sync tool never sees the content. Idempotent and
-safe to re-run; try `-WhatIf` first to preview what it would do.
+output, and it doesn't stop there -- `.git/` itself lives inside the same sync scope, so any
+large git operation (a rebase, `git gc`, cloning the full history) is exposed to the same
+churn. NTFS junctions redirecting just the build-output folders were tried first and didn't
+hold up -- the cloud-sync client followed the junctions and synced through them anyway, at
+least on the version tested. The reliable fix is to keep your clone outside any cloud-sync
+folder entirely; there's no per-folder workaround that's actually held up in practice.
 
 ## Before you open a pull request
 

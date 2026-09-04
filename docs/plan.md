@@ -1035,3 +1035,38 @@ public) and unrelated Windows-path example values inside Rust unit-test
 fixtures. So the move itself is safe -- nothing else needs updating for it
 to keep working. `scripts/windows/setup-build-artefacts.ps1` and its
 junctions become unnecessary once the move lands and will be retired.
+
+### Move done: checkout now lives at `D:\Git`, `setup-build-artefacts.ps1` retired
+
+Ed ran `Move-Item "D:\OneDrive\Git" "D:\Git"`-equivalent by hand (his `D:\Git`
+already existed, holding several unrelated non-synced projects, so the two
+checkouts landed as siblings under it rather than nested). Verified after
+the fact via the device bridge, reconnected to the new location: `git
+status` clean, `git log`/`git remote -v` unchanged, both `origin` and
+`upstream` still correctly pointed. Confirms the earlier `git grep` check
+was right -- nothing needed updating for the move itself to work.
+
+One real near-miss retiring the junctions afterward, worth recording since
+it's a general trap and not specific to this repo: the first attempt used
+`Remove-Item -Force $source` on each junction. PowerShell's `Remove-Item`
+enumerates a reparse point's contents *through* the link to decide whether
+to prompt for "has children" confirmation -- for a junction, that means it
+was about to ask permission to delete the linked-to real content in
+`D:\Build Artefacts`, not just unlink the junction, despite `-Recurse`
+never being passed. Ed caught the confirmation prompt before answering it
+and flagged it rather than assuming it was fine; correctly caught before
+any data loss. Fixed by swapping in `cmd /c rmdir "$source"` -- the old
+native `rmdir`, not the PowerShell cmdlet, which has always safely removed
+only the reparse point regardless of what its target contains. Re-ran
+cleanly: all five folders unlinked, content moved back in beside the
+checkout from `D:\Build Artefacts\AnyStemDeck\...`, verified afterward via
+the device bridge that all five are real directories again (not links) with
+their content intact (e.g. `.venv` still has `Lib`/`Scripts`/`pyvenv.cfg`/
+`share`, a real venv, not an empty shell).
+
+`scripts/windows/setup-build-artefacts.ps1` removed from the repo, along
+with its `CONTRIBUTING.md` section (replaced with a short paragraph
+recommending checkouts stay outside cloud-sync folders entirely, given the
+junction approach didn't hold up). This whole detour -- OneDrive scare,
+junction script, discovering junctions don't reliably stop OneDrive either,
+moving the checkout instead -- is now closed.
